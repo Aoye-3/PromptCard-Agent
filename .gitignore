@@ -1,0 +1,145 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Dependencies
+node_modules
+.pnp
+.pnp.js
+
+# Testing
+coverage
+*.lcov
+.nyc_output
+
+# Production
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build files
+*.tsbuildinfo
+
+# Temporary files
+*.tmp
+*.temp
+
+# OS generated files
+Thumbs.db
+.DS_Store
+
+# Large files and directories
+Prompt Guide/
+NewVison/Prompt Guide/
+*.arrow
+*.parquet
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.h5
+*.onnx
+*.tflite
+*.pb
+*.mlmodel
+*.caffemodel
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.joblib
+*.model
+*.weights
+
+# Archives
+*.tar.gz
+*.zip
+*.rar
+*.7z
+*.iso
+
+# Media files
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mkv
+*.webm
+*.m4v
+*.mp3
+*.wav
+*.flac
+*.aac
+*.ogg
+*.wma
+*.m4a
+*.aiff
+*.au
+*.mid
+*.midi
+*.ac3
+*.dts
+*.eac3
+*.opus
+*.weba
+
+# Documents
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.odt
+*.ods
+*.odp
+*.rtf
+
+# Large data files
+*.arrow
+*.parquet
+*.csv
+*.tsv
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!tsconfig.node.json
+!vercel.json
+!public/**/*.json
+!data/**/*.json
+*.xml
+*.yaml
+*.yml
+*.toml
+*.ini
+*.cfg
+*.conf
+*.config
+*.properties

@@ -54,6 +54,6 @@ export default defineConfig({
     }
   },
   test: {
-    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**']
+    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**', 'agent-runtime/**']
   }
 })

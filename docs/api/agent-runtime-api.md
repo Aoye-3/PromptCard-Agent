@@ -1,24 +1,78 @@
 # Agent Runtime API
 
-The frontend calls the Agent Runtime through Vite proxy routes:
+The maintained frontend contract is the PromptCard Runtime Boundary. In development, Vite proxies:
 
 ```text
-GET /agent-health -> http://127.0.0.1:8001/health
 /agent-api/* -> http://127.0.0.1:8001/api/*
 ```
 
-Current frontend service coverage in `src/services/agent-runtime-service.ts` includes:
+## PromptCard Runtime Boundary
 
-- health
-- auth setup status
-- promptcard bootstrap auth
-- current user
-- models
-- skills
-- tools
-- agents
-- thread creation
-- run-and-wait Agent execution
-- proposal parsing
+### `GET /agent-api/promptcard/runtime/status`
 
-The current run path uses `assistant_id: "lead_agent"` and model context `deepseek-chat`.
+Returns a compact health view for the embedded runtime:
+
+```json
+{
+  "runtime": { "ok": true, "service": "promptcard-runtime-boundary" },
+  "auth": { "ok": true, "adminCount": 1 },
+  "models": { "ok": true, "count": 1 },
+  "tools": { "ok": true, "count": 10 },
+  "storage": { "ok": true, "payload": { "ok": true } }
+}
+```
+
+### `POST /agent-api/promptcard/runtime/bootstrap`
+
+Creates or reuses the app-managed PromptCard admin user and sets the runtime session cookie. This replaces frontend calls to DeerFlow auth internals.
+
+### `GET /agent-api/promptcard/runtime/catalog`
+
+Returns the PromptCard UI catalog:
+
+```json
+{
+  "models": [],
+  "skills": [],
+  "tools": [],
+  "builtins": [],
+  "subagentEnabled": true,
+  "agents": []
+}
+```
+
+### `POST /agent-api/promptcard/runtime/messages`
+
+Request:
+
+```json
+{
+  "threadId": "optional-existing-thread",
+  "content": "用户消息",
+  "mode": "card-workspace",
+  "workspaceContext": {
+    "contextId": "card:project:0",
+    "mode": "card-workspace",
+    "projectId": "project",
+    "projectTitle": "Project",
+    "snapshot": {}
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "threadId": "runtime-thread-id",
+  "text": "assistant text",
+  "proposals": [],
+  "diagnostics": { "proposalCount": 0 }
+}
+```
+
+The backend owns thread creation, prompt construction, DeerFlow run execution, assistant text extraction, and proposal parsing.
+
+## Compatibility Routes
+
+DeerFlow-native routes such as `/agent-api/threads`, `/agent-api/models`, `/agent-api/tools`, `/agent-api/skills`, `/agent-api/agents`, and `/agent-api/v1/auth/*` remain available for compatibility and internal adapter use. PromptCard frontend features should prefer the boundary routes above.

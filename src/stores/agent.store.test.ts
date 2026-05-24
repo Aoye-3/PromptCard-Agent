@@ -23,8 +23,10 @@ const serviceMock = vi.hoisted(() => ({
   skills: vi.fn(),
   tools: vi.fn(),
   agents: vi.fn(),
+  catalog: vi.fn(),
   createThread: vi.fn(),
   runAgentMessage: vi.fn(),
+  sendMessage: vi.fn(),
   buildPromptLibraryContext: vi.fn(),
   parseAgentWorkspaceProposals: vi.fn()
 }))
@@ -38,6 +40,20 @@ describe('agent store', () => {
     vi.clearAllMocks()
     serviceMock.createThread.mockResolvedValue('thread-1')
     serviceMock.runAgentMessage.mockResolvedValue({ text: 'agent response', payload: {} })
+    serviceMock.sendMessage.mockResolvedValue({
+      threadId: 'thread-1',
+      text: 'agent response',
+      proposals: [workspaceProposal],
+      diagnostics: {}
+    })
+    serviceMock.catalog.mockResolvedValue({
+      models: [],
+      skills: [],
+      tools: [],
+      builtins: [],
+      subagentEnabled: false,
+      agents: []
+    })
     serviceMock.buildPromptLibraryContext.mockReturnValue('[]')
     serviceMock.parseAgentWorkspaceProposals.mockReturnValue([workspaceProposal])
     useAgentStore.setState({
@@ -78,9 +94,13 @@ describe('agent store', () => {
     const expectedProposal = { ...workspaceProposal, threadId: 'thread-1' }
     expect(returned).toEqual([expectedProposal])
     expect(useAgentStore.getState().proposals).toEqual([expectedProposal])
-    expect(serviceMock.runAgentMessage).toHaveBeenCalledWith(
-      'thread-1',
-      expect.stringContaining('frontend will apply workspace_card_update')
-    )
+    expect(serviceMock.sendMessage).toHaveBeenCalledWith({
+      threadId: undefined,
+      content: '补全选中卡片',
+      mode: 'card-workspace',
+      workspaceContext
+    })
+    expect(serviceMock.runAgentMessage).not.toHaveBeenCalled()
+    expect(serviceMock.parseAgentWorkspaceProposals).not.toHaveBeenCalled()
   })
 })

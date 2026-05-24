@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from app.gateway.routers import promptcard_runtime
+from app.gateway.promptcard_runtime import parse_agent_workspace_proposals
+
+
+def test_parse_agent_workspace_proposals_filters_unknown_card_ids():
+    text = """
+```json
+{
+  "kind": "agent_workspace_proposals",
+  "proposals": [
+    {
+      "kind": "workspace_card_update",
+      "id": "keep",
+      "agentName": "DeepSeek Agent",
+      "updates": [{"cardId": "card-1", "content": "Updated"}],
+      "rationale": "ok",
+      "status": "pending",
+      "createdAt": 1
+    },
+    {
+      "kind": "workspace_card_update",
+      "id": "drop",
+      "agentName": "DeepSeek Agent",
+      "updates": [{"cardId": "missing-card", "content": "Nope"}],
+      "rationale": "bad",
+      "status": "pending",
+      "createdAt": 2
+    }
+  ]
+}
+```
+"""
+    workspace_context = {
+        "snapshot": {
+            "cards": [{"id": "card-1", "type": "subject", "content": ""}],
+        }
+    }
+
+    proposals = parse_agent_workspace_proposals(text, workspace_context=workspace_context)
+
+    assert [proposal["id"] for proposal in proposals] == ["keep"]
+    assert proposals[0]["updates"] == [{"cardId": "card-1", "content": "Updated"}]
+
+
+def test_messages_endpoint_uses_promptcard_runtime_service(monkeypatch):
+    async def fake_send_message(body, request):
+        assert body.thread_id is None
+        assert body.content == "补全选中卡片"
+        assert body.mode == "card-workspace"
+        assert body.workspace_context["contextId"] == "card:project-1:0"
+        return {
+            "threadId": "thread-1",
+            "text": "agent response",
+            "proposals": [],
+            "diagnostics": {"runtime": "ok"},
+        }
+
+    monkeypatch.setattr(promptcard_runtime.runtime_service, "send_message", fake_send_message)
+    app = FastAPI()
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/promptcard/runtime/messages",
+            json={
+                "content": "补全选中卡片",
+                "mode": "card-workspace",
+                "workspaceContext": {
+                    "contextId": "card:project-1:0",
+                    "mode": "card-workspace",
+                    "projectId": "project-1",
+                    "projectTitle": "Project",
+                    "snapshot": {"cards": [{"id": "card-1"}]},
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["threadId"] == "thread-1"
+
+
+def test_status_endpoint_returns_promptcard_runtime_sections(monkeypatch):
+    async def fake_status(request):
+        return {
+            "runtime": {"ok": True},
+            "auth": {"ok": True},
+            "models": {"ok": True, "count": 1},
+            "tools": {"ok": True, "count": 2},
+            "storage": {"ok": True},
+        }
+
+    monkeypatch.setattr(promptcard_runtime.runtime_service, "status", fake_status)
+    app = FastAPI()
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app) as client:
+        response = client.get("/api/promptcard/runtime/status")
+
+    assert response.status_code == 200
+    assert response.json()["runtime"]["ok"] is True
+    assert set(response.json()) == {"runtime", "auth", "models", "tools", "storage"}
+
+
+def test_bootstrap_endpoint_delegates_to_promptcard_runtime_service(monkeypatch):
+    async def fake_bootstrap(request, response):
+        response.set_cookie("access_token", "test-token")
+        return {"user": {"email": "admin@promptcard.dev"}, "expires_in": 3600}
+
+    monkeypatch.setattr(promptcard_runtime.runtime_service, "bootstrap", fake_bootstrap)
+    app = FastAPI()
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app) as client:
+        response = client.post("/api/promptcard/runtime/bootstrap", json={})
+
+    assert response.status_code == 200
+    assert response.json()["user"]["email"] == "admin@promptcard.dev"
+    assert "access_token" in response.headers["set-cookie"]

@@ -16,8 +16,8 @@ npm.cmd run test -- --run
 
 Command purposes:
 
-- `dev`: start the Vite frontend.
-- `dev:with-agent`: start the storage service, Agent Runtime, and frontend helper flow.
+- `dev`: start the Vite frontend on port 3000 with strict port behavior.
+- `dev:with-agent`: start or reuse the storage service, Agent Runtime, and Vite frontend.
 - `storage:dev`: start only the local storage service on `127.0.0.1:8002`.
 - `agent:dev`: start only the Agent Runtime.
 - `agent:check`: validate Agent Runtime config loading.
@@ -41,7 +41,23 @@ Vite dev middleware also exposes:
 - `GET/PUT /__promptcard/presets`
 - `GET/PUT /__promptcard/projects`
 
-These endpoints write JSON files under `data/` and are used as local development persistence helpers.
+These endpoints write JSON files under `data/` and are compatibility-only local development helpers. Durable frontend storage should use the storage service through `/storage-api`.
+
+## Runtime Process Health
+
+`npm.cmd run dev:with-agent` checks service health before starting background processes:
+
+- storage: `http://127.0.0.1:8002/health`
+- Agent Runtime: `http://127.0.0.1:8001/health`
+
+If a service is already healthy, the script reuses it instead of starting another hidden process. If a service must be started, logs are written under `logs/`:
+
+- `logs/storage-service.log`
+- `logs/storage-service.err.log`
+- `logs/agent-runtime.log`
+- `logs/agent-runtime.err.log`
+
+The frontend uses `vite --strictPort`; port 3000 conflicts fail loudly instead of silently moving to another port.
 
 ## Runtime Hygiene
 
@@ -66,7 +82,7 @@ Find the listener:
 Get-NetTCPConnection -LocalPort 3000 -State Listen
 ```
 
-Stop only the known development server process, then restart `npm.cmd run dev`.
+Stop only the known development server process, then restart `npm.cmd run dev`. Because Vite uses strict port mode, this conflict must be fixed before the frontend can start.
 
 ### Agent Backend Disconnected
 
@@ -76,13 +92,21 @@ Run:
 npm.cmd run agent:check
 ```
 
-Then start the runtime:
+Then start or reuse the runtime:
 
 ```powershell
 npm.cmd run agent:dev
 ```
 
 Check that one supported key source exists and contains a usable DeepSeek-style key. Prefer setting `PROMPTCARD_AGENT_API_KEY_FILE` when running outside the default local workspace. Do not print the key.
+
+For the PromptCard boundary API, check:
+
+```powershell
+curl.exe --http1.0 http://localhost:3000/agent-api/promptcard/runtime/status
+```
+
+If the raw Agent process starts but this endpoint fails, inspect `logs/agent-runtime.err.log` first.
 
 ### Agent Check Fails Before Runtime Loads
 

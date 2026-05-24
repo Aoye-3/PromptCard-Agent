@@ -6,9 +6,9 @@ import type {
   AgentWorkspaceProposal,
   PromptLibraryWriteProposal
 } from '@/models/Agent.model'
-import type { IPreset } from '@/models/Card.model'
 
 const AGENT_API_BASE = '/agent-api'
+const PROMPTCARD_RUNTIME_BASE = `${AGENT_API_BASE}/promptcard/runtime`
 
 const jsonHeaders = () => {
   const headers: Record<string, string> = {
@@ -22,6 +22,7 @@ const jsonHeaders = () => {
 }
 
 const readCookie = (name: string) => {
+  if (typeof document === 'undefined') return undefined
   const prefix = `${name}=`
   return document.cookie
     .split(';')
@@ -72,7 +73,7 @@ const messageText = (content: unknown): string => {
 }
 
 export const agentRuntimeService = {
-  health: () => requestJson<Record<string, unknown>>('/agent-health'),
+  health: () => requestJson<Record<string, unknown>>(`${PROMPTCARD_RUNTIME_BASE}/status`),
 
   setupStatus: () =>
     requestJson<{ needs_setup?: boolean; initialized?: boolean }>(
@@ -81,7 +82,7 @@ export const agentRuntimeService = {
 
   bootstrap: () =>
     requestJson<{ user?: unknown; expires_in?: number }>(
-      `${AGENT_API_BASE}/v1/auth/promptcard-bootstrap`,
+      `${PROMPTCARD_RUNTIME_BASE}/bootstrap`,
       {
         method: 'POST',
         headers: jsonHeaders(),
@@ -109,72 +110,47 @@ export const agentRuntimeService = {
 
   me: () => requestJson(`${AGENT_API_BASE}/v1/auth/me`),
 
-  models: async () => normalizeItems<AgentModelInfo>(await requestJson(`${AGENT_API_BASE}/models`), ['models', 'items']),
+  catalog: () =>
+    requestJson<{
+      models?: AgentModelInfo[]
+      skills?: AgentSkillInfo[]
+      tools?: AgentToolInfo[]
+      builtins?: string[]
+      subagentEnabled?: boolean
+      agents?: AgentInfo[]
+    }>(`${PROMPTCARD_RUNTIME_BASE}/catalog`),
 
-  skills: async () => normalizeItems<AgentSkillInfo>(await requestJson(`${AGENT_API_BASE}/skills`), ['skills', 'items']),
+  models: async () => normalizeItems<AgentModelInfo>(await agentRuntimeService.catalog(), ['models', 'items']),
+
+  skills: async () => normalizeItems<AgentSkillInfo>(await agentRuntimeService.catalog(), ['skills', 'items']),
 
   tools: async () => {
-    const payload = await requestJson<Record<string, unknown>>(`${AGENT_API_BASE}/tools`)
+    const payload = await agentRuntimeService.catalog()
     return {
       tools: normalizeItems<AgentToolInfo>(payload, ['tools', 'items']),
       builtins: Array.isArray(payload.builtins) ? (payload.builtins as string[]) : [],
-      subagentEnabled: Boolean(payload.subagent_enabled)
+      subagentEnabled: Boolean(payload.subagentEnabled)
     }
   },
 
-  agents: async () => normalizeItems<AgentInfo>(await requestJson(`${AGENT_API_BASE}/agents`), ['agents', 'items']),
+  agents: async () => normalizeItems<AgentInfo>(await agentRuntimeService.catalog(), ['agents', 'items']),
 
-  createThread: async () => {
-    const payload = await requestJson<Record<string, unknown>>(`${AGENT_API_BASE}/threads`, {
+  sendMessage: (body: {
+    threadId?: string
+    content: string
+    mode?: string
+    workspaceContext?: unknown
+  }) =>
+    requestJson<{
+      threadId: string
+      text: string
+      proposals: AgentWorkspaceProposal[]
+      diagnostics?: Record<string, unknown>
+    }>(`${PROMPTCARD_RUNTIME_BASE}/messages`, {
       method: 'POST',
       headers: jsonHeaders(),
-      body: JSON.stringify({
-        title: 'PromptCard Agent Thread',
-        metadata: { source: 'promptcard-agent-dashboard' }
-      })
-    })
-    return String(payload.id || payload.thread_id || payload.threadId || '')
-  },
-
-  runAgentMessage: async (threadId: string, content: string) => {
-    const payload = await requestJson<Record<string, unknown>>(
-      `${AGENT_API_BASE}/threads/${threadId}/runs/wait`,
-      {
-        method: 'POST',
-        headers: jsonHeaders(),
-        body: JSON.stringify({
-          assistant_id: 'lead_agent',
-          input: {
-            messages: [{ role: 'user', content }]
-          },
-          context: {
-            model_name: 'deepseek-chat',
-            thinking_enabled: false,
-            subagent_enabled: true,
-            max_concurrent_subagents: 2
-          },
-          stream_mode: ['values']
-        })
-      }
-    )
-    return {
-      payload,
-      text: extractAssistantText(payload)
-    }
-  },
-
-  buildPromptLibraryContext: (presets: IPreset[]) =>
-    JSON.stringify(
-      presets.slice(0, 80).map(preset => ({
-        id: preset.id,
-        type: preset.type,
-        category: preset.category,
-        label: preset.label,
-        content: preset.content
-      })),
-      null,
-      2
-    ),
+      body: JSON.stringify(body)
+    }),
 
   parsePromptLibraryProposals,
   parseAgentWorkspaceProposals

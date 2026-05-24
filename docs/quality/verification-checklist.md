@@ -9,6 +9,8 @@ npx.cmd tsc --noEmit
 npm.cmd run lint
 npm.cmd run build
 npm.cmd run agent:check
+cd agent-runtime/backend
+uv run pytest tests/test_promptcard_runtime_boundary.py -q
 ```
 
 For browser-facing changes, also smoke test the local app at:

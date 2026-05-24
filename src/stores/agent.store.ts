@@ -43,40 +43,16 @@ interface AgentState {
 
 const messageId = () => `agent-message-${Date.now()}-${Math.random().toString(16).slice(2)}`
 
-const runtimePrompt = (content: string, presets: IPreset[], workspaceContext?: AgentWorkspaceContext) => {
-  const promptLibrarySnapshot = agentRuntimeService.buildPromptLibraryContext(presets)
-  return [
-    'You are the embedded PMAgent collaboration agent. Reply in concise Chinese by default.',
-    'You are a conversational editor for PromptCard components. Talk with the user, then return executable JSON instructions when a card change is clearly requested.',
-    'For card workspace edits, the frontend will apply workspace_card_update and workspace_card_create instructions directly. Do not describe them as pending proposals or ask for approval after the user has requested the change.',
-    'If the user intent is unclear, ask a concise follow-up question in Chinese and do not return JSON.',
-    'When changing workspace cards, include a JSON block with this envelope:',
-    '{"kind":"agent_workspace_proposals","proposals":[{"kind":"workspace_card_update","id":"proposal-...","contextId":"...","agentName":"DeepSeek Agent","updates":[{"cardId":"card-id","title":"optional","content":"new content"}],"rationale":"reason","status":"pending","createdAt":0},{"kind":"workspace_card_create","id":"proposal-...","contextId":"...","agentName":"DeepSeek Agent","pageIndex":0,"cardDraft":{"type":"style","title":"Style","content":"content","meta":{"source":"agent-runtime"}},"rationale":"reason","status":"pending","createdAt":0},{"kind":"storyboard_update","id":"proposal-...","contextId":"...","agentName":"DeepSeek Agent","sequenceId":"sequence-id","rowId":"row-id","sequenceUpdates":{"style":"optional"},"rowUpdates":{"subject":"optional","action":"optional","scene":"optional","camera":"optional","lighting":"optional","audio":"optional","duration":"optional","timeRange":"optional","cutLabel":"optional"},"rationale":"reason","status":"pending","createdAt":0},{"kind":"prompt_library_write_proposal","id":"proposal-...","contextId":"...","agentName":"DeepSeek Agent","operation":"create","targetPresetId":null,"presetDraft":{"type":"style","category":"agent","label":"name","content":"content","meta":{"source":"agent-runtime"}},"rationale":"reason","status":"pending","createdAt":0}]}',
-    'Only include fields that should change. Never invent cardId, sequenceId, or rowId; use IDs from the workspace snapshot. For workspace_card_update, use existing cardId values only. For workspace_card_create, use a valid card type.',
-    workspaceContext ? 'Current workspace snapshot:' : '',
-    workspaceContext ? JSON.stringify(workspaceContext, null, 2) : '',
-    'Current Prompt library snapshot:',
-    promptLibrarySnapshot,
-    'User request:',
-    content
-  ].filter(Boolean).join('\n\n')
-}
-
 const loadRuntimeCatalog = async () => {
-  const [models, skills, toolsPayload, agents] = await Promise.all([
-    agentRuntimeService.models(),
-    agentRuntimeService.skills(),
-    agentRuntimeService.tools(),
-    agentRuntimeService.agents()
-  ])
+  const catalog = await agentRuntimeService.catalog()
 
   return {
-    models,
-    skills,
-    tools: toolsPayload.tools,
-    builtinTools: toolsPayload.builtins,
-    subagentEnabled: toolsPayload.subagentEnabled,
-    agents
+    models: catalog.models || [],
+    skills: catalog.skills || [],
+    tools: catalog.tools || [],
+    builtinTools: catalog.builtins || [],
+    subagentEnabled: Boolean(catalog.subagentEnabled),
+    agents: catalog.agents || []
   }
 }
 
@@ -128,7 +104,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, presets, options) => {
+  sendMessage: async (content, _presets, options) => {
     const userMessage: AgentMessage = {
       id: messageId(),
       role: 'user',
@@ -146,24 +122,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         await get().bootstrapRuntime()
       }
 
-      let threadId = get().activeThreadId
-      if (!threadId) {
-        threadId = await agentRuntimeService.createThread()
-        set({ activeThreadId: threadId })
-      }
-
-      const result = await agentRuntimeService.runAgentMessage(
-        threadId,
-        runtimePrompt(content, presets, options?.workspaceContext)
-      )
-      const proposals = agentRuntimeService.parseAgentWorkspaceProposals(result.text).map(proposal => ({
+      const result = await agentRuntimeService.sendMessage({
+        threadId: get().activeThreadId,
+        content,
+        mode: options?.mode,
+        workspaceContext: options?.workspaceContext
+      })
+      const proposals = result.proposals.map(proposal => ({
         ...proposal,
-        threadId: proposal.threadId || threadId,
+        threadId: proposal.threadId || result.threadId,
         contextId: proposal.contextId || options?.workspaceContext?.contextId
       }))
 
       set(state => ({
         running: false,
+        activeThreadId: result.threadId,
         messages: [
           ...state.messages,
           {

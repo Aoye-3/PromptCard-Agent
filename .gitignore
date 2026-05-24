@@ -13,6 +13,7 @@ node_modules
 .pnp.js
 agent-runtime/backend/.venv/
 agent-runtime/.deer-flow/
+agent-runtime/backend/.deer-flow/
 agent-runtime/.agent/
 agent-runtime/.uv-cache/
 agent-runtime/*.log

@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { parseAgentWorkspaceProposals, parsePromptLibraryProposals } from './agent-runtime-service'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { agentRuntimeService, parseAgentWorkspaceProposals, parsePromptLibraryProposals } from './agent-runtime-service'
+
+const originalFetch = globalThis.fetch
+
+afterEach(() => {
+  globalThis.fetch = originalFetch
+  vi.restoreAllMocks()
+})
 
 describe('agent runtime proposal parsing', () => {
   it('parses workspace proposal envelopes', () => {
@@ -72,5 +79,51 @@ describe('agent runtime proposal parsing', () => {
   it('ignores invalid proposal JSON safely', () => {
     expect(parseAgentWorkspaceProposals('```json\n{ broken }\n```')).toEqual([])
     expect(parseAgentWorkspaceProposals('plain text only')).toEqual([])
+  })
+
+  it('sends PromptCard runtime messages through the boundary endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        threadId: 'thread-1',
+        text: 'agent response',
+        proposals: [],
+        diagnostics: { runtime: 'ok' }
+      })
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    const response = await agentRuntimeService.sendMessage({
+      threadId: 'thread-1',
+      content: '补全选中卡片',
+      mode: 'card-workspace',
+      workspaceContext: {
+        contextId: 'card:project-1:0',
+        mode: 'card-workspace',
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        snapshot: { selectedCardIds: ['card-1'] }
+      }
+    })
+
+    expect(response.threadId).toBe('thread-1')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/agent-api/promptcard/runtime/messages',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          threadId: 'thread-1',
+          content: '补全选中卡片',
+          mode: 'card-workspace',
+          workspaceContext: {
+            contextId: 'card:project-1:0',
+            mode: 'card-workspace',
+            projectId: 'project-1',
+            projectTitle: 'Project',
+            snapshot: { selectedCardIds: ['card-1'] }
+          }
+        })
+      })
+    )
   })
 })

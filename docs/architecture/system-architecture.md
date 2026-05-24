@@ -21,7 +21,8 @@ flowchart TD
   StorageService["promptcard-storage<br/>127.0.0.1:8002"]
   Vite["Vite Dev Server<br/>vite.config.ts<br/>vite/plugins"]
   Files["Storage JSON Files<br/>data/projects.json<br/>data/project-trash.json<br/>data/prompt-library-presets.json<br/>data/prompt-library-trash.json"]
-  Runtime["Agent Runtime<br/>agent-runtime/backend<br/>127.0.0.1:8001"]
+  RuntimeBoundary["PromptCard Runtime API<br/>/api/promptcard/runtime/*"]
+  Runtime["DeerFlow Runtime Internals<br/>agent-runtime/backend<br/>127.0.0.1:8001"]
   DeepSeek["DeepSeek<br/>https://api.deepseek.com"]
 
   User --> App
@@ -38,7 +39,8 @@ flowchart TD
   Components --> Stores
   Stores --> RuntimeService["agent-runtime-service.ts"]
   RuntimeService --> Vite
-  Vite --> Runtime
+  Vite --> RuntimeBoundary
+  RuntimeBoundary --> Runtime
   Runtime --> DeepSeek
 ```
 
@@ -50,9 +52,9 @@ flowchart TD
 - **State stores**: `src/stores/` owns card workspace state, Prompt library presets, Agent runtime state, and related ordering/persistence helpers.
 - **Storage facade and adapters**: `src/utils/storage.ts` preserves the app-facing storage API; `src/storage/storage-service-client.ts` calls the local storage service for project and Prompt Library durable writes; project normalization is delegated to `src/domain/projects/`.
 - **Local storage service**: `promptcard_storage/` owns revision-aware project and Prompt Library persistence, Trash files, migration, and atomic JSON writes.
-- **Agent service layer**: `src/services/agent-runtime-service.ts` wraps runtime health, auth bootstrap, catalog, thread, run, and proposal parsing calls.
+- **Agent service layer**: `src/services/agent-runtime-service.ts` is a thin client for the PromptCard Runtime Boundary under `/agent-api/promptcard/runtime/*`.
 - **Development middleware**: `vite/plugins/promptcard-dev-storage.ts` exposes local-only endpoints for Prompt library data, project data, and dev server shutdown; `vite.config.ts` wires those plugins into Vite.
-- **Agent Runtime**: `agent-runtime/` contains the DeerFlow-derived runtime, config, public skills, and scripts for local DeepSeek testing.
+- **Agent Runtime**: `agent-runtime/` contains the PromptCard boundary router/adapter plus DeerFlow-derived internals, config, public skills, and scripts for local DeepSeek testing.
 
 ## Data Flows
 
@@ -66,7 +68,7 @@ Prompt presets use the `IPreset` compatibility contract. The `preset.store` rema
 
 ### Agent Proposal Flow
 
-The Agent dashboard sends the current user prompt plus a bounded Prompt library snapshot to the Agent Runtime. If the Agent suggests Prompt library changes, the frontend parses `PromptLibraryWriteProposal` JSON from the model response. Proposals stay pending until the user approves or rejects them in the UI.
+The Agent dashboard sends user content and optional workspace context to `/agent-api/promptcard/runtime/messages`. The backend builds the PMAgent prompt, adds a bounded Prompt Library snapshot, runs DeerFlow, extracts assistant text, validates workspace ids, and returns normalized proposals. Prompt Library writes remain pending until the user approves or rejects them in the UI.
 
 ### Local Storage Service Flow
 

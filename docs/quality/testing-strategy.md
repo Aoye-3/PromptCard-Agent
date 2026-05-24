@@ -18,6 +18,7 @@ The current frontend test suite covers several core utilities and stores:
 - Agent runtime proposal parsing
 - Agent workspace context building
 - Agent store `sendMessage()` proposal return behavior
+- local startup script parsing and health-check branching
 
 Tests are run through Vitest.
 
@@ -37,6 +38,12 @@ For Agent Runtime work, also run:
 
 ```powershell
 npm.cmd run agent:check
+```
+
+For startup script work, run:
+
+```powershell
+npm.cmd run test -- scripts/start-dev-with-agent.test.ts --run
 ```
 
 For browser-facing changes, use a manual or Playwright smoke test against:

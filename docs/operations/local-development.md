@@ -49,15 +49,18 @@ These endpoints write JSON files under `data/` and are compatibility-only local 
 
 - storage: `http://127.0.0.1:8002/health`
 - Agent Runtime: `http://127.0.0.1:8001/health`
+- frontend: `http://127.0.0.1:3000/`
 
-If a service is already healthy, the script reuses it instead of starting another hidden process. If a service must be started, logs are written under `logs/`:
+If storage or Agent Runtime is already healthy, the script reuses it instead of starting another hidden process. If the Vite frontend is already healthy, the script exits successfully instead of trying to start a second strict-port Vite process. If a background service must be started, logs are written under `logs/`:
 
 - `logs/storage-service.log`
 - `logs/storage-service.err.log`
 - `logs/agent-runtime.log`
 - `logs/agent-runtime.err.log`
 
-The frontend uses `vite --strictPort`; port 3000 conflicts fail loudly instead of silently moving to another port.
+The `*.err.log` files contain process stderr, not only fatal errors. Uvicorn and Python warnings may appear there during a healthy startup, so the health endpoints above are the source of truth for local startup success.
+
+The frontend uses `vite --strictPort`; port 3000 conflicts still fail loudly when the existing listener is not the healthy local frontend.
 
 ## Runtime Hygiene
 
@@ -83,6 +86,8 @@ Get-NetTCPConnection -LocalPort 3000 -State Listen
 ```
 
 Stop only the known development server process, then restart `npm.cmd run dev`. Because Vite uses strict port mode, this conflict must be fixed before the frontend can start.
+
+When running `npm.cmd run dev:with-agent`, a healthy existing frontend at `http://127.0.0.1:3000/` is reused and the command exits successfully. Investigate the listener only when the frontend URL does not return a successful response.
 
 ### Agent Backend Disconnected
 

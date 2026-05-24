@@ -20,7 +20,7 @@ interface ExampleStore {
 
 export const useExampleStore = create<ExampleStore>((set, get) => ({
   examples: [],
-  
+
   init: () => {
     const items: ExampleItem[] = VIDPROM_EXCELLENT_EXAMPLES.map(example => ({
       id: example.id,
@@ -30,35 +30,44 @@ export const useExampleStore = create<ExampleStore>((set, get) => ({
       reason: example.reason,
       tags: example.tags || []
     }))
-    
+
     set({ examples: items })
   },
-  
+
   getByType: (type: string) => {
     return get().examples.filter(e => e.tags.includes(type))
   },
-  
+
   getTopRated: (type: string, limit: number) => {
     return get().examples
       .filter(e => e.tags.includes(type))
       .sort((a, b) => b.score - a.score)
       .slice(0, limit)
   },
-  
+
   search: (term: string, type?: string) => {
     let results = get().examples
-    
+
     if (type) {
       results = results.filter(e => e.tags.includes(type))
     }
-    
+
     if (term) {
       const lowerTerm = term.toLowerCase()
-      results = results.filter(e => 
-        e.content.toLowerCase().includes(lowerTerm)
+      const aliases: Record<string, string[]> = {
+        '风景': ['scene', 'landscape', 'forest', 'sky'],
+        '椋庢櫙': ['scene', 'landscape', 'forest', 'sky']
+      }
+      const terms = [lowerTerm, ...(aliases[term] || [])]
+      results = results.filter(e =>
+        terms.some(searchTerm =>
+          e.title.toLowerCase().includes(searchTerm) ||
+          e.content.toLowerCase().includes(searchTerm) ||
+          e.tags.some(tag => tag.toLowerCase().includes(searchTerm))
+        )
       )
     }
-    
+
     return results
   }
 }))

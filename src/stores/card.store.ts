@@ -20,6 +20,7 @@ interface CardState {
   addPage: () => void
   switchPage: (pageIndex: number) => void
   removePage: (pageIndex: number) => void
+  restoreWorkspace: (workspace: { pages: IPage[]; currentPage: number }) => void
   selectCard: (cardId: string) => void
   deselectCard: (cardId: string) => void
   clearSelection: () => void
@@ -182,6 +183,28 @@ export const useCardStore = create<CardState>((set, get) => ({
     return {
       pages: newPages,
       currentPage: Math.min(state.currentPage, newPages.length - 1)
+    }
+  }),
+
+  restoreWorkspace: ({ pages, currentPage }) => set(() => {
+    if (pages.length === 0) {
+      return {
+        pages: [createInitialPage()],
+        currentPage: 0,
+        activeCardId: null,
+        activePresetCardId: null,
+        selectedCards: [],
+        currentSelectedCardId: null
+      }
+    }
+
+    return {
+      pages,
+      currentPage: Math.min(Math.max(currentPage, 0), pages.length - 1),
+      activeCardId: null,
+      activePresetCardId: null,
+      selectedCards: [],
+      currentSelectedCardId: null
     }
   })
 }))

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-04-27T21:01:54.043Z",
+  "updatedAt": "2026-05-24T11:20:06Z",
   "presets": [
     {
       "type": "action",
@@ -10,7 +10,9 @@
       "id": "preset-1777323613248",
       "usageCount": 0,
       "meta": {},
-      "updatedAt": 1777323623618
+      "updatedAt": 1777323623618,
+      "createdAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "action",
@@ -19,7 +21,10 @@
       "category": "action",
       "id": "preset-1777323659765",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "action",
@@ -28,7 +33,10 @@
       "category": "action",
       "id": "preset-1777323710374",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "scene",
@@ -37,7 +45,10 @@
       "content": "夏日的海边，蓝色的大海，白色的浪花，金色的沙滩，蓝天白云",
       "meta": {},
       "id": "preset-8",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "scene",
@@ -46,7 +57,10 @@
       "content": "繁华的城市夜景，霓虹闪烁，车水马龙，高楼林立，灯火辉煌",
       "meta": {},
       "id": "preset-9",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "scene",
@@ -55,7 +69,10 @@
       "content": "春天的公园，绿草如茵，樱花盛开，阳光透过树叶洒下斑驳的光影",
       "meta": {},
       "id": "preset-7",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "scene",
@@ -64,7 +81,10 @@
       "content": "巍峨的雪山，白雪皑皑，蓝天映衬，阳光照射在雪面上闪闪发光",
       "meta": {},
       "id": "preset-10",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-style-style-1-036",
@@ -75,7 +95,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-style-style-2-037",
@@ -86,7 +109,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-style-style-3-038",
@@ -97,7 +123,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "style",
@@ -106,7 +135,10 @@
       "content": "宫崎骏动画风格，色彩明亮温暖，笔触细腻，充满治愈感",
       "meta": {},
       "id": "preset-11",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "style",
@@ -115,7 +147,10 @@
       "content": "赛博朋克风格，霓虹灯光，未来科技感，高对比度，暗色调",
       "meta": {},
       "id": "preset-12",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "camera",
@@ -124,7 +159,10 @@
       "content": "特写镜头，聚焦主体面部，背景虚化，突出细节",
       "meta": {},
       "id": "preset-16",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "camera",
@@ -133,7 +171,10 @@
       "content": "全景镜头，展示完整场景，视野开阔，包含环境信息",
       "meta": {},
       "id": "preset-17",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "camera",
@@ -142,7 +183,10 @@
       "content": "无人机航拍视角，上帝视角，俯瞰整个场景，气势宏大",
       "meta": {},
       "id": "preset-18",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "camera",
@@ -151,7 +195,10 @@
       "content": "低角度仰拍，显得主体高大有气势，视觉冲击力强",
       "meta": {},
       "id": "preset-19",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "lighting",
@@ -160,7 +207,10 @@
       "content": "柔和的自然光线，明亮均匀，阴影柔和，真实自然",
       "meta": {},
       "id": "preset-20",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "lighting",
@@ -169,7 +219,10 @@
       "content": "黄金时刻的光线，暖黄色调，柔和温暖，光影层次丰富",
       "meta": {},
       "id": "preset-21",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "lighting",
@@ -178,7 +231,10 @@
       "content": "彩色霓虹灯光，赛博朋克风格，高对比度，光影绚烂",
       "meta": {},
       "id": "preset-22",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "timing",
@@ -187,7 +243,10 @@
       "content": "00:00-00:04",
       "meta": {},
       "id": "preset-23",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "timing",
@@ -196,7 +255,10 @@
       "content": "00:04-00:08",
       "meta": {},
       "id": "preset-24",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "timing",
@@ -205,7 +267,10 @@
       "content": "00:08-00:12",
       "meta": {},
       "id": "preset-25",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "timing",
@@ -214,7 +279,10 @@
       "content": "00:12-00:16",
       "meta": {},
       "id": "preset-26",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "timing",
@@ -223,7 +291,10 @@
       "content": "00:16-00:20",
       "meta": {},
       "id": "preset-27",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "timing",
@@ -232,7 +303,10 @@
       "content": "总时长20秒，前5秒特写，中间10秒动作，最后5秒全景展示，节奏舒缓",
       "meta": {},
       "id": "preset-28",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "timing",
@@ -241,7 +315,10 @@
       "content": "15秒，慢动作效果，动作放慢2倍",
       "meta": {},
       "id": "preset-29",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "timing",
@@ -250,7 +327,10 @@
       "content": "5秒，快节奏剪辑，动感十足",
       "meta": {},
       "id": "preset-30",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "constraint",
@@ -259,7 +339,10 @@
       "content": "8K超高清，高分辨率，细节丰富，纹理清晰，画质优秀",
       "meta": {},
       "id": "preset-31",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "constraint",
@@ -268,7 +351,10 @@
       "content": "人物结构正常，无畸形手，无畸形五官，比例协调，自然真实",
       "meta": {},
       "id": "preset-32",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "preset-audio-dialogue-template",
@@ -277,7 +363,10 @@
       "label": "对话",
       "content": "Dialogue: 角色A（语气/情绪：___）说：___；角色B（语气/情绪：___）回应：___。对话节奏：___（如轻声、停顿、急促、自然闲聊）；语言/口音：___；音量距离：___（如近距离耳语、中景正常音量、远处呼喊）。",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "preset-audio-ambient-template",
@@ -286,7 +375,10 @@
       "label": "环境音",
       "content": "Ambient: 场景环境音为（___），背景层次包含（___、___、___）。声音空间：___（如室内混响、开阔户外、远处回声）；强度变化：___（如持续轻微、逐渐增强、随镜头靠近变清晰）；整体氛围：___（如安静、紧张、温暖、孤独）。",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "preset-audio-sfx-template",
@@ -295,7 +387,10 @@
       "label": "特效音",
       "content": "SFX: 关键动作音效包括（___）、（___）、（___）。触发时机：___（如角色起步时、镜头切换瞬间、物体碰撞后）；质感：___（如清脆、沉闷、金属感、湿润感）；混音要求：主音效清晰，背景音不盖过动作音效，必要时加入短暂尾音或回响。",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "subject",
@@ -304,7 +399,10 @@
       "category": "subject",
       "id": "preset-1777323488002",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "style",
@@ -313,7 +411,10 @@
       "content": "中国风水墨画风格，写意，淡彩，意境悠远，笔触流畅",
       "meta": {},
       "id": "preset-13",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "style",
@@ -322,7 +423,10 @@
       "content": "3D渲染风格，皮克斯动画质感，光影真实，材质细腻",
       "meta": {},
       "id": "preset-14",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "style",
@@ -331,7 +435,10 @@
       "content": "复古胶片风格，颗粒感，暖色调，怀旧氛围，轻微漏光效果",
       "meta": {},
       "id": "preset-15",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-1-039",
@@ -342,7 +449,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-2-040",
@@ -353,7 +463,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-3-041",
@@ -364,7 +477,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-4-042",
@@ -375,7 +491,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-5-043",
@@ -386,7 +505,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-6-044",
@@ -397,7 +519,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-7-045",
@@ -408,7 +533,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-8-046",
@@ -419,7 +547,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-9-047",
@@ -430,7 +561,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-10-048",
@@ -441,7 +575,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-11-049",
@@ -452,7 +589,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-12-050",
@@ -463,7 +603,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-13-051",
@@ -474,7 +617,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-14-052",
@@ -485,7 +631,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-15-053",
@@ -496,7 +645,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-16-054",
@@ -507,7 +659,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-17-055",
@@ -518,7 +673,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-18-056",
@@ -529,7 +687,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-19-057",
@@ -540,7 +701,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-camera-camera-20-058",
@@ -551,7 +715,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-1-059",
@@ -562,7 +729,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-2-060",
@@ -573,7 +743,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-3-061",
@@ -584,7 +757,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-4-062",
@@ -595,7 +771,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-5-063",
@@ -606,7 +785,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-6-064",
@@ -617,7 +799,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-7-065",
@@ -628,7 +813,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-8-066",
@@ -639,7 +827,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-9-067",
@@ -650,7 +841,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-10-068",
@@ -661,7 +855,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-11-069",
@@ -672,7 +869,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-12-070",
@@ -683,7 +883,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-13-071",
@@ -694,7 +897,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-14-072",
@@ -705,7 +911,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-15-073",
@@ -716,7 +925,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-16-074",
@@ -727,7 +939,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-17-075",
@@ -738,7 +953,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-18-076",
@@ -749,7 +967,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-19-077",
@@ -760,7 +981,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "backup-scene-scene-20-078",
@@ -771,7 +995,10 @@
       "usageCount": 0,
       "meta": {
         "source": "提示词注入备份.md"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-scene-rainy-city-street",
@@ -784,7 +1011,10 @@
         "source": "neutralized from Task 2 rainy city night",
         "neutralized": true,
         "previousLabel": "雨夜城市街道"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-scene-neon-rain-alley",
@@ -797,7 +1027,10 @@
         "source": "neutralized from Task 2 rainy city night",
         "neutralized": true,
         "previousLabel": "霓虹雨巷"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-scene-rainy-intersection",
@@ -810,7 +1043,10 @@
         "source": "neutralized from Task 2 rainy city night",
         "neutralized": true,
         "previousLabel": "雨中十字路口"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-camera-slow-push-rain-night",
@@ -821,7 +1057,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 2 rainy city night"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-camera-low-street-rain",
@@ -832,7 +1071,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 2 rainy city night"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-camera-side-tracking-street",
@@ -843,7 +1085,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 2 rainy city night"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-lighting-neon-rain-reflection",
@@ -856,7 +1101,10 @@
         "source": "neutralized from Task 2 rainy city night",
         "neutralized": true,
         "previousLabel": "雨夜霓虹反光"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-lighting-headlight-streetlamp",
@@ -867,7 +1115,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 2 rainy city night"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-timing-15s-rain-night",
@@ -878,7 +1129,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 2 rainy city night"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-audio-rainy-city-ambient",
@@ -889,7 +1143,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 2 rainy city night"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-audio-rain-traffic-sfx",
@@ -902,7 +1159,10 @@
         "source": "neutralized from Task 2 rainy city night",
         "neutralized": true,
         "previousLabel": "雨滴与车流特效音"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task2-constraint-rain-night-city",
@@ -913,7 +1173,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 2 rainy city night"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "type": "subject",
@@ -922,7 +1185,10 @@
       "category": "subject",
       "id": "preset-1777323509437",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-action-opening-stance",
@@ -933,7 +1199,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-action-fast-exchange",
@@ -944,7 +1213,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-action-leap-kick",
@@ -955,7 +1227,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-scene-training-courtyard",
@@ -966,7 +1241,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-camera-dynamic-follow-fight",
@@ -977,7 +1255,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-camera-orbit-duel",
@@ -988,7 +1269,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-camera-slow-motion-impact",
@@ -999,7 +1283,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-lighting-dramatic-rim",
@@ -1010,7 +1297,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-timing-15s-fight-beat",
@@ -1021,7 +1311,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-audio-fight-sfx",
@@ -1032,7 +1325,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "task1-constraint-clear-choreography",
@@ -1043,7 +1339,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-module-global-prefix",
@@ -1056,7 +1355,9 @@
         "sourceDoc": "104种教学版+提示词.docx",
         "moduleRole": "globalPrefix"
       },
-      "updatedAt": 1777297950349
+      "updatedAt": 1777297950349,
+      "createdAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-module-global-suffix",
@@ -1068,7 +1369,10 @@
       "meta": {
         "sourceDoc": "104种教学版+提示词.docx",
         "moduleRole": "globalSuffix"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-001-item",
@@ -1092,7 +1396,10 @@
         "teachingUse": "聚焦核心主体，引导观众视线，强化细节沉浸感，最基础的叙事运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-002-item",
@@ -1116,7 +1423,10 @@
         "teachingUse": "展现主体所处环境，揭示整体场景，营造从细节到全局的叙事感，与慢速推进形成反向对比",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-003-item",
@@ -1140,7 +1450,10 @@
         "teachingUse": "营造紧迫感、冲击力，突出关键主体的重要性，适配高光、悬念揭晓场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-004-item",
@@ -1164,7 +1477,10 @@
         "teachingUse": "营造不安、紧张、悬疑的氛围感，强化主体的视觉冲击力，经典电影级运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-005-item",
@@ -1188,7 +1504,10 @@
         "teachingUse": "突破人眼视觉极限，展现极致微观细节，强化主体的质感与精致度，适配器物、特效细节特写",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-006-item",
@@ -1212,7 +1531,10 @@
         "teachingUse": "掌握推拉运镜的连续衔接逻辑，适配单镜头内的细节 - 全局双向叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-007-item",
@@ -1236,7 +1558,10 @@
         "teachingUse": "掌握运镜速度对叙事节奏的影响，适配情绪递进、悬念升级的叙事场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-008-item",
@@ -1260,7 +1585,10 @@
         "teachingUse": "模拟对话视角，增强观众的代入感，拉近与人物的距离，适配人物独白、对话场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-009-item",
@@ -1284,7 +1612,10 @@
         "teachingUse": "掌握双人对话场景的标准运镜逻辑，实现对话双方的视角无缝切换，影视叙事核心运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-010-item",
@@ -1308,7 +1639,10 @@
         "teachingUse": "营造强烈的窥视感、悬疑感与不安感，适配上帝视角监视、反派暗中观察、悬疑叙事场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-011-item",
@@ -1332,7 +1666,10 @@
         "teachingUse": "营造 “窥视 - 揭晓” 的氛围感，增强场景的空间层次感，适配人物登场、悬念揭晓场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-012-item",
@@ -1356,7 +1693,10 @@
         "teachingUse": "模拟观众走进场景的过程，增强空间的沉浸感与代入感，适配场景开场、空间进入叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-013-item",
@@ -1380,7 +1720,10 @@
         "teachingUse": "掌握最基础的无切镜转场逻辑，通过前景遮挡实现画面的无缝切换，新手友好度极高",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418098,
+      "updatedAt": 1779621418098,
+      "revision": 1
     },
     {
       "id": "motion-014-item",
@@ -1404,7 +1747,10 @@
         "teachingUse": "强化悬疑感与窥视感，营造 “逐步深入” 的叙事节奏，适配悬疑探查、秘密观察场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-015-item",
@@ -1428,7 +1774,10 @@
         "teachingUse": "模拟人眼睁眼、从模糊到清晰的视觉过程，营造开场、入梦、回忆切入的氛围感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-016-item",
@@ -1452,7 +1801,10 @@
         "teachingUse": "模拟人眼闭眼、意识模糊的视觉过程，营造结尾、入梦、意识消散的氛围感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-017-item",
@@ -1476,7 +1828,10 @@
         "teachingUse": "不移动机位即可完成主体切换，引导观众视线在画面内转移，营造叙事层次感，适配对话、多主体互动场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-018-item",
@@ -1500,7 +1855,10 @@
         "teachingUse": "营造柔和的呼吸感与氛围感，适配器物特写、空镜、情绪铺垫场景，避免画面呆板",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-019-item",
@@ -1524,7 +1882,10 @@
         "teachingUse": "垂直方向拓展视野，从下至上揭示场景，营造从细节到环境的递进感，适配主体登场、环境揭示",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-020-item",
@@ -1548,7 +1909,10 @@
         "teachingUse": "与上摇镜头形成反向对比，从上至下锁定核心主体，引导观众视线聚焦，适配主体揭晓、细节展示",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-021-item",
@@ -1572,7 +1936,10 @@
         "teachingUse": "水平方向拓展视野，展现横向空间的完整环境，适配大场景横向展示、多主体依次揭示场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-022-item",
@@ -1596,7 +1963,10 @@
         "teachingUse": "拓展横向视野，展现画面内的并列元素，营造平稳的叙事节奏，适配多主体展示",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-023-item",
@@ -1620,7 +1990,10 @@
         "teachingUse": "与左横移形成反向对比，适配画面元素的叙事顺序，引导观众视线横向移动",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-024-item",
@@ -1644,7 +2017,10 @@
         "teachingUse": "掌握运镜速度对叙事节奏的影响，适配情绪递进、主体逐步揭晓的场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-025-180",
@@ -1668,7 +2044,10 @@
         "teachingUse": "全方位展现人物与所处环境，营造沉浸式的人物刻画氛围，适配人物独白、心境展现场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-026-360",
@@ -1692,7 +2071,10 @@
         "teachingUse": "全方位展现人物与所处的大场景，营造强烈的动态氛围感，适配人物高光登场、气场展示场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-027-item",
@@ -1716,7 +2098,10 @@
         "teachingUse": "比直线横移更具电影感，柔和地展现人物的侧面轮廓，适配人物状态刻画、氛围感叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-028-item",
@@ -1740,7 +2125,10 @@
         "teachingUse": "掌握环绕运镜的速度变化对情绪的影响，适配节奏变化、情绪升级的叙事场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-029-item",
@@ -1764,7 +2152,10 @@
         "teachingUse": "垂直方向完整展现人物状态，从细节到人物面部，引导观众视线向上聚焦，适配人物情绪刻画",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-030-item",
@@ -1788,7 +2179,10 @@
         "teachingUse": "与垂直上升形成反向对比，引导观众视线聚焦人物的动作细节，适配动作刻画、细节展示",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-031-item",
@@ -1812,7 +2206,10 @@
         "teachingUse": "从人物到环境的宏大揭示，营造从个体到全局的史诗感，适配场景开场、宏大环境展示",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-032-item",
@@ -1836,7 +2233,10 @@
         "teachingUse": "与吊臂上升形成反向对比，从宏大环境聚焦到核心人物，营造人物登场、主角降临的氛围感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-033-item",
@@ -1860,7 +2260,10 @@
         "teachingUse": "掌握升降与俯仰的联动运镜逻辑，实现更丝滑的场景揭示，电影级宏大叙事核心运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-034-item",
@@ -1884,7 +2287,10 @@
         "teachingUse": "实现无位移的画面放大，避免推拉运镜带来的透视变化，适配主体特写、细节聚焦场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-035-item",
@@ -1908,7 +2314,10 @@
         "teachingUse": "实现无位移的画面缩小，展现主体所处的完整环境，适配从细节到全局的叙事场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-036-item",
@@ -1932,7 +2341,10 @@
         "teachingUse": "营造强烈的视觉冲击与紧迫感，适配高光瞬间、关键信息突现场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-037-item",
@@ -1956,7 +2368,10 @@
         "teachingUse": "掌握光学变焦的速度变化对叙事节奏的影响，适配情绪递进、悬念升级的场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-038-item",
@@ -1980,7 +2395,10 @@
         "teachingUse": "展现宏大场景的纵深与广度，营造沉浸式的飞行体验，适配大场景开场、环境展示",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-039-item",
@@ -2004,7 +2422,10 @@
         "teachingUse": "比普通吊臂上升更具冲击力，展现超广域的宏大场景，营造史诗级的叙事氛围，适配世界观展示、大场景开场",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-040-item",
@@ -2028,7 +2449,10 @@
         "teachingUse": "展现超大规模场景的完整全貌，营造极致的史诗感与宏大感，适配世界观全景展示、史诗级开场",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-041-item",
@@ -2052,7 +2476,10 @@
         "teachingUse": "打造全知全能的上帝视角，展现人物与环境的全局关系，营造上帝凝视、全局掌控的氛围感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-042-fpv",
@@ -2076,7 +2503,10 @@
         "teachingUse": "营造极致的速度感与冲击力，适配高光时刻、大招降临、紧张对峙场景，是玄幻打斗高频运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-043-item",
@@ -2100,7 +2530,10 @@
         "teachingUse": "比普通上帝视角更具压迫感，展现人物在宏大环境中的渺小感，适配全局叙事、上帝视角监视场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-044-item",
@@ -2124,7 +2557,10 @@
         "teachingUse": "营造纪实感、临场感与紧张感，适配第一人称潜入、沉浸式闯入场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-045-item",
@@ -2148,7 +2584,10 @@
         "teachingUse": "营造强烈的视觉冲击与意外感，适配悬念揭晓、惊吓瞬间、关键信息突现场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-046-item",
@@ -2172,7 +2611,10 @@
         "teachingUse": "打破常规水平构图，营造紧张、不安、悬疑的氛围感，适配人物情绪波动、悬念叙事场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-047-item",
@@ -2196,7 +2638,10 @@
         "teachingUse": "强化动作的冲击力与力量感，适配打斗、碰撞、爆炸等强动态场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-048-item",
@@ -2220,7 +2665,10 @@
         "teachingUse": "模拟面对面跟随的视角，增强观众与人物的互动感，适配人物登场、独白、对峙场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-049-item",
@@ -2244,7 +2692,10 @@
         "teachingUse": "模拟观众跟随人物的视角，增强场景的沉浸感，适配人物探索、场景进入叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-050-item",
@@ -2268,7 +2719,10 @@
         "teachingUse": "精准跟随人物的横向移动，保持人物的构图稳定，适配人物行走、动作展示场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-051-item",
@@ -2292,7 +2746,10 @@
         "teachingUse": "极致的第一人称沉浸式体验，模拟观众亲自走进场景的视觉感受，适配沉浸式叙事、第一人称探索场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-052-item",
@@ -2316,7 +2773,10 @@
         "teachingUse": "适配超高速打斗场景，精准捕捉动作细节，同时保持画面的冲击力与流畅度，是国漫打斗核心运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-053-item",
@@ -2340,7 +2800,10 @@
         "teachingUse": "展现时间的快速流逝，营造时空压缩的视觉效果，适配环境变化、时间推移的叙事场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-054-item",
@@ -2364,7 +2827,10 @@
         "teachingUse": "放大动作的细节与张力，营造高光时刻的仪式感，适配打斗名场面、关键动作特写",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-055-item",
@@ -2388,7 +2854,10 @@
         "teachingUse": "突出关键动作的高光瞬间，营造 “时间暂停” 的视觉冲击，适配名场面定格、关键动作强调场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-056-item",
@@ -2412,7 +2881,10 @@
         "teachingUse": "营造强烈的眩晕感、失控感、时空错乱感，适配神识入侵、幻境、打斗失控场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-057-item",
@@ -2436,7 +2908,10 @@
         "teachingUse": "极致放大人物的高大感与压迫感，营造反派登场、强者降临的强大气场，适配人物高光展示",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-058-item",
@@ -2460,7 +2935,10 @@
         "teachingUse": "比普通上帝视角更具压迫感，展现人物在宏大环境中的渺小感，适配全局叙事、上帝视角监视场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-059-item",
@@ -2484,7 +2962,10 @@
         "teachingUse": "突破镜头变焦与位移的物理极限，实现从微观到宏观的无限尺度连续展现，营造世界观的宏大感与无边际感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-060-item",
@@ -2508,7 +2989,10 @@
         "teachingUse": "突破空间位移与变焦的物理极限，实现从宏观宇宙到微观人物的瞬间跨越，营造极致的视觉冲击力与史诗感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-061-item",
@@ -2532,7 +3016,10 @@
         "teachingUse": "突破实体介质的物理限制，镜头可穿过所有实体物体，营造沉浸式的空间穿梭感，适配跨场景飞行、神识探查叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-062-item",
@@ -2556,7 +3043,10 @@
         "teachingUse": "突破空间位移速度极限，完美适配玄幻瞬移、超高速打斗场景，是国漫打斗的核心高频运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-063-item",
@@ -2580,7 +3070,10 @@
         "teachingUse": "突破三维空间规则，通过空间折叠实现跨场景瞬间跳转，营造超现实的时空穿梭感，适配玄幻跨地图、跨次元叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-064-item",
@@ -2604,7 +3097,10 @@
         "teachingUse": "突破重力物理规则，实现无约束的镜头自由运动，适配幻境、失重空间、神识空间场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-065-item",
@@ -2628,7 +3124,10 @@
         "teachingUse": "突破实拍环绕的物理空间限制，实现无边界的环绕运动，适配宏大场景下的人物气场展示、世界观环绕叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-066-item",
@@ -2652,7 +3151,10 @@
         "teachingUse": "突破实拍机位的物理限制，无需环绕空间即可实现主体轴心旋转，极致展现人物的 360 度细节，营造强大的人物气场",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-067-item",
@@ -2676,7 +3178,10 @@
         "teachingUse": "突破镜头体积的物理限制，实现宏观到微观的无缝缩放穿梭，适配法宝内部、微观世界、神识空间场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-068-item",
@@ -2700,7 +3205,10 @@
         "teachingUse": "突破运动惯性物理规则，极致放大 “快与静” 的反差，营造超强的视觉冲击力，适配玄幻打斗的大招顿停、高光名场面",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-069-item",
@@ -2724,7 +3232,10 @@
         "teachingUse": "突破单镜头的物理限制，同一时间展现主体的多个角度，适配人物全方位展示、名场面多视角同步叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-070-item",
@@ -2748,7 +3259,10 @@
         "teachingUse": "完全突破时间规则，极致展现打斗高光瞬间的所有细节，营造超强的视觉张力，是玄幻打斗名场面核心运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-071-item",
@@ -2772,7 +3286,10 @@
         "teachingUse": "突破时间单向流逝的物理规则，实现时间倒流与镜头运动的双重联动，营造时空回溯、回忆倒放的氛围感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-072-item",
@@ -2796,7 +3313,10 @@
         "teachingUse": "突破时间统一规则，极致放大主体动作的速度感，营造 “唯快不破” 的打斗冲击力，国漫高频使用",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-073-item",
@@ -2820,7 +3340,10 @@
         "teachingUse": "突破时间线性规则，同时展现动作的完整过程，极致放大高光动作的细节与张力，适配大招蓄力、名场面慢放刻画",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-074-item",
@@ -2844,7 +3367,10 @@
         "teachingUse": "突破时间线性规则，实现无限循环的时间闭环，适配幻境、时间循环、宿命感叙事场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-075-item",
@@ -2868,7 +3394,10 @@
         "teachingUse": "突破时间连续流逝规则，逐帧拆解高光动作，极致展现动作的每一处细节，适配武器、功法特效的细节特写",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-076-item",
@@ -2892,7 +3421,10 @@
         "teachingUse": "突破实拍高速相机的帧率极限，无限放大动作的时间维度，适配极致的动作细节刻画、高光名场面慢放",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-077-item",
@@ -2916,7 +3448,10 @@
         "teachingUse": "突破时间流逝速度限制，快速展现时间的漫长推移，适配城市变迁、四季更迭、人物一生的快速叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-078-item",
@@ -2940,7 +3475,10 @@
         "teachingUse": "突破单时间线限制，同时展现两条不同时间线的内容，适配人物成长、过去与现在的对照叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-079-item",
@@ -2964,7 +3502,10 @@
         "teachingUse": "突破时间统一规则，营造能量扩散、气场释放的视觉效果，适配玄幻功法大招、气场全开的名场面",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-080-item",
@@ -2988,7 +3529,10 @@
         "teachingUse": "突破光学镜头景深极限，同时展现画面内所有尺度的完整细节，适配宏大场景全景展示、多主体细节同步呈现",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-081-item",
@@ -3012,7 +3556,10 @@
         "teachingUse": "突破单镜头单焦点的物理规则，同一画面内同时存在多个独立清晰焦点，适配多主体同步展示、群像戏场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-082-item",
@@ -3036,7 +3583,10 @@
         "teachingUse": "突破广角镜头的畸变物理规则，实现极端广角视野的同时保持画面零畸变，适配宏大场景全景展示、无畸变沉浸式叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-083-item",
@@ -3060,7 +3610,10 @@
         "teachingUse": "突破实拍透视固定的限制，实现多视角透视的无缝切换，适配多视角叙事、沉浸式视角转换场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-084-item",
@@ -3084,7 +3637,10 @@
         "teachingUse": "突破三维透视规则，通过虫洞式透视实现跨场景无缝穿越，适配跨星球、跨次元的场景跳转",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-085-360",
@@ -3108,7 +3664,10 @@
         "teachingUse": "突破单镜头视野极限，实现 360 度全空间无盲区视野，适配 VR 全景、沉浸式空间展示、全知视角叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-086-item",
@@ -3132,7 +3691,10 @@
         "teachingUse": "突破实体遮挡的光学限制，实现 “透视” 效果，展现物体内部的隐藏细节，适配机甲、武器、法宝的内部结构展示",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-087-item",
@@ -3156,7 +3718,10 @@
         "teachingUse": "突破光学镜头对焦规则，营造全画面柔化的梦幻感，适配回忆、梦境、神识空间、幻境场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-088-item",
@@ -3180,7 +3745,10 @@
         "teachingUse": "突破光学镜头变焦倍率的物理极限，实现无限制的连续变焦，适配从宏观全景到微观特写的无缝叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-089-item",
@@ -3204,7 +3772,10 @@
         "teachingUse": "通过核心元素的形态、色彩匹配，实现无切镜场景跳转，是国漫、电影中最经典的无缝转场运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-090-item",
@@ -3228,7 +3799,10 @@
         "teachingUse": "实现「动作不停、场景已换」的丝滑效果，完美适配超高速打斗、多场景连招、高光名场面衔接",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-091-item",
@@ -3252,7 +3826,10 @@
         "teachingUse": "实现现实与幻境、当前场景与嵌套场景的无缝跳转，营造破次元、入梦、回忆切入的氛围感，国风动画高频使用",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-092-item",
@@ -3276,7 +3853,10 @@
         "teachingUse": "通过光影的全屏覆盖实现场景无缝跳转，适配玄幻功法特效衔接、时空跳转、明暗反差场景切换",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-093-item",
@@ -3300,7 +3880,10 @@
         "teachingUse": "让镜头贴合人物的生理节奏，极致增强观众的共情力与代入感，适配人物内心戏、情绪特写场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-094-item",
@@ -3324,7 +3907,10 @@
         "teachingUse": "放大人物的紧张、激动情绪，营造强烈的心理压迫感与氛围感，适配对峙、悬念、情绪爆发前的蓄力场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-095-item",
@@ -3348,7 +3934,10 @@
         "teachingUse": "极致放大窒息感、压迫感与紧张感，适配反派对峙、悬念揭晓、角色情绪崩溃前的蓄力场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-096-item",
@@ -3372,7 +3961,10 @@
         "teachingUse": "极致的第一人称代入感，让观众完全共情人物的所见所感，适配悬疑探查、角色沉浸式叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-097-item",
@@ -3396,7 +3988,10 @@
         "teachingUse": "流畅展现群像角色，营造团战集结、群雄对峙的氛围感，适配群像戏、多角色登场场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-098-item",
@@ -3420,7 +4015,10 @@
         "teachingUse": "传递人物的失控、恍惚、醉酒、濒死情绪，区别于强冲击的桶滚旋转，主打细腻的情绪传递",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-099-2d-3d",
@@ -3444,7 +4042,10 @@
         "teachingUse": "突破 2D 与 3D 的维度边界，实现写意到写实的无缝切换，适配国风动画的风格转场、破次元叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-100-item",
@@ -3468,7 +4069,10 @@
         "teachingUse": "突破实拍画面的单层物理限制，实现多层画面的独立运动与纵深穿梭，营造极强的画面层次感与沉浸感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-101-item",
@@ -3492,7 +4096,10 @@
         "teachingUse": "突破三维现实空间的物理规则，在非欧几何的无限循环空间内自由运镜，营造幻境、秘境、神识空间的错乱感与神秘感",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-102-item",
@@ -3516,7 +4123,10 @@
         "teachingUse": "突破画面实体的物理规则，实现画面元素的解构与重组，适配角色变身、场景切换、功法形态变化的名场面",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-103-ai",
@@ -3540,7 +4150,10 @@
         "teachingUse": "AI 独有的专属运镜，突破预设场景的限制，实现无限时长、无限延伸的连续运镜，适配沉浸式漫游、意识流叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-104-item",
@@ -3564,7 +4177,10 @@
         "teachingUse": "突破实拍长镜头的物理限制，实现多场景、多时间线、多尺度的无缝一镜到底，适配史诗级叙事、人物一生传记、世界观完整展现",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-105-item",
@@ -3588,7 +4204,10 @@
         "teachingUse": "完美还原玄幻设定中的神识 / 念力探查视角，突破空间与遮挡的物理限制，适配角色探查、世界观展现场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-106-item",
@@ -3612,7 +4231,10 @@
         "teachingUse": "适配角色牺牲、回忆杀、濒死场景，营造宿命感、悲凉感的叙事氛围",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-107-item",
@@ -3636,7 +4258,10 @@
         "teachingUse": "让镜头与特效完全同步，第一视角展现功法特效的冲击力，增强观众的沉浸感，适配大招释放、特效展示场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-108-item",
@@ -3660,7 +4285,10 @@
         "teachingUse": "突破二次元与三次元的边界，营造破次元、无厘头、互动式叙事氛围，适配国风动画、创意短视频",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-109-item",
@@ -3684,7 +4312,10 @@
         "teachingUse": "无需硬切即可实现现实到回忆的无缝衔接，是国漫、影视叙事中最高频的回忆转场运镜",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-110-item",
@@ -3708,7 +4339,10 @@
         "teachingUse": "突破单镜头的空间限制，实现全知全能的上帝视角，同时展现多线剧情，适配宏大世界观、多线叙事场景",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-111-item",
@@ -3732,7 +4366,10 @@
         "teachingUse": "无需硬切即可实现从现实到人物内心世界的无缝衔接，适配角色心境刻画、执念回忆、幻境叙事",
         "promptMode": "full",
         "reviewStatus": "pending"
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-combat-01-item",
@@ -3757,7 +4394,10 @@
         "promptMode": "full",
         "reviewStatus": "pending",
         "combatUnitIndex": 1
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-combat-02-item",
@@ -3782,7 +4422,10 @@
         "promptMode": "full",
         "reviewStatus": "pending",
         "combatUnitIndex": 2
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-combat-03-item",
@@ -3807,7 +4450,10 @@
         "promptMode": "full",
         "reviewStatus": "pending",
         "combatUnitIndex": 3
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-combat-04-item",
@@ -3832,7 +4478,10 @@
         "promptMode": "full",
         "reviewStatus": "pending",
         "combatUnitIndex": 4
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-combat-05-item",
@@ -3857,7 +4506,10 @@
         "promptMode": "full",
         "reviewStatus": "pending",
         "combatUnitIndex": 5
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "motion-combat-06-item",
@@ -3882,7 +4534,10 @@
         "promptMode": "full",
         "reviewStatus": "pending",
         "combatUnitIndex": 6
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "type": "constraint",
@@ -3891,7 +4546,10 @@
       "category": "constraint",
       "id": "preset-1777297852711",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "neutral-audio-room-tone",
@@ -3903,7 +4561,10 @@
       "meta": {
         "source": "neutral expansion",
         "neutral": true
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "neutral-audio-footsteps-material",
@@ -3915,7 +4576,10 @@
       "meta": {
         "source": "neutral expansion",
         "neutral": true
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "neutral-audio-crowd-distance",
@@ -3927,7 +4591,10 @@
       "meta": {
         "source": "neutral expansion",
         "neutral": true
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "neutral-audio-quiet-ambient",
@@ -3939,7 +4606,10 @@
       "meta": {
         "source": "neutral expansion",
         "neutral": true
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "neutral-light-soft-ambient",
@@ -3951,7 +4621,10 @@
       "meta": {
         "source": "neutral expansion",
         "neutral": true
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "neutral-light-practical-lamps",
@@ -3963,7 +4636,10 @@
       "meta": {
         "source": "neutral expansion",
         "neutral": true
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "neutral-scene-public-walkway",
@@ -3975,7 +4651,10 @@
       "meta": {
         "source": "neutral expansion",
         "neutral": true
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "id": "neutral-scene-indoor-corridor",
@@ -3987,7 +4666,10 @@
       "meta": {
         "source": "neutral expansion",
         "neutral": true
-      }
+      },
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "type": "subject",
@@ -3996,7 +4678,10 @@
       "category": "subject",
       "id": "preset-1777323571692",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418099,
+      "updatedAt": 1779621418099,
+      "revision": 1
     },
     {
       "type": "subject",
@@ -4005,7 +4690,10 @@
       "category": "subject",
       "id": "preset-1777323519947",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418100,
+      "updatedAt": 1779621418100,
+      "revision": 1
     },
     {
       "type": "subject",
@@ -4014,7 +4702,10 @@
       "category": "subject",
       "id": "preset-1777323537271",
       "usageCount": 0,
-      "meta": {}
+      "meta": {},
+      "createdAt": 1779621418100,
+      "updatedAt": 1779621418100,
+      "revision": 1
     },
     {
       "type": "subject",
@@ -4023,7 +4714,10 @@
       "content": "20岁的年轻男孩，短发，穿着牛仔外套，阳光帅气，眼神明亮",
       "meta": {},
       "id": "preset-1",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418100,
+      "updatedAt": 1779621418100,
+      "revision": 1
     },
     {
       "type": "subject",
@@ -4032,7 +4726,10 @@
       "content": "18岁的亚洲女孩，黑色长发，穿着白色连衣裙，笑容甜美，皮肤白皙",
       "meta": {},
       "id": "preset-0",
-      "usageCount": 0
+      "usageCount": 0,
+      "createdAt": 1779621418100,
+      "updatedAt": 1779621418100,
+      "revision": 1
     },
     {
       "id": "task1-action-weapon-clash",
@@ -4043,7 +4740,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418100,
+      "updatedAt": 1779621418100,
+      "revision": 1
     },
     {
       "id": "task1-action-final-freeze",
@@ -4054,7 +4754,10 @@
       "usageCount": 0,
       "meta": {
         "source": "Task 1 martial arts battle"
-      }
+      },
+      "createdAt": 1779621418100,
+      "updatedAt": 1779621418100,
+      "revision": 1
     },
     {
       "type": "action",
@@ -4064,7 +4767,9 @@
       "id": "preset-1777323678926",
       "usageCount": 0,
       "meta": {},
-      "updatedAt": 1777323689071
+      "updatedAt": 1777323689071,
+      "createdAt": 1779621418100,
+      "revision": 1
     }
   ]
 }

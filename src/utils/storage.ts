@@ -1,84 +1,187 @@
 import localforage from 'localforage'
 import type { ICard, IPreset, IExample } from '@/models/Card.model'
-import type { IPromptHistory } from '@/models/PromptHistory.model'
+import type { IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from '@/models/PromptHistory.model'
+import {
+  createStoryboardProject,
+  createStoryboardRow,
+  createStoryboardSequence,
+  createThreeStageProject,
+  normalizeProject,
+  sortProjects
+} from '@/domain/projects/project-normalization'
+import { devPresetFileStorage, devProjectFileStorage, staticPresetFileStorage } from '@/storage/dev-file-storage'
+import { storageServiceClient } from '@/storage/storage-service-client'
 import type { IPromptTemplate } from '@/models/PromptTemplate.model'
 import type { IUserSettings } from '@/models/UserSettings.model'
+import type { IPage } from '@/stores/card-initial-state'
 
-const PRESET_FILE_ENDPOINT = '/__promptcard/presets'
-const STATIC_PRESET_FILE_URL = '/prompt-library-presets.json'
-const PRESET_SOURCE_UPDATED_AT_KEY = 'presetsSourceUpdatedAt'
-
-interface PresetFilePayload {
-  schemaVersion: number
-  updatedAt: string | null
-  presets: IPreset[]
+export interface IPersistedWorkspace {
+  pages: IPage[]
+  currentPage: number
+  savedAt: number
 }
 
-export const devPresetFileStorage = {
-  async getAll(): Promise<IPreset[] | null> {
-    if (typeof fetch !== 'function') return null
+const MAX_PROMPT_HISTORY = 50
+const BROWSER_CACHE_MIGRATION_KEY = 'storageServiceBrowserCacheMigrated'
 
-    try {
-      const response = await fetch(PRESET_FILE_ENDPOINT, {
-        headers: { Accept: 'application/json' }
-      })
-      if (!response.ok) return null
-
-      const data = await response.json() as PresetFilePayload
-      return Array.isArray(data.presets) ? data.presets : null
-    } catch {
-      return null
-    }
-  },
-
-  async saveAll(presets: IPreset[]): Promise<boolean> {
-    if (typeof fetch !== 'function') return false
-
-    try {
-      const response = await fetch(PRESET_FILE_ENDPOINT, {
-        method: 'PUT',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ presets })
-      })
-      return response.ok
-    } catch {
-      return false
-    }
-  }
+export {
+  createStoryboardProject,
+  createStoryboardRow,
+  createStoryboardSequence,
+  createThreeStageProject,
+  devPresetFileStorage,
+  devProjectFileStorage,
+  staticPresetFileStorage
 }
 
-const staticPresetFileStorage = {
-  async getPayload(): Promise<PresetFilePayload | null> {
-    if (typeof fetch !== 'function') return null
-
-    try {
-      const response = await fetch(STATIC_PRESET_FILE_URL, {
-        headers: { Accept: 'application/json' },
-        cache: 'no-cache'
-      })
-      if (!response.ok) return null
-
-      const data = await response.json() as PresetFilePayload
-      return Array.isArray(data.presets) ? data : null
-    } catch {
-      return null
-    }
-  }
-}
-
-// 初始化localforage
 localforage.config({
   name: 'PromptCard',
   version: 1.0,
   storeName: 'promptcard',
-  description: 'PromptCard 4.0 本地存储'
+  description: 'PromptCard local UI cache'
 })
 
+async function migrateBrowserCacheOnce(): Promise<void> {
+  const migrated = await localforage.getItem<boolean>(BROWSER_CACHE_MIGRATION_KEY)
+  if (migrated) return
+
+  const [projects, workspace, presets] = await Promise.all([
+    localforage.getItem<IPromptProject[]>('projects'),
+    localforage.getItem<IPersistedWorkspace>('workspace'),
+    localforage.getItem<IPreset[]>('presets')
+  ])
+
+  if ((projects && projects.length > 0) || workspace || (presets && presets.length > 0)) {
+    await storageServiceClient.migrateBrowserCache({
+      projects: projects || [],
+      workspace: workspace || undefined,
+      presets: presets || []
+    })
+  }
+
+  await localforage.setItem(BROWSER_CACHE_MIGRATION_KEY, true)
+}
+
 export const storage = {
-  // Card相关
+  projects: {
+    async getAll(): Promise<IPromptProject[]> {
+      await migrateBrowserCacheOnce()
+      return sortProjects((await storageServiceClient.projects.getAll()).map(normalizeProject))
+    },
+    async getById(id: string): Promise<IPromptProject | null> {
+      await migrateBrowserCacheOnce()
+      const project = await storageServiceClient.projects.getById(id)
+      return project ? normalizeProject(project) : null
+    },
+    async create(project: {
+      title: string
+      pages: IPage[]
+      currentPage: number
+      meta?: Record<string, unknown>
+    }): Promise<IPromptProject> {
+      const now = Date.now()
+      const newProject: IPromptProject = {
+        id: now.toString(),
+        title: project.title,
+        type: 'card',
+        revision: 1,
+        pages: project.pages,
+        currentPage: project.currentPage,
+        createdAt: now,
+        updatedAt: now,
+        lastOpenedAt: now,
+        meta: project.meta || {}
+      }
+      return normalizeProject(await storageServiceClient.projects.create(newProject))
+    },
+    async createStoryboard(project: {
+      title: string
+      storyboard?: IStoryboardProject
+      meta?: Record<string, unknown>
+    }): Promise<IPromptProject> {
+      const now = Date.now()
+      const newProject: IPromptProject = {
+        id: now.toString(),
+        title: project.title,
+        type: 'storyboard',
+        revision: 1,
+        pages: [],
+        currentPage: 0,
+        storyboard: project.storyboard || createStoryboardProject(now),
+        createdAt: now,
+        updatedAt: now,
+        lastOpenedAt: now,
+        meta: project.meta || {}
+      }
+      return normalizeProject(await storageServiceClient.projects.create(newProject))
+    },
+    async createThreeStage(project: {
+      title: string
+      threeStage?: IThreeStageProject
+      meta?: Record<string, unknown>
+    }): Promise<IPromptProject> {
+      const now = Date.now()
+      const newProject: IPromptProject = {
+        id: now.toString(),
+        title: project.title,
+        type: 'three-stage',
+        revision: 1,
+        pages: [],
+        currentPage: 0,
+        threeStage: project.threeStage || createThreeStageProject(now),
+        createdAt: now,
+        updatedAt: now,
+        lastOpenedAt: now,
+        meta: project.meta || {}
+      }
+      return normalizeProject(await storageServiceClient.projects.create(newProject))
+    },
+    async update(id: string, updates: Partial<Omit<IPromptProject, 'id' | 'createdAt'>>): Promise<IPromptProject | null> {
+      const current = await this.getById(id)
+      if (!current) return null
+      const { revision: updateRevision, ...safeUpdates } = updates as Partial<IPromptProject>
+      const revision = typeof updateRevision === 'number' ? updateRevision : current.revision
+      return normalizeProject(await storageServiceClient.projects.update(id, revision, safeUpdates))
+    },
+    async delete(id: string): Promise<void> {
+      await storageServiceClient.projects.trash([id], 'user')
+    },
+    async trash(ids: string[]): Promise<void> {
+      await storageServiceClient.projects.trash(ids, 'user')
+    },
+    async getTrash() {
+      return storageServiceClient.projects.getTrash()
+    },
+    async restore(ids: string[]): Promise<void> {
+      await storageServiceClient.projects.restore(ids)
+    },
+    async deleteForever(ids: string[]): Promise<void> {
+      await storageServiceClient.projects.deleteForever(ids)
+    },
+    async setLastOpened(id: string): Promise<IPromptProject | null> {
+      const projects = await this.getAll()
+      const maxLastOpenedAt = Math.max(0, ...projects.map(project => project.lastOpenedAt || 0))
+      const now = Math.max(Date.now(), maxLastOpenedAt + 1)
+      return this.update(id, { lastOpenedAt: now, updatedAt: now })
+    },
+    async saveToFile(): Promise<boolean> {
+      await this.getAll()
+      return true
+    }
+  },
+
+  workspace: {
+    async get(): Promise<IPersistedWorkspace | null> {
+      return (await localforage.getItem<IPersistedWorkspace>('workspace')) || null
+    },
+    async save(workspace: IPersistedWorkspace): Promise<void> {
+      void workspace
+    },
+    async clear(): Promise<void> {
+      await localforage.removeItem('workspace')
+    }
+  },
+
   cards: {
     async getAll(): Promise<ICard[]> {
       return (await localforage.getItem<ICard[]>('cards')) || []
@@ -91,65 +194,69 @@ export const storage = {
     }
   },
 
-  // Preset相关
   presets: {
     async getAll(): Promise<IPreset[]> {
-      const filePresets = await devPresetFileStorage.getAll()
-      if (filePresets) {
-        await localforage.setItem('presets', filePresets)
-        await localforage.setItem(PRESET_SOURCE_UPDATED_AT_KEY, new Date().toISOString())
-        return filePresets
-      }
+      await migrateBrowserCacheOnce()
+      return storageServiceClient.presets.getAll()
+    },
+    async create(preset: Omit<IPreset, 'revision'> & { revision?: number }): Promise<IPreset> {
+      return storageServiceClient.presets.create(preset)
+    },
+    async saveAll(presets: IPreset[]): Promise<void> {
+      const current = await this.getAll()
+      const currentIds = new Set(current.map(preset => preset.id))
+      const nextIds = new Set(presets.map(preset => preset.id))
 
-      const localPresets = (await localforage.getItem<IPreset[]>('presets')) || []
-      const staticPayload = await staticPresetFileStorage.getPayload()
-
-      if (staticPayload?.presets) {
-        const sourceUpdatedAt = staticPayload.updatedAt || 'static'
-        const cachedSourceUpdatedAt = await localforage.getItem<string>(PRESET_SOURCE_UPDATED_AT_KEY)
-
-        if (localPresets.length === 0 || cachedSourceUpdatedAt !== sourceUpdatedAt) {
-          await localforage.setItem('presets', staticPayload.presets)
-          await localforage.setItem(PRESET_SOURCE_UPDATED_AT_KEY, sourceUpdatedAt)
-          return staticPayload.presets
+      for (const preset of presets) {
+        if (currentIds.has(preset.id)) {
+          await storageServiceClient.presets.update(preset.id, preset.revision || 1, preset)
+        } else {
+          await storageServiceClient.presets.create(preset)
         }
       }
 
-      return localPresets
-    },
-    async saveAll(presets: IPreset[]): Promise<void> {
-      const savedToFile = await devPresetFileStorage.saveAll(presets)
-      if (!savedToFile) {
-        console.warn('Prompt preset file storage unavailable; falling back to browser storage.')
+      const removedIds = current.filter(preset => !nextIds.has(preset.id)).map(preset => preset.id)
+      if (removedIds.length > 0) {
+        await storageServiceClient.presets.trash(removedIds, 'user')
       }
-      await localforage.setItem('presets', presets)
     },
     async incrementUsage(id: string): Promise<void> {
-      const presets = await this.getAll()
-      const updated = presets.map(p => p.id === id ? { ...p, usageCount: p.usageCount + 1 } : p)
-      await this.saveAll(updated)
+      const preset = await this.getById(id)
+      if (preset) await storageServiceClient.presets.incrementUsage(id, preset.revision || 1)
     },
-    // 新增更新方法
     async update(id: string, updates: Partial<IPreset>): Promise<void> {
-      const presets = await this.getAll()
-      const updated = presets.map(p => 
-        p.id === id ? { ...p, ...updates, updatedAt: Date.now() } : p
-      )
-      await this.saveAll(updated)
+      const preset = await this.getById(id)
+      if (!preset) return
+      await storageServiceClient.presets.update(id, updates.revision || preset.revision || 1, {
+        ...updates,
+        updatedAt: Date.now()
+      })
     },
-    // 新增删除方法
     async delete(id: string): Promise<void> {
-      const presets = await this.getAll()
-      await this.saveAll(presets.filter(p => p.id !== id))
+      await storageServiceClient.presets.trash([id], 'user')
     },
-    // 新增查找方法
+    async trash(ids: string[]): Promise<void> {
+      await storageServiceClient.presets.trash(ids, 'user')
+    },
+    async getTrash() {
+      return storageServiceClient.presets.getTrash()
+    },
+    async restore(ids: string[]): Promise<void> {
+      await storageServiceClient.presets.restore(ids)
+    },
+    async deleteForever(ids: string[]): Promise<void> {
+      await storageServiceClient.presets.deleteForever(ids)
+    },
+    async reorder(orderedIds: string[]): Promise<IPreset[]> {
+      const revisions = Object.fromEntries((await this.getAll()).map(preset => [preset.id, preset.revision || 1]))
+      return storageServiceClient.presets.reorder(orderedIds, revisions)
+    },
     async getById(id: string): Promise<IPreset | undefined> {
-      const presets = await this.getAll()
-      return presets.find(p => p.id === id)
+      await migrateBrowserCacheOnce()
+      return storageServiceClient.presets.getById(id)
     }
   },
 
-  // Example相关
   examples: {
     async getAll(): Promise<IExample[]> {
       return (await localforage.getItem<IExample[]>('examples')) || []
@@ -163,7 +270,6 @@ export const storage = {
     }
   },
 
-  // Prompt History相关
   history: {
     async getAll(): Promise<IPromptHistory[]> {
       return (await localforage.getItem<IPromptHistory[]>('history')) || []
@@ -178,6 +284,33 @@ export const storage = {
       await localforage.setItem('history', [newHistory, ...all])
       return newHistory
     },
+    async addSnapshot(snapshot: {
+      content: string
+      cards: ICard[]
+      pages?: IPage[]
+      title?: string
+      meta?: Record<string, unknown>
+    }): Promise<IPromptHistory | null> {
+      const content = snapshot.content.trim()
+      if (!content) return null
+
+      const all = await this.getAll()
+      const withoutDuplicate = all.filter(item => item.content.trim() !== content)
+      const now = Date.now()
+      const newHistory: IPromptHistory = {
+        id: now.toString(),
+        content,
+        cards: snapshot.cards,
+        pages: snapshot.pages,
+        title: snapshot.title || `Prompt ${new Date(now).toLocaleString()}`,
+        score: 0,
+        createdAt: now,
+        meta: snapshot.meta || {}
+      }
+
+      await localforage.setItem('history', [newHistory, ...withoutDuplicate].slice(0, MAX_PROMPT_HISTORY))
+      return newHistory
+    },
     async delete(id: string): Promise<void> {
       const all = await this.getAll()
       await localforage.setItem('history', all.filter(h => h.id !== id))
@@ -187,7 +320,6 @@ export const storage = {
     }
   },
 
-  // Template相关
   templates: {
     async getAll(): Promise<IPromptTemplate[]> {
       return (await localforage.getItem<IPromptTemplate[]>('templates')) || []
@@ -220,7 +352,6 @@ export const storage = {
     }
   },
 
-  // Settings相关
   settings: {
     async get(): Promise<IUserSettings> {
       const defaultSettings: IUserSettings = {
@@ -240,7 +371,6 @@ export const storage = {
     }
   },
 
-  // 通用操作
   async clearAll(): Promise<void> {
     await localforage.clear()
   },
@@ -248,6 +378,7 @@ export const storage = {
   async exportData(): Promise<string> {
     const data = {
       cards: await this.cards.getAll(),
+      projects: await this.projects.getAll(),
       presets: await this.presets.getAll(),
       examples: await this.examples.getAll(),
       history: await this.history.getAll(),
@@ -263,17 +394,20 @@ export const storage = {
     try {
       const data = JSON.parse(jsonString)
       if (data.version !== '4.0.0') {
-        throw new Error('不支持的版本')
+        throw new Error('Unsupported version')
       }
       await this.cards.saveAll(data.cards || [])
-      await this.presets.saveAll(data.presets || [])
+      await storageServiceClient.migrateBrowserCache({
+        projects: data.projects || [],
+        presets: data.presets || []
+      })
       await this.examples.saveAll(data.examples || [])
       await localforage.setItem('history', data.history || [])
       await localforage.setItem('templates', data.templates || [])
       await this.settings.save(data.settings || {})
       return true
     } catch (e) {
-      console.error('导入失败:', e)
+      console.error('Import failed:', e)
       return false
     }
   }

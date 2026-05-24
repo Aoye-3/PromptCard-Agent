@@ -4,13 +4,15 @@ import { useI18n } from '@/i18n'
 
 interface PromptLibraryTableProps {
   presets: IPreset[]
+  selectedIds?: string[]
   onEdit: (preset: IPreset) => void
   onDelete: (id: string) => void
+  onToggleSelect?: (id: string) => void
   onReorder?: (orderedIds: string[]) => void
   sortable?: boolean
 }
 
-const PromptLibraryTable = ({ presets, onEdit, onDelete, onReorder, sortable = false }: PromptLibraryTableProps) => {
+const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onToggleSelect, onReorder, sortable = false }: PromptLibraryTableProps) => {
   const { t, cardTypeLabel } = useI18n()
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -65,6 +67,9 @@ const PromptLibraryTable = ({ presets, onEdit, onDelete, onReorder, sortable = f
         <thead className="bg-gray-50">
           <tr>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Select
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {t('sort')}
             </th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -117,6 +122,14 @@ const PromptLibraryTable = ({ presets, onEdit, onDelete, onReorder, sortable = f
               }`}
             >
               <td className="px-4 py-4 whitespace-nowrap">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-gray-300 text-black focus:ring-gray-200"
+                  checked={selectedIds.includes(preset.id)}
+                  onChange={() => onToggleSelect?.(preset.id)}
+                />
+              </td>
+              <td className="px-4 py-4 whitespace-nowrap">
                 <span
                   className={`inline-flex h-8 w-8 items-center justify-center rounded border text-sm ${
                     canSort
@@ -167,7 +180,7 @@ const PromptLibraryTable = ({ presets, onEdit, onDelete, onReorder, sortable = f
           ))}
         </tbody>
       </table>
-      
+
       {presets.length === 0 && (
         <div className="text-center py-12">
           <i className="fa fa-search text-4xl text-gray-300 mb-4"></i>

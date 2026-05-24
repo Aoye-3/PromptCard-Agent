@@ -11,6 +11,14 @@ lerna-debug.log*
 node_modules
 .pnp
 .pnp.js
+agent-runtime/backend/.venv/
+agent-runtime/.deer-flow/
+agent-runtime/.agent/
+agent-runtime/.uv-cache/
+agent-runtime/*.log
+agent-runtime/**/__pycache__/
+__pycache__/
+*.py[cod]
 
 # Testing
 coverage
@@ -134,8 +142,12 @@ NewVison/Prompt Guide/
 !vercel.json
 !public/**/*.json
 !data/**/*.json
+data/projects.json
+data/project-trash.json
+data/prompt-library-trash.json
 *.xml
 *.yaml
+!agent-runtime/config.yaml
 *.yml
 *.toml
 *.ini

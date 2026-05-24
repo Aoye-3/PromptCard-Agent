@@ -5,6 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:with-agent": "powershell -ExecutionPolicy Bypass -File scripts/start-dev-with-agent.ps1",
+    "storage:dev": "powershell -ExecutionPolicy Bypass -File scripts/start-storage-service.ps1",
+    "storage:test": "python -m unittest promptcard_storage.tests.test_store",
+    "agent:dev": "powershell -ExecutionPolicy Bypass -File scripts/start-agent-runtime.ps1",
+    "agent:check": "powershell -ExecutionPolicy Bypass -File scripts/check-agent-runtime.ps1",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 30",
     "preview": "vite preview",

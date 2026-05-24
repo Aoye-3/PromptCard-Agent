@@ -1,14 +1,14 @@
 
-export type CardType = 
-  | 'subject' 
-  | 'action' 
-  | 'scene' 
-  | 'style' 
-  | 'camera' 
-  | 'lighting' 
-  | 'timing' 
-  | 'audio' 
-  | 'constraint' 
+export type CardType =
+  | 'subject'
+  | 'action'
+  | 'scene'
+  | 'style'
+  | 'camera'
+  | 'lighting'
+  | 'timing'
+  | 'audio'
+  | 'constraint'
   | 'custom'
 
 export interface ICard {
@@ -27,6 +27,7 @@ export interface ICard {
 export interface IPreset {
   id: string
   type: CardType
+  revision?: number
   category: string
   label: string
   content: string

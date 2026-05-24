@@ -80,7 +80,7 @@ const normalizePhrase = (phrase: string): string => {
   return phrase
     .trim()
     .replace(/\s+/g, ' ')
-    .replace(/^[\[\]【】()（）"'“”‘’]+|[\[\]【】()（）"'“”‘’]+$/g, '')
+    .replace(/^[[\]【】()（）"'“”‘’]+|[[\]【】()（）"'“”‘’]+$/g, '')
     .toLowerCase()
 }
 

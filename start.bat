@@ -1,30 +1,31 @@
 @echo off
+chcp 65001 >nul
 echo ======================================
-echo PromptCard V4 开发服务器启动脚本
+echo PromptCard Manager local development
 echo ======================================
 echo.
 
-:: 检查是否安装了依赖
 if not exist node_modules (
-    echo 检测到未安装项目依赖，正在安装...
+    echo Installing frontend dependencies...
     npm install
     if %errorlevel% neq 0 (
-        echo 依赖安装失败，请检查网络连接或npm配置
+        echo Dependency installation failed. Check network or npm configuration.
         pause
         exit /b 1
     )
-    echo 依赖安装成功！
+    echo Dependencies installed.
     echo.
 )
 
-:: 启动开发服务器
-echo 正在启动开发服务器...
-echo 访问地址: http://localhost:3000/
+echo Starting storage service, Agent Runtime, and Vite frontend...
+echo Frontend: http://localhost:3000/
+echo Storage:  http://127.0.0.1:8002/health
 echo.
-echo 按 Ctrl + C 停止服务器
+echo Press Ctrl+C in this window to stop the Vite frontend.
+echo Background storage and Agent windows can be closed separately if needed.
 echo ======================================
 echo.
 
-npm run dev
+npm run dev:with-agent
 
 pause

@@ -1,0 +1,92 @@
+config_version: 1
+log_level: info
+
+token_usage:
+  enabled: true
+
+models:
+  - name: deepseek-chat
+    display_name: DeepSeek Chat
+    use: langchain_deepseek:ChatDeepSeek
+    model: deepseek-chat
+    api_key: $DEEPSEEK_API_KEY
+    base_url: https://api.deepseek.com
+    timeout: 600.0
+    max_retries: 2
+    max_tokens: 4096
+    temperature: 0.3
+    supports_thinking: false
+    supports_vision: false
+
+sandbox:
+  use: deerflow.sandbox.local:LocalSandboxProvider
+  allow_host_bash: false
+
+tool_groups:
+  - name: web
+  - name: file:read
+  - name: promptcard
+
+tools:
+  - name: web_fetch
+    group: web
+    use: deerflow.community.jina_ai.tools:web_fetch_tool
+  - name: image_search
+    group: web
+    use: deerflow.community.image_search.tools:image_search_tool
+  - name: ls
+    group: file:read
+    use: deerflow.sandbox.tools:ls_tool
+  - name: read_file
+    group: file:read
+    use: deerflow.sandbox.tools:read_file_tool
+  - name: glob
+    group: file:read
+    use: deerflow.sandbox.tools:glob_tool
+  - name: grep
+    group: file:read
+    use: deerflow.sandbox.tools:grep_tool
+  - name: prompt_library_search
+    group: promptcard
+    use: deerflow.tools.promptcard_library:prompt_library_search
+  - name: prompt_library_read
+    group: promptcard
+    use: deerflow.tools.promptcard_library:prompt_library_read
+  - name: prompt_library_propose_write
+    group: promptcard
+    use: deerflow.tools.promptcard_library:prompt_library_propose_write
+  - name: prompt_library_write_with_revision
+    group: promptcard
+    use: deerflow.tools.promptcard_library:prompt_library_write_with_revision
+  - name: promptcard_project_read
+    group: promptcard
+    use: deerflow.tools.promptcard_library:promptcard_project_read
+  - name: promptcard_project_write_with_revision
+    group: promptcard
+    use: deerflow.tools.promptcard_library:promptcard_project_write_with_revision
+
+skills:
+  path: skills
+  container_path: /mnt/skills
+
+agents_api:
+  enabled: true
+
+database:
+  backend: sqlite
+  sqlite_dir: .deer-flow/data
+
+memory:
+  enabled: false
+
+title:
+  enabled: true
+
+summarization:
+  enabled: false
+
+tool_search:
+  enabled: true
+
+loop_detection:
+  enabled: true

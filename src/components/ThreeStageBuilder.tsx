@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react'
-import { Copy, Database, Eraser, Home, Search } from 'lucide-react'
+﻿import { useState } from 'react'
+import { Copy, Database, Eraser, Home } from 'lucide-react'
 import type { IPreset } from '@/models/Card.model'
 import type { IPromptProject, IThreeStageProject, IThreeStageSection, ThreeStageKey } from '@/models/PromptHistory.model'
 import { getStageDefinition, stageDefinitions, valueOf } from '@/domain/three-stage/three-stage-definitions'
+import { PromptInjectionPanel } from './prompt-injection/PromptInjectionPanel'
+import type { PromptInjectionAction, PromptInjectionEvent } from '@/domain/prompt-injection/prompt-injection'
 
 const getSection = (threeStage: IThreeStageProject, stage: ThreeStageKey): IThreeStageSection => threeStage[stage]
 
@@ -14,7 +16,13 @@ interface ThreeStageBuilderScreenProps {
   onSave: () => void
   onChange: (threeStage: IThreeStageProject) => void
   onIncrementPresetUsage: (id: string) => Promise<void>
+  previewMode?: boolean
 }
+
+const fieldPresetActions: PromptInjectionAction[] = [
+  { id: 'append', label: '追加' },
+  { id: 'replace', label: '替换' }
+]
 
 const ThreeStageBuilderScreen = ({
   activeProject,
@@ -23,7 +31,8 @@ const ThreeStageBuilderScreen = ({
   onBack,
   onSave,
   onChange,
-  onIncrementPresetUsage
+  onIncrementPresetUsage,
+  previewMode = false
 }: ThreeStageBuilderScreenProps) => {
   const [presetSearch, setPresetSearch] = useState('')
   const selectedStage = getStageDefinition(threeStage.selectedStage).key
@@ -31,15 +40,6 @@ const ThreeStageBuilderScreen = ({
   const selectedField = selectedStageDefinition.fields.find(field => field.id === threeStage.selectedFieldId) || selectedStageDefinition.fields[0]
   const selectedValue = valueOf(getSection(threeStage, selectedStage).fields, selectedField.id)
   const selectedOutput = selectedStageDefinition.buildOutput(getSection(threeStage, selectedStage).fields)
-
-  const filteredCameraPresets = useMemo(() => {
-    const keyword = presetSearch.trim().toLowerCase()
-    if (!keyword) return cameraPresets
-    return cameraPresets.filter(preset =>
-      preset.label.toLowerCase().includes(keyword) ||
-      preset.content.toLowerCase().includes(keyword)
-    )
-  }, [cameraPresets, presetSearch])
 
   const updateSection = (stage: ThreeStageKey, section: IThreeStageSection): void => {
     onChange({
@@ -94,6 +94,12 @@ const ThreeStageBuilderScreen = ({
     await onIncrementPresetUsage(preset.id)
   }
 
+  const handleApplyPreset = ({ preset, actionId }: PromptInjectionEvent) => {
+    if (actionId === 'append' || actionId === 'replace') {
+      void applyPreset(preset, actionId)
+    }
+  }
+
   return (
     <section className="min-h-[calc(100vh-168px)] bg-[#f7f8fb] px-6 pb-10 pt-7">
       <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -115,7 +121,7 @@ const ThreeStageBuilderScreen = ({
           </button>
           <button className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800" onClick={onSave}>
             <Database className="h-4 w-4" />
-            保存
+            {previewMode ? '预览不保存' : '保存'}
           </button>
         </div>
       </div>
@@ -141,6 +147,7 @@ const ThreeStageBuilderScreen = ({
                           ? 'border-gray-950 bg-gray-50 shadow-sm'
                           : 'border-gray-100 bg-white hover:border-gray-200'
                       }`}
+                      onClick={() => selectField(stage.key, field.id)}
                       onFocus={() => selectField(stage.key, field.id)}
                     >
                       <div className="mb-2 flex items-center justify-between gap-2">
@@ -210,46 +217,22 @@ const ThreeStageBuilderScreen = ({
             </div>
 
             {selectedField.presetType === 'camera' && (
-              <div className="mt-6">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-bold text-gray-900">Prompt 库镜头选项</h3>
-                  <span className="text-xs text-gray-400">{filteredCameraPresets.length} 条</span>
-                </div>
-                <label className="relative block">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100"
-                    value={presetSearch}
-                    onChange={(event) => setPresetSearch(event.target.value)}
-                    placeholder="搜索镜头、运镜、构图..."
-                  />
-                </label>
-                <div className="mt-3 max-h-[44vh] space-y-2 overflow-y-auto pr-1">
-                  {filteredCameraPresets.length > 0 ? filteredCameraPresets.map(preset => (
-                    <div key={preset.id} className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
-                      <div className="text-sm font-bold text-gray-950">{preset.label}</div>
-                      <p className="mt-1 line-clamp-3 text-xs leading-5 text-gray-500">{preset.content}</p>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          className="flex-1 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                          onClick={() => applyPreset(preset, 'append')}
-                        >
-                          追加
-                        </button>
-                        <button
-                          className="flex-1 rounded-full bg-gray-950 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800"
-                          onClick={() => applyPreset(preset, 'replace')}
-                        >
-                          替换
-                        </button>
-                      </div>
-                    </div>
-                  )) : (
-                    <div className="rounded-2xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">
-                      没有匹配的镜头选项
-                    </div>
-                  )}
-                </div>
+              <div className="-mx-5 mt-6 border-t border-gray-100">
+                <PromptInjectionPanel
+                  title="Prompt 库镜头选项"
+                  activeType="camera"
+                  availableTypes={['camera']}
+                  presets={cameraPresets}
+                  actions={fieldPresetActions}
+                  selectedTargetLabel={selectedField.label}
+                  searchTerm={presetSearch}
+                  searchPlaceholder="搜索镜头、运镜、构图..."
+                  emptyMessage="没有匹配的镜头选项"
+                  getTypeLabel={() => '镜头'}
+                  onTypeChange={() => undefined}
+                  onSearchChange={setPresetSearch}
+                  onApplyPreset={handleApplyPreset}
+                />
               </div>
             )}
           </div>

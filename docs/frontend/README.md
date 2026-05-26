@@ -1,8 +1,4 @@
 # Frontend
 
-- [Application Shell](./app-shell.md)
-- [State Management](./state-management.md)
-- [Storage Model](./storage-model.md)
-- [Design Guidelines](./design-guidelines.md)
+- [Application](./application.md)
 - [Prompt Library](./prompt-library.md)
-- [Three-stage Builder](./three-stage-builder.md)

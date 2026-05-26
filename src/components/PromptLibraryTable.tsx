@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ChevronsUp } from 'lucide-react'
 import type { IPreset } from '@/models/Card.model'
 import { useI18n } from '@/i18n'
 
@@ -9,10 +10,11 @@ interface PromptLibraryTableProps {
   onDelete: (id: string) => void
   onToggleSelect?: (id: string) => void
   onReorder?: (orderedIds: string[]) => void
+  onMoveToTop?: (id: string) => void
   sortable?: boolean
 }
 
-const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onToggleSelect, onReorder, sortable = false }: PromptLibraryTableProps) => {
+const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onToggleSelect, onReorder, onMoveToTop, sortable = false }: PromptLibraryTableProps) => {
   const { t, cardTypeLabel } = useI18n()
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -62,32 +64,38 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
+    <div className="w-full overflow-hidden">
+      <table className="w-full table-fixed divide-y divide-gray-200">
+        <colgroup>
+          <col className="w-[64px]" />
+          <col className="w-[86px]" />
+          <col className="w-[110px]" />
+          <col className="w-[220px]" />
+          <col />
+          <col className="w-[110px]" />
+          <col className="w-[250px]" />
+        </colgroup>
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
               Select
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
               {t('sort')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
               {t('type')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
               {t('name')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
               {t('content')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              {t('category')}
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
               {t('usageTimes')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
               {t('actions')}
             </th>
           </tr>
@@ -121,7 +129,7 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                     : 'hover:bg-gray-50'
               }`}
             >
-              <td className="px-4 py-4 whitespace-nowrap">
+              <td className="px-4 py-4">
                 <input
                   type="checkbox"
                   className="h-4 w-4 rounded border-gray-300 text-black focus:ring-gray-200"
@@ -129,7 +137,7 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                   onChange={() => onToggleSelect?.(preset.id)}
                 />
               </td>
-              <td className="px-4 py-4 whitespace-nowrap">
+              <td className="px-4 py-4">
                 <span
                   className={`inline-flex h-8 w-8 items-center justify-center rounded border text-sm ${
                     canSort
@@ -141,30 +149,39 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                   <i className="fa fa-bars"></i>
                 </span>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap">
+              <td className="px-4 py-4">
                 <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeColor(preset.type)}`}>
                   {cardTypeLabel(preset.type)}
                 </span>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm font-medium text-gray-900">{preset.label}</div>
+              <td className="px-4 py-4">
+                <div className="truncate text-sm font-medium text-gray-900">{preset.label}</div>
               </td>
-              <td className="px-6 py-4">
-                <div className="text-sm text-gray-900 max-w-md line-clamp-2">
+              <td className="px-4 py-4">
+                <div className="line-clamp-2 text-sm leading-6 text-gray-900">
                   {preset.content}
                 </div>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-gray-500">{preset.category || '-'}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
+              <td className="px-4 py-4">
                 <div className="text-sm text-gray-500">
                   <i className="fa fa-eye mr-1"></i> {preset.usageCount}
                 </div>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+              <td className="px-4 py-4 text-sm font-medium">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                {canSort && (
+                  <button
+                    className="text-gray-600 hover:text-gray-950"
+                    onClick={() => onMoveToTop?.(preset.id)}
+                    disabled={presets[0]?.id === preset.id}
+                    title="移动到列表顶端"
+                  >
+                    <ChevronsUp className="mr-1 h-4 w-4" />
+                    置顶
+                  </button>
+                )}
                 <button
-                  className="text-blue-600 hover:text-blue-900 mr-3"
+                  className="text-blue-600 hover:text-blue-900"
                   onClick={() => onEdit(preset)}
                 >
                   <i className="fa fa-edit mr-1"></i>{t('edit')}
@@ -175,6 +192,7 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                 >
                   <i className="fa fa-trash mr-1"></i>{t('delete')}
                 </button>
+                </div>
               </td>
             </tr>
           ))}

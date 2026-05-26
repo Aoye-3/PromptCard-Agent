@@ -17,13 +17,15 @@ export const StoryboardBuilderScreen = ({
   storyboard,
   onBack,
   onSave,
-  onChange
+  onChange,
+  previewMode = false
 }: {
   activeProject: IPromptProject
   storyboard: IStoryboardProject
   onBack: () => void
   onSave: () => void
   onChange: (storyboard: IStoryboardProject) => void
+  previewMode?: boolean
 }) => {
   const sequences = storyboard.sequences
   const activeSequence = sequences.find(sequence => sequence.id === storyboard.selectedSequenceId) || sequences[0]
@@ -139,7 +141,7 @@ export const StoryboardBuilderScreen = ({
           </button>
           <button className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800" onClick={onSave}>
             <Database className="h-4 w-4" />
-            保存
+            {previewMode ? '预览不保存' : '保存'}
           </button>
         </div>
       </div>
@@ -292,12 +294,14 @@ export const StoryboardBuilderScreen = ({
           </div>
         </div>
 
+        {!previewMode && (
         <AgentCollaborationPanel
           title="Storyboard Agent"
           mode="storyboard-workspace"
           workspaceContext={workspaceContext}
           onApplyWorkspaceProposal={handleApplyStoryboardAgentProposal}
         />
+        )}
       </div>
     </section>
   )

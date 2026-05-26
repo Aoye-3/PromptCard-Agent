@@ -1,17 +1,5 @@
 import type { ICard } from '@/models/Card.model'
-
-export const PROMPT_CARD_ORDER: ICard['type'][] = [
-  'timing',
-  'subject',
-  'action',
-  'scene',
-  'style',
-  'camera',
-  'lighting',
-  'audio',
-  'constraint',
-  'custom'
-]
+import { PROMPT_CARD_LABELS, PROMPT_CARD_ORDER, PROMPT_PAGE_SEPARATOR } from './promptParser'
 
 const shortPhraseStopWords = new Set([
   'and',
@@ -52,6 +40,14 @@ export interface DuplicatePhraseResult {
 export interface PromptPageLike {
   cards: ICard[]
 }
+
+const PROMPT_LABEL_TYPES = Object.entries(PROMPT_CARD_LABELS).reduce<Record<string, ICard['type']>>(
+  (acc, [type, label]) => {
+    acc[label] = type as ICard['type']
+    return acc
+  },
+  {}
+)
 
 export const getPromptSegments = (cards: ICard[]): PromptSegment[] => {
   return [...cards]
@@ -143,11 +139,18 @@ export const parsePromptToCardUpdates = (
   pages: PromptPageLike[],
   prompt: string
 ): Record<string, Partial<ICard>> => {
-  const lines = prompt.split(/\r?\n/)
   const updates: Record<string, Partial<ICard>> = {}
+  const pageBlocks = splitPromptIntoPageBlocks(prompt, pages.length)
 
   pages.forEach((page, pageIndex) => {
-    const line = lines[pageIndex] ?? ''
+    const block = pageBlocks[pageIndex] ?? ''
+    const labeledUpdates = parseLabeledPageBlock(page, block)
+    if (labeledUpdates) {
+      Object.assign(updates, labeledUpdates)
+      return
+    }
+
+    const line = block.split(/\r?\n/).find(item => item.trim()) ?? ''
     const timingCard = page.cards.find(card => card.type === 'timing')
     const timestampMatch = line.match(/^\s*\[([^\]]*)\]\s*/)
     const body = timestampMatch ? line.slice(timestampMatch[0].length).trim() : line.trim()
@@ -172,6 +175,90 @@ export const parsePromptToCardUpdates = (
           : parts[index] || ''
       }
     })
+  })
+
+  return updates
+}
+
+const splitPromptIntoPageBlocks = (prompt: string, pageCount: number): string[] => {
+  const lines = prompt.split(/\r?\n/)
+  const hasPageSeparators = lines.some(line => line.trim() === PROMPT_PAGE_SEPARATOR)
+
+  if (!hasPageSeparators) {
+    const nonEmptyLines = lines.filter(line => line.trim())
+    const isLegacyLinePerPage = pageCount > 1 && nonEmptyLines.every(line => /^\s*\[[^\]]*\]/.test(line))
+    return isLegacyLinePerPage ? nonEmptyLines : [prompt]
+  }
+
+  const blocks: string[] = ['']
+  lines.forEach(line => {
+    if (line.trim() === PROMPT_PAGE_SEPARATOR) {
+      blocks.push('')
+      return
+    }
+    blocks[blocks.length - 1] = blocks[blocks.length - 1]
+      ? `${blocks[blocks.length - 1]}\n${line}`
+      : line
+  })
+
+  return blocks
+}
+
+const parseLabeledPageBlock = (
+  page: PromptPageLike,
+  block: string
+): Record<string, Partial<ICard>> | null => {
+  const lines = block.split(/\r?\n/).map(line => line.trim()).filter(Boolean)
+  const labeledLines = lines
+    .map(line => line.match(/^([^:：]+)\s*[:：]\s*(.*)$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match && PROMPT_LABEL_TYPES[match[1].trim()]))
+
+  if (labeledLines.length === 0) return null
+
+  const cardsByType = getPromptSegments(page.cards).reduce<Record<ICard['type'], ICard[]>>((acc, segment) => {
+    acc[segment.card.type] = [...(acc[segment.card.type] || []), segment.card]
+    return acc
+  }, {
+    timing: [],
+    subject: [],
+    action: [],
+    scene: [],
+    style: [],
+    camera: [],
+    lighting: [],
+    audio: [],
+    constraint: [],
+    custom: []
+  })
+
+  const typeOffsets = PROMPT_CARD_ORDER.reduce<Record<ICard['type'], number>>((acc, type) => {
+    acc[type] = 0
+    return acc
+  }, {
+    timing: 0,
+    subject: 0,
+    action: 0,
+    scene: 0,
+    style: 0,
+    camera: 0,
+    lighting: 0,
+    audio: 0,
+    constraint: 0,
+    custom: 0
+  })
+
+  const updates = page.cards.reduce<Record<string, Partial<ICard>>>((acc, card) => {
+    acc[card.id] = { content: '' }
+    return acc
+  }, {})
+
+  labeledLines.forEach(match => {
+    const type = PROMPT_LABEL_TYPES[match[1].trim()]
+    const card = cardsByType[type][typeOffsets[type]]
+    if (!card) return
+
+    updates[card.id] = { content: match[2].trim() }
+    typeOffsets[type] += 1
   })
 
   return updates

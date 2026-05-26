@@ -11,6 +11,8 @@ export const AppShell = ({
   saveStatusText,
   activeProject,
   onCreateProject,
+  onOpenTemplateLibrary,
+  onShowProjectTrash,
   showProjectUtilities,
   children
 }: {
@@ -21,6 +23,8 @@ export const AppShell = ({
   saveStatusText: string
   activeProject: IPromptProject | null
   onCreateProject: () => void
+  onOpenTemplateLibrary: () => void
+  onShowProjectTrash: () => void
   showProjectUtilities: boolean
   children: ReactNode
 }) => (
@@ -67,11 +71,17 @@ export const AppShell = ({
 
     {showProjectUtilities && (
       <div className="fixed bottom-[92px] left-6 z-50 flex gap-3">
-        <button className="rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200">
+        <button
+          className="rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200"
+          onClick={onOpenTemplateLibrary}
+        >
           <Grid2X2 className="h-4 w-4" />
           模板库
         </button>
-        <button className="rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200">
+        <button
+          className="rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200"
+          onClick={onShowProjectTrash}
+        >
           <Trash2 className="h-4 w-4" />
           回收站
         </button>
@@ -88,7 +98,6 @@ export const AppShell = ({
     </nav>
   </div>
 )
-
 
 const IconButton = ({ label, onClick, children }: { label: string; onClick?: () => void; children: ReactNode }) => (
   <button className="rounded-full p-2 text-gray-950 transition hover:bg-gray-100" title={label} aria-label={label} onClick={onClick}>

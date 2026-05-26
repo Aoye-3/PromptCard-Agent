@@ -1,130 +1,86 @@
-# Testing and Quality
+# Testing Strategy
 
 ## Current Test Areas
 
-The current frontend test suite covers several core utilities and stores:
+Vitest covers:
 
-- prompt parsing
-- prompt composer behavior
-- storage behavior
-- project normalization and project merge behavior
-- storyboard sequence/row operations
-- three-stage output definitions
-- Vite dev endpoint payload validation
-- preset ordering
-- card initial state
-- card persistence
-- example store behavior
-- Agent runtime proposal parsing
-- Agent workspace context building
-- Agent store `sendMessage()` proposal return behavior
+- prompt parsing and composition
+- storage facade behavior
+- project normalization and merge behavior
+- storyboard operations
+- three-stage field definitions
+- builder template registry contracts
+- interactive temporary builder previews
+- Prompt Library refresh, ordering, table actions, and edit form safety
+- shared prompt injection filtering and rendering
+- Agent runtime service parsing and Agent store proposal behavior
 - local startup script parsing and health-check branching
 
-Tests are run through Vitest.
+Python unittest covers the local storage service store.
 
-Vitest excludes `tests/e2e/**` so Playwright specs are not collected by the unit-test runner.
+## Required Verification
 
-## Recommended Verification Matrix
-
-Before merging implementation work, run:
+Before merging to `main`, run:
 
 ```powershell
-npm.cmd run build
-npm.cmd run test -- --run
 npm.cmd run lint
+npm.cmd test -- --run
+npm.cmd run build
+python -m unittest promptcard_storage.tests.test_store
+git diff --check
 ```
 
-For Agent Runtime work, also run:
+For Agent Runtime changes:
 
 ```powershell
 npm.cmd run agent:check
 ```
 
-For startup script work, run:
-
-```powershell
-npm.cmd run test -- scripts/start-dev-with-agent.test.ts --run
-```
-
-For browser-facing changes, use a manual or Playwright smoke test against:
-
-```text
-http://127.0.0.1:3000/
-```
-
-The Playwright smoke suite runs through:
-
-```powershell
-npm.cmd run test:e2e
-```
-
-In restricted sandbox environments, Chromium launch may require elevated execution permissions.
+For browser-facing changes, smoke test `http://127.0.0.1:3000/`. In restricted sandbox environments, Chromium launch may require elevated execution permissions.
 
 ## Acceptance Scenarios
 
 ### Project Flow
 
-- Create a card project.
-- Add and edit cards.
-- Save and reopen the project.
-- Create a storyboard project.
-- Add/edit sequence and shot fields.
-- Create a three-stage project.
-- Edit character, storyboard, and video-prompt structured fields.
-- Confirm example text appears as placeholder guidance and empty fields do not appear in copied output.
-- Confirm camera-bound three-stage fields can append and replace values from `camera` Prompt library presets.
-- Save and reopen the three-stage project.
-- Confirm project list ordering follows recent activity.
+- Create card, storyboard, and three-stage projects.
+- Open the template library and confirm it keeps the shell visible.
+- Confirm template previews are interactive temporary builder previews.
+- Edit a template preview and create a project from it; confirm the project is seeded from that preview snapshot.
+- Confirm leaving the template library does not write prompt history.
+- Save and reopen projects.
 
 ### Prompt Library Flow
 
 - Load initial presets.
-- Add a preset.
-- Update a preset.
-- Delete a preset.
-- Reorder presets.
-- Confirm usage count increments when a preset is applied.
-- Confirm dev file persistence works when the Vite endpoint is available.
+- Search by label and content.
+- Add, edit, delete, Trash, restore, and permanently delete presets.
+- Confirm existing Prompt edit opens read-only, then unlocks after clicking modify.
+- Copy Prompt content from the edit dialog without saving.
+- Reorder within a concrete category.
+- Move an item to the top of the current category.
+- Confirm search, all-category view, and Trash do not expose category reorder controls.
+- Confirm UI updates immediately after create/update/reorder without a page refresh.
 
-### Agent Dashboard Flow
+### Agent Flow
 
 - Runtime status moves from unknown to connected when Agent Runtime is available.
-- Auth bootstrap completes without showing a second login form.
-- Models, skills, tools, and Agent summaries load.
-- A DeepSeek-backed prompt returns an assistant response.
+- A PromptCard runtime message returns assistant text.
 - Prompt library proposal JSON is parsed into a pending proposal.
-- Approving a proposal updates the Prompt library through preset store methods.
-- Rejecting a proposal does not mutate the Prompt library.
-
-### Agent Collaboration Flow
-
-- Open or create a card project.
-- Confirm the right rail shows one two-page panel with `结构化卡片输入` and `Agent 协作`.
-- In `结构化卡片输入`, preset selection and card add/replace behavior still works.
-- In `Agent 协作`, send a card-editing request such as `把主体卡片改得更具体`.
-- When the Agent returns `workspace_card_update` or `workspace_card_create`, the card workspace updates immediately.
-- When the Agent needs clarification, it should reply conversationally without mutating cards.
-- When runtime is disconnected, the chat panel should show a readable connection error and leave card editing usable.
-
-### Development Server Shutdown
-
-- Open `Me`.
-- Open settings.
-- Click **Close development server**.
-- Confirm the browser shows the closed-server message.
-- Confirm the Vite dev server stops listening on port 3000.
+- Approving a proposal updates presets through preset store methods.
+- Rejecting a proposal leaves presets unchanged.
+- Card workspace proposals can auto-apply in the card collaboration panel.
 
 ## Quality Gates
 
 - Do not commit secrets.
-- Do not commit generated virtual environments, uv caches, or local runtime databases.
+- Do not commit generated virtual environments, uv caches, local runtime databases, or unrelated local data churn.
 - Keep docs aligned with current code behavior.
-- Label incomplete Agent/DeerFlow capabilities as roadmap instead of current behavior.
-- For storage changes, verify both browser storage fallback and dev file endpoint behavior.
-- For Agent collaboration changes, verify that Prompt library writes still require approval while card workspace edits can auto-apply.
+- Label incomplete Agent/DeerFlow capabilities as roadmap or not yet implemented.
+- For storage changes, verify storage service behavior and browser-cache compatibility.
+- For Prompt Library changes, verify in-memory store refresh behavior.
 
-## Roadmap / Not Yet Implemented
+## Roadmap
 
-- End-to-end browser tests are lightweight smoke coverage. Broader interaction coverage should be added around high-risk browser workflows.
-- Agent live-model tests depend on a local DeepSeek key and should not run in generic CI without secret configuration.
+- End-to-end browser tests are still lightweight smoke coverage.
+- Live model tests depend on a local key and should not run in generic CI without secret configuration.
 - Durable Agent proposal audit tests are not applicable until such storage exists.

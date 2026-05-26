@@ -10,7 +10,7 @@ This is the single entry point for the maintained project documentation. Histori
 - [API](./api/README.md)
 - [Frontend](./frontend/README.md)
 - [Backend](./backend/README.md)
-- [Database and Storage](./database/README.md)
+- [Storage](./database/README.md)
 - [Operations](./operations/README.md)
 - [Quality](./quality/README.md)
 - [Maintenance](./maintenance/README.md)

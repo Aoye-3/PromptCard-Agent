@@ -14,7 +14,37 @@ Prompt Library presets use `IPreset`. UI and Agent approval flows should call pr
 
 The local storage service owns `data/prompt-library-presets.json` and `data/prompt-library-trash.json`. Empty preset storage is seeded by the service from the bundled preset JSON. The frontend no longer seeds durable presets.
 
-Frontend project and preset storage calls use `/storage-api/*`, proxied to the storage service. The older Vite dev JSON endpoints remain compatibility helpers, but they are no longer the primary app persistence path.
+Frontend project and preset storage calls use `/storage-api/*`, proxied to the storage service. The older Vite dev JSON endpoints remain compatibility helpers, but they are no longer the primary app persistence path and do not drive realtime frontend refresh.
+
+Prompt injection is a reusable frontend flow:
+
+```text
+IPreset -> prompt injection module -> builder adapter -> target state
+```
+
+The prompt injection module filters and presents presets. Builder adapters decide how an action mutates state, such as appending to a card, replacing a focused three-stage field, or creating a new card. This keeps Prompt Library data reusable across card, three-stage, storyboard, and future builder modes.
+
+## Builder Template Data
+
+Builder templates describe parent prompt-building mode modules. They are maintained separately from Prompt Library presets and separately from concrete editor stores.
+
+Current flow:
+
+```text
+BuilderTemplate -> template library UI -> project creation adapter -> IPromptProject -> builder screen
+```
+
+Readonly preview flow:
+
+```text
+BuilderTemplate -> readonly preview renderer
+```
+
+The template registry may declare child modules for a mode, such as card fields, field-level prompt injection, storyboard shot rows, or Agent collaboration adapters. Those declarations are descriptive and serializable; they must not import React screens, Zustand stores, or storage clients.
+
+The project creation adapter in `src/App.tsx` is the bridge from template id to storage factory. This keeps the template library extensible without coupling it to the implementation details of card, storyboard, or three-stage builders.
+
+The readonly preview renderer is not part of the project state flow. It must not create `IPromptProject` records, mutate presets, call autosave, or mount real builder screens.
 
 ## Agent Collaboration Data
 

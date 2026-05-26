@@ -2,7 +2,7 @@
 
 ## Overview
 
-PromptCard-Manager uses Zustand for in-memory application state and `localforage` for browser persistence. In development, Vite middleware provides optional file-backed persistence for projects and Prompt library presets.
+PromptCard-Manager uses Zustand for in-memory application state. The local storage service is the durable source of truth for projects and Prompt Library presets, reached from the frontend through `/storage-api/*`. `localforage` is still used for local UI cache data such as history, settings, cards, and the one-time browser-cache migration marker.
 
 ## Zustand Stores
 
@@ -18,6 +18,8 @@ PromptCard-Manager uses Zustand for in-memory application state and `localforage
 - selected-card prompt assembly
 
 Cards use the `ICard` schema and are grouped into pages from `card-initial-state`.
+
+The complete card Prompt text is not stored as separate state. `src/utils/promptParser.ts` assembles it from card fields with fixed labels (`时长`, `主体`, `动作`, `场景`, `风格`, `镜头`, `灯光`, `音频`, `约束`, `自定义`) and standalone `//` page dividers. `src/utils/promptComposer.ts` parses edits in that structured text back into the corresponding card `content`, so editing a labeled Prompt segment follows the same data path as editing the card itself.
 
 ### Preset Store
 
@@ -49,13 +51,16 @@ It delegates HTTP calls to `agent-runtime-service`.
 
 ## Storage Model
 
-`src/utils/storage.ts` is the persistence facade. It configures `localforage` using the `PromptCard` database name and exposes logical groups such as projects, presets, workspace, history, and export behavior.
+`src/utils/storage.ts` is the persistence facade. It configures `localforage` using the `PromptCard` database name for local UI cache data and exposes logical groups such as projects, presets, workspace, history, and export behavior.
 
-Browser storage is the primary persistence layer. Development file storage is opportunistic:
+Project and Prompt Library persistence goes through the storage service. Development file storage is legacy compatibility only:
 
 - Presets use `/__promptcard/presets`.
 - Projects use `/__promptcard/projects`.
-- If dev file endpoints are unavailable, storage falls back to browser persistence.
+
+These development endpoints are not the live app source of truth and should not be used to reason about realtime UI refresh.
+
+Prompt history is local UI cache, not durable project storage. It is stored in `localforage` under the `history` key, deduplicated by prompt content, and capped at 50 items. The Projects screen exposes the history list only when cached history exists; users can restore a snapshot, delete one item, or clear all cached history.
 
 ## Core Schemas
 
@@ -155,7 +160,7 @@ In the card builder collaboration panel, card workspace proposals are applied im
 
 ## Merge and Normalization Behavior
 
-Project loading merges browser projects with dev file projects by ID. If both sources contain the same ID, the record with the newer `updatedAt` wins. Loaded projects are sorted by `lastOpenedAt` and then `updatedAt`.
+Project loading reads from the storage service after one-time browser-cache migration. Loaded projects are sorted by `lastOpenedAt` and then `updatedAt`.
 
 Storyboard loading normalizes missing or legacy fields:
 

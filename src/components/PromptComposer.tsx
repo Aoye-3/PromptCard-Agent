@@ -5,6 +5,7 @@ import {
   countPromptSegments,
   getPromptSegments
 } from '@/utils/promptComposer'
+import { PROMPT_PAGE_SEPARATOR } from '@/utils/promptParser'
 import { useI18n } from '@/i18n'
 
 interface PromptComposerProps {
@@ -41,13 +42,24 @@ const renderPromptWithPageTextColors = (prompt: string) => {
   }
 
   const lines = prompt.split('\n')
+  let pageIndex = 0
 
-  return lines.map((line, index) => (
-    <React.Fragment key={`${index}-${line}`}>
-      <span className={getPageTextClass(index)}>{line || ' '}</span>
-      {index < lines.length - 1 && '\n'}
-    </React.Fragment>
-  ))
+  return lines.map((line, index) => {
+    const isSeparator = line.trim() === PROMPT_PAGE_SEPARATOR
+    const className = isSeparator ? 'text-stone-gray' : getPageTextClass(pageIndex)
+    const renderedLine = (
+      <React.Fragment key={`${index}-${line}`}>
+        <span className={className}>{line || ' '}</span>
+        {index < lines.length - 1 && '\n'}
+      </React.Fragment>
+    )
+
+    if (isSeparator) {
+      pageIndex += 1
+    }
+
+    return renderedLine
+  })
 }
 
 const PromptComposer: React.FC<PromptComposerProps> = ({

@@ -37,7 +37,8 @@ export const CardBuilderScreen = ({
   onCreativePresetSelect,
   onApplyAgentProposal,
   activeCardId,
-  t
+  t,
+  previewMode = false
 }: {
   activeProject: IPromptProject
   pages: IPromptProject['pages']
@@ -65,6 +66,7 @@ export const CardBuilderScreen = ({
   onApplyAgentProposal: (proposal: AgentWorkspaceProposal) => void
   activeCardId: string | null
   t: ReturnType<typeof useI18n>['t']
+  previewMode?: boolean
 }) => {
   const [rightPanelMode, setRightPanelMode] = useState<'structured' | 'agent'>('structured')
   const workspaceContext = buildCardWorkspaceContext({
@@ -93,7 +95,7 @@ export const CardBuilderScreen = ({
         </button>
         <button className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800" onClick={onSave}>
           <Database className="h-4 w-4" />
-          {t('save')}
+          {previewMode ? '预览不保存' : t('save')}
         </button>
       </div>
     </div>
@@ -169,7 +171,7 @@ export const CardBuilderScreen = ({
       </div>
       <aside className="rounded-[24px] border border-gray-100 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]">
         <div className="border-b border-gray-100 p-4">
-          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-gray-50 p-1">
+          <div className={`grid gap-2 rounded-2xl bg-gray-50 p-1 ${previewMode ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <button
               type="button"
               className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black transition ${
@@ -182,6 +184,7 @@ export const CardBuilderScreen = ({
               <Grid2X2 className="h-4 w-4" />
               结构化卡片输入
             </button>
+            {!previewMode && (
             <button
               type="button"
               className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black transition ${
@@ -194,9 +197,10 @@ export const CardBuilderScreen = ({
               <Bot className="h-4 w-4" />
               Agent 协作
             </button>
+            )}
           </div>
         </div>
-        {rightPanelMode === 'agent' && (
+        {!previewMode && rightPanelMode === 'agent' && (
         <AgentCollaborationPanel
           title="Agent 协作"
           mode="card-workspace"
@@ -207,10 +211,6 @@ export const CardBuilderScreen = ({
         )}
         {rightPanelMode === 'structured' && (
         <div>
-        <div className="border-b border-gray-100 p-5">
-          <h2 className="text-lg font-bold">结构化卡片输入</h2>
-          <p className="mt-1 text-sm text-gray-500">先使用结构化卡片输入创建内容，再切换到 Agent 协作继续编辑。</p>
-        </div>
         <CreativeMode
           onPresetSelect={onCreativePresetSelect}
           initialType={activeCardId ? pages[currentPage]?.cards.find(card => card.id === activeCardId)?.type : 'subject'}

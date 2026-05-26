@@ -1,41 +1,54 @@
 import type { ICard } from '@/models/Card.model'
 
-export const assemblePrompt = (pages: { cards: ICard[] }[], separator: string = ', '): string => {
+export const PROMPT_PAGE_SEPARATOR = '//'
+
+export const PROMPT_CARD_ORDER: ICard['type'][] = [
+  'timing',
+  'subject',
+  'action',
+  'scene',
+  'style',
+  'camera',
+  'lighting',
+  'audio',
+  'constraint',
+  'custom'
+]
+
+export const PROMPT_CARD_LABELS: Record<ICard['type'], string> = {
+  timing: '时长',
+  subject: '主体',
+  action: '动作',
+  scene: '场景',
+  style: '风格',
+  camera: '镜头',
+  lighting: '灯光',
+  audio: '音频',
+  constraint: '约束',
+  custom: '自定义'
+}
+
+export const assemblePrompt = (pages: { cards: ICard[] }[]): string => {
   if (!pages.length) return ''
 
   const pageContents = pages.map((page) => {
-    const timingCard = page.cards.find(card => card.type === 'timing')
-    const timingContent = timingCard?.content.trim() ?? ''
-    const timePrefix = timingContent ? `[${timingContent}] ` : ''
-
-    const order: ICard['type'][] = [
-      'subject',
-      'action',
-      'scene',
-      'style',
-      'camera',
-      'lighting',
-      'audio',
-      'constraint',
-      'custom'
-    ]
     const sortedCards = [...page.cards]
-      .filter(card => card.type !== 'timing')
       .sort((a, b) => {
-        const indexA = order.indexOf(a.type)
-        const indexB = order.indexOf(b.type)
+        const indexA = PROMPT_CARD_ORDER.indexOf(a.type)
+        const indexB = PROMPT_CARD_ORDER.indexOf(b.type)
         return indexA - indexB
       })
 
-    const content = sortedCards
-      .map(card => card.content.trim())
+    return sortedCards
+      .map(card => {
+        const content = card.content.trim()
+        return content ? `${PROMPT_CARD_LABELS[card.type]}：${content}` : ''
+      })
       .filter(content => content.length > 0)
-      .join(separator)
-
-    return `${timePrefix}${content}`.trim()
+      .join('\n')
   })
 
-  return pageContents.filter(content => content.length > 0).join('\n')
+  return pageContents.filter(content => content.length > 0).join(`\n${PROMPT_PAGE_SEPARATOR}\n`)
 }
 
 export const parsePromptToCards = (prompt: string): Partial<ICard>[] => {

@@ -24,6 +24,10 @@ export interface IPersistedWorkspace {
 const MAX_PROMPT_HISTORY = 50
 const BROWSER_CACHE_MIGRATION_KEY = 'storageServiceBrowserCacheMigrated'
 
+function createLocalId(prefix: string): string {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 export {
   createStoryboardProject,
   createStoryboardRow,
@@ -224,10 +228,10 @@ export const storage = {
       const preset = await this.getById(id)
       if (preset) await storageServiceClient.presets.incrementUsage(id, preset.revision || 1)
     },
-    async update(id: string, updates: Partial<IPreset>): Promise<void> {
+    async update(id: string, updates: Partial<IPreset>): Promise<IPreset | undefined> {
       const preset = await this.getById(id)
-      if (!preset) return
-      await storageServiceClient.presets.update(id, updates.revision || preset.revision || 1, {
+      if (!preset) return undefined
+      return storageServiceClient.presets.update(id, updates.revision || preset.revision || 1, {
         ...updates,
         updatedAt: Date.now()
       })
@@ -278,7 +282,7 @@ export const storage = {
       const all = await this.getAll()
       const newHistory: IPromptHistory = {
         ...history,
-        id: Date.now().toString(),
+        id: createLocalId('history'),
         createdAt: Date.now()
       }
       await localforage.setItem('history', [newHistory, ...all])
@@ -298,7 +302,7 @@ export const storage = {
       const withoutDuplicate = all.filter(item => item.content.trim() !== content)
       const now = Date.now()
       const newHistory: IPromptHistory = {
-        id: now.toString(),
+        id: createLocalId('history'),
         content,
         cards: snapshot.cards,
         pages: snapshot.pages,

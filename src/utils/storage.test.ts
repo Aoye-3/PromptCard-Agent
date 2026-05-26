@@ -148,6 +148,21 @@ describe('storage service facade', () => {
     expect(history).toHaveLength(2)
     expect(history[0].content).toBe('Another prompt')
   })
+
+  test('deletes and clears prompt history from browser UI cache', async () => {
+    const pages = [{ id: 'page-1', cards: [] }]
+    const first = await storage.history.addSnapshot({ content: 'First prompt', pages, cards: [] })
+    await storage.history.addSnapshot({ content: 'Second prompt', pages, cards: [] })
+
+    expect(first).not.toBeNull()
+    if (!first) throw new Error('Expected first history snapshot')
+
+    await storage.history.delete(first.id)
+    expect((await storage.history.getAll()).map(item => item.content)).toEqual(['Second prompt'])
+
+    await storage.history.clear()
+    expect(await storage.history.getAll()).toEqual([])
+  })
 })
 
 function jsonResponse(payload: unknown, status = 200): Response {

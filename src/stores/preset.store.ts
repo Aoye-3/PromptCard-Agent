@@ -54,13 +54,14 @@ export const usePresetStore = create<PresetState>((set, get) => ({
       usageCount: 0,
       meta: preset.meta || {}
     }
-    await storage.presets.create(newPreset)
-    await get().refresh()
+    const created = await storage.presets.create(newPreset)
+    set({ presets: [...get().presets.filter(p => p.id !== created.id), created] })
   },
 
   updatePreset: async (id, updates) => {
-    await storage.presets.update(id, updates)
-    await get().refresh()
+    const updated = await storage.presets.update(id, updates)
+    if (!updated) return
+    set({ presets: get().presets.map(preset => preset.id === id ? updated : preset) })
   },
 
   deletePreset: async (id) => {
@@ -84,9 +85,16 @@ export const usePresetStore = create<PresetState>((set, get) => ({
   },
 
   reorderPresets: async (activeType, orderedIds) => {
+    const previous = get().presets
     const ordered = reorderPresetsByCategory(get().presets, activeType, orderedIds)
-    const saved = await storage.presets.reorder(ordered.map(preset => preset.id))
-    set({ presets: saved })
+    set({ presets: ordered })
+    try {
+      const saved = await storage.presets.reorder(ordered.map(preset => preset.id))
+      set({ presets: saved })
+    } catch (error) {
+      set({ presets: previous })
+      throw error
+    }
   },
 
   incrementUsage: async (id: string) => {

@@ -63,13 +63,18 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
   }, {} as Record<string, number>)
 
   const handleSavePreset = async (presetData: Omit<IPreset, 'id' | 'usageCount' | 'meta'>) => {
-    if (editingPreset) {
-      await updatePreset(editingPreset.id, presetData)
-    } else {
-      await addPreset(presetData)
+    try {
+      if (editingPreset) {
+        await updatePreset(editingPreset.id, presetData)
+      } else {
+        await addPreset(presetData)
+      }
+      setIsFormOpen(false)
+      setEditingPreset(null)
+    } catch (error) {
+      console.error('Failed to save preset:', error)
+      alert('Prompt 保存失败，请重试。')
     }
-    setIsFormOpen(false)
-    setEditingPreset(null)
   }
 
   const handleEditPreset = (preset: IPreset) => {
@@ -86,7 +91,21 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
 
   const handleReorderPresets = async (orderedIds: string[]) => {
     if (activeCategory === 'all' || isSearchActive) return
-    await reorderPresets(activeCategory as CardType, orderedIds)
+    try {
+      await reorderPresets(activeCategory as CardType, orderedIds)
+    } catch (error) {
+      console.error('Failed to reorder presets:', error)
+      alert('Prompt 排序保存失败，列表已恢复。请刷新后重试。')
+    }
+  }
+
+  const handleMovePresetToTop = (id: string) => {
+    if (!canReorder || filteredPresets[0]?.id === id) return
+    const orderedIds = [
+      id,
+      ...filteredPresets.filter(preset => preset.id !== id).map(preset => preset.id)
+    ]
+    void handleReorderPresets(orderedIds)
   }
 
   const toggleSelected = (id: string) => {
@@ -129,16 +148,6 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
             <p className="mt-1 text-sm text-gray-500">{t('managePresetPrompts')}</p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <label className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-              <input
-                type="text"
-                placeholder={t('searchPrompt')}
-                className="w-full rounded-2xl border border-gray-200 bg-gray-50 py-2 pl-10 pr-4 text-sm focus:border-gray-300 focus:ring-2 focus:ring-gray-100 sm:w-72"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </label>
             <button
               className="rounded-2xl bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800"
               onClick={() => setIsFormOpen(true)}
@@ -161,11 +170,23 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-4 py-8 pb-28 sm:px-6 lg:px-8">
+      <div className="mx-auto w-full max-w-[1600px] px-4 py-8 pb-28 sm:px-6 lg:px-8">
         <div className="mb-8 rounded-[24px] border border-gray-100 bg-white p-5 shadow-[0_18px_45px_rgba(15,23,42,0.04)]">
-          <div className="mb-4 flex items-center gap-3">
-            <span className="fa fa-filter text-gray-500 text-lg"></span>
-            <h3 className="text-base font-semibold text-gray-900">{t('categoryFilter')}</h3>
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="fa fa-filter text-gray-500 text-lg"></span>
+              <h3 className="text-base font-semibold text-gray-900">{t('categoryFilter')}</h3>
+            </div>
+            <label className="relative block lg:w-[420px]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder={t('searchPrompt')}
+                className="w-full rounded-2xl border border-gray-200 bg-gray-50 py-2.5 pl-10 pr-4 text-sm focus:border-gray-300 focus:ring-2 focus:ring-gray-100"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </label>
           </div>
           <div className="flex flex-wrap gap-2">
             <button
@@ -243,6 +264,7 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
             onDelete={handleDeletePreset}
             onToggleSelect={showTrash ? toggleTrashSelected : toggleSelected}
             onReorder={handleReorderPresets}
+            onMoveToTop={handleMovePresetToTop}
             sortable={!showTrash && canReorder}
           />
         </div>

@@ -79,4 +79,67 @@ describe('promptComposer utilities', () => {
     expect(updates['subject-2'].content).toBe('rainy street')
     expect(updates['action-2'].content).toBe('camera follows')
   })
+
+  it('parses fixed card labels back into matching card content', () => {
+    const page = {
+      cards: [
+        createCard('time', 'timing', ''),
+        createCard('subject', 'subject', ''),
+        createCard('action', 'action', '')
+      ]
+    }
+
+    const updates = parsePromptToCardUpdates(
+      [page],
+      ['时长：0-3S', '主体：young hero', '动作：running fast'].join('\n')
+    )
+
+    expect(updates.time.content).toBe('0-3S')
+    expect(updates.subject.content).toBe('young hero')
+    expect(updates.action.content).toBe('running fast')
+  })
+
+  it('uses standalone slash dividers to map prompt blocks to pages', () => {
+    const pageOne = {
+      cards: [
+        createCard('time-1', 'timing', ''),
+        createCard('subject-1', 'subject', '')
+      ]
+    }
+    const pageTwo = {
+      cards: [
+        createCard('time-2', 'timing', ''),
+        createCard('subject-2', 'subject', '')
+      ]
+    }
+
+    const updates = parsePromptToCardUpdates(
+      [pageOne, pageTwo],
+      ['时长：0-3S', '主体：young hero', '//', '时长：3-6S', '主体：rainy street'].join('\n')
+    )
+
+    expect(updates['time-1'].content).toBe('0-3S')
+    expect(updates['subject-1'].content).toBe('young hero')
+    expect(updates['time-2'].content).toBe('3-6S')
+    expect(updates['subject-2'].content).toBe('rainy street')
+  })
+
+  it('clears existing card content when a labeled prompt segment is removed', () => {
+    const page = {
+      cards: [
+        createCard('time', 'timing', '0-3S'),
+        createCard('subject', 'subject', 'young hero'),
+        createCard('action', 'action', 'running fast')
+      ]
+    }
+
+    const updates = parsePromptToCardUpdates(
+      [page],
+      ['时长：0-3S', '动作：running fast'].join('\n')
+    )
+
+    expect(updates.time.content).toBe('0-3S')
+    expect(updates.subject.content).toBe('')
+    expect(updates.action.content).toBe('running fast')
+  })
 })

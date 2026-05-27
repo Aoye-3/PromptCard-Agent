@@ -7,10 +7,10 @@ echo.
 
 if not exist node_modules (
     echo Installing frontend dependencies...
-    npm install
+    call npm.cmd install
     if %errorlevel% neq 0 (
         echo Dependency installation failed. Check network or npm configuration.
-        pause
+        if not "%PROMPTCARD_START_SKIP_PAUSE%"=="1" pause
         exit /b 1
     )
     echo Dependencies installed.
@@ -26,6 +26,8 @@ echo Background storage and Agent windows can be closed separately if needed.
 echo ======================================
 echo.
 
-npm run dev:with-agent
+call npm.cmd run dev:with-agent
+set START_EXIT_CODE=%errorlevel%
 
-pause
+if not "%PROMPTCARD_START_SKIP_PAUSE%"=="1" pause
+exit /b %START_EXIT_CODE%

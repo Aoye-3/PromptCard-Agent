@@ -21,6 +21,7 @@ Command purposes:
 - `storage:dev`: start only the local storage service on `127.0.0.1:8002`.
 - `agent:dev`: start only the Agent Runtime.
 - `agent:check`: validate Agent Runtime config loading.
+- `startup:test`: start from `start.bat` and verify the full local startup flow.
 - `build`: run TypeScript and production Vite build.
 - `test -- --run`: run Vitest once.
 
@@ -61,6 +62,44 @@ If storage or Agent Runtime is already healthy, the script reuses it instead of 
 The `*.err.log` files contain process stderr, not only fatal errors. Uvicorn and Python warnings may appear there during a healthy startup, so the health endpoints above are the source of truth for local startup success.
 
 The frontend uses `vite --strictPort`; port 3000 conflicts still fail loudly when the existing listener is not the healthy local frontend.
+
+### Blank Browser After Startup
+
+A blank browser at `http://localhost:3000/` with successful health checks usually means the HTML shell loaded but the React bundle did not render. Inspect the current Vite transform errors:
+
+```powershell
+Get-Content logs\dev-server.err.log -Tail 120
+```
+
+Recent root cause seen locally: `src/components/ThreeStageBuilder.tsx` had an unterminated string constant, so Vite served the page shell but could not transform the application module. Confirm the source is currently valid with:
+
+```powershell
+npm.cmd run build
+```
+
+If the build passes and health checks pass, close the old browser tab or stop the existing port 3000 listener before rerunning `npm.cmd run dev:with-agent`; the startup script reuses an already healthy frontend listener.
+
+### Full Startup Test
+
+Run this when changing startup scripts or investigating a blank local app:
+
+```powershell
+npm.cmd run startup:test
+```
+
+The test starts from `start.bat`, skips the interactive pause through `PROMPTCARD_START_SKIP_PAUSE=1`, and verifies:
+
+- storage service health: `http://127.0.0.1:8002/health`
+- Agent Runtime health: `http://127.0.0.1:8001/health`
+- Vite frontend health: `http://127.0.0.1:3000/`
+- frontend HTML includes the Vite React entry module
+- browser render check shows the project screen without console errors
+
+If Playwright cannot launch in the current environment, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test-start-from-bat.ps1 -SkipBrowserCheck
+```
 
 ## Runtime Hygiene
 

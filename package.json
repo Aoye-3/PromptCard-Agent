@@ -10,6 +10,7 @@
     "storage:test": "python -m unittest promptcard_storage.tests.test_store",
     "agent:dev": "powershell -ExecutionPolicy Bypass -File scripts/start-agent-runtime.ps1",
     "agent:check": "powershell -ExecutionPolicy Bypass -File scripts/check-agent-runtime.ps1",
+    "startup:test": "powershell -ExecutionPolicy Bypass -File scripts/test-start-from-bat.ps1",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 30",
     "preview": "vite preview",

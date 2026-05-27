@@ -12,6 +12,8 @@ node_modules
 .pnp
 .pnp.js
 agent-runtime/backend/.venv/
+agent-runtime/backend/.deer-flow/
+agent-runtime/backend/.pytest_cache/
 agent-runtime/.deer-flow/
 agent-runtime/backend/.deer-flow/
 agent-runtime/.agent/

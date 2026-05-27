@@ -24,6 +24,41 @@ http://127.0.0.1:8002/health
 
 If all three return successful responses, the local stack is running.
 
+## Browser Is Blank but Localhost Returns 200
+
+The Vite root URL can return the HTML shell even when a frontend module failed to transform. Check the Vite stderr log first:
+
+```powershell
+Get-Content logs\dev-server.err.log -Tail 120
+```
+
+If it contains a transform error such as `Unterminated string constant`, fix the referenced source file and run:
+
+```powershell
+npm.cmd run build
+```
+
+When the build passes but the browser is still blank, the likely cause is a stale Vite process or browser tab holding an old HMR error state. Stop only the process listening on port 3000, then start again:
+
+```powershell
+Get-NetTCPConnection -LocalPort 3000 -State Listen
+npm.cmd run dev:with-agent
+```
+
+Use `npm.cmd` from PowerShell. Calling `npm` can resolve to `npm.ps1` and fail under a restricted execution policy.
+
+For an end-to-end startup check from the batch entry point, run:
+
+```powershell
+npm.cmd run startup:test
+```
+
+If browser automation is blocked on the current machine, rerun with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\test-start-from-bat.ps1 -SkipBrowserCheck
+```
+
 ## Agent Runtime Is Disconnected
 
 ```powershell

@@ -3,7 +3,7 @@ param(
   [string]$AgentHealthUrl = "http://127.0.0.1:8001/health",
   [string]$FrontendUrl = "http://127.0.0.1:3000/",
   [int]$HealthTimeoutSeconds = 30,
-  [string]$FrontendCommand = "npm run dev"
+  [string]$FrontendCommand = "npm.cmd run dev"
 )
 
 $ErrorActionPreference = "Stop"

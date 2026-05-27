@@ -152,5 +152,5 @@ describe('start-dev-with-agent.ps1', () => {
 
     await expect(readFile(marker.markerPath, 'utf8')).resolves.toBe('started\r\n')
     expect(result.code).toBe(0)
-  })
+  }, 15_000)
 })

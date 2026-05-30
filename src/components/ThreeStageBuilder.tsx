@@ -1,8 +1,16 @@
 import { useMemo, useState } from 'react'
-import { Copy, Database, Eraser, Home, Search } from 'lucide-react'
+import { ChevronDown, Copy, Database, Eraser, Home, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import type { IPreset } from '@/models/Card.model'
 import type { IPromptProject, IThreeStageProject, IThreeStageSection, ThreeStageKey } from '@/models/PromptHistory.model'
-import { getStageDefinition, stageDefinitions, valueOf } from '@/domain/three-stage/three-stage-definitions'
+import {
+  createStoryboardShotRange,
+  getStageDefinition,
+  parseStoryboardShotRanges,
+  stageDefinitions,
+  stringifyStoryboardShotRanges,
+  valueOf
+} from '@/domain/three-stage/three-stage-definitions'
+import type { FieldDefinition, StoryboardShotRange } from '@/domain/three-stage/three-stage-definitions'
 
 const getSection = (threeStage: IThreeStageProject, stage: ThreeStageKey): IThreeStageSection => threeStage[stage]
 
@@ -11,9 +19,11 @@ interface ThreeStageBuilderScreenProps {
   threeStage: IThreeStageProject
   cameraPresets: IPreset[]
   onBack: () => void
+  onRenameProject?: () => void
   onSave: () => void
   onChange: (threeStage: IThreeStageProject) => void
   onIncrementPresetUsage: (id: string) => Promise<void>
+  previewMode?: boolean
 }
 
 const ThreeStageBuilderScreen = ({
@@ -21,11 +31,14 @@ const ThreeStageBuilderScreen = ({
   threeStage,
   cameraPresets,
   onBack,
+  onRenameProject,
   onSave,
   onChange,
-  onIncrementPresetUsage
+  onIncrementPresetUsage,
+  previewMode = false
 }: ThreeStageBuilderScreenProps) => {
   const [presetSearch, setPresetSearch] = useState('')
+  const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set())
   const selectedStage = getStageDefinition(threeStage.selectedStage).key
   const selectedStageDefinition = getStageDefinition(selectedStage)
   const selectedField = selectedStageDefinition.fields.find(field => field.id === threeStage.selectedFieldId) || selectedStageDefinition.fields[0]
@@ -94,6 +107,26 @@ const ThreeStageBuilderScreen = ({
     await onIncrementPresetUsage(preset.id)
   }
 
+  const updateStoryboardShotRanges = (stage: ThreeStageKey, ranges: StoryboardShotRange[]): void => {
+    updateField(stage, 'shotRanges', stringifyStoryboardShotRanges(ranges))
+  }
+
+  const fieldKey = (stage: ThreeStageKey, fieldId: string): string => `${stage}:${fieldId}`
+
+  const toggleFieldDrawer = (stage: ThreeStageKey, fieldId: string): void => {
+    const key = fieldKey(stage, fieldId)
+    setExpandedFields(current => {
+      const next = new Set(current)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+    selectField(stage, fieldId)
+  }
+
   return (
     <section className="min-h-[calc(100vh-168px)] bg-[#f7f8fb] px-6 pb-10 pt-7">
       <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
@@ -102,7 +135,20 @@ const ThreeStageBuilderScreen = ({
             <Home className="h-4 w-4" />
             项目
           </button>
-          <h1 className="text-3xl font-bold">{activeProject.title}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="break-words text-3xl font-bold">{activeProject.title}</h1>
+            {onRenameProject && (
+              <button
+                type="button"
+                className="rounded-full p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
+                onClick={onRenameProject}
+                title="重命名项目"
+                aria-label="重命名项目"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <p className="mt-1 text-sm text-gray-500">三段式构建：人物版、故事版、视频生成提示词分别输出。</p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -115,7 +161,7 @@ const ThreeStageBuilderScreen = ({
           </button>
           <button className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800" onClick={onSave}>
             <Database className="h-4 w-4" />
-            保存
+            {previewMode ? '预览不保存' : '保存'}
           </button>
         </div>
       </div>
@@ -133,32 +179,27 @@ const ThreeStageBuilderScreen = ({
                   <p className="mt-2 text-sm leading-6 text-gray-500">{stage.description}</p>
                 </div>
                 <div className="flex-1 space-y-3 overflow-y-auto p-4">
-                  {stage.fields.map(field => (
-                    <label
-                      key={field.id}
-                      className={`block rounded-2xl border p-3 transition ${
-                        selectedStage === stage.key && selectedField.id === field.id
-                          ? 'border-gray-950 bg-gray-50 shadow-sm'
-                          : 'border-gray-100 bg-white hover:border-gray-200'
-                      }`}
-                      onFocus={() => selectField(stage.key, field.id)}
-                    >
-                      <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-gray-900">{field.label}</span>
-                        {field.presetType === 'camera' && (
-                          <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-600">镜头库</span>
-                        )}
-                      </div>
-                      <textarea
-                        className="min-h-[72px] w-full resize-y rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100"
-                        rows={field.rows || 3}
-                        value={section.fields[field.id] || ''}
-                        placeholder={field.placeholder}
+                  {(stage.layout || stage.fields.map(field => ({ type: 'field' as const, fieldId: field.id }))).map(item => {
+                    if (item.type === 'locked') {
+                      return <LockedTextBlock key={item.id} text={item.text} />
+                    }
+                    const field = stage.fields.find(candidate => candidate.id === item.fieldId)
+                    if (!field) return null
+                    return (
+                      <StageFieldEditor
+                        key={field.id}
+                        stage={stage.key}
+                        field={field}
+                        fields={section.fields}
+                        active={selectedStage === stage.key && selectedField.id === field.id}
+                        expanded={expandedFields.has(fieldKey(stage.key, field.id))}
+                        onToggle={() => toggleFieldDrawer(stage.key, field.id)}
                         onFocus={() => selectField(stage.key, field.id)}
-                        onChange={(event) => updateField(stage.key, field.id, event.target.value)}
+                        onUpdateField={updateField}
+                        onUpdateShotRanges={updateStoryboardShotRanges}
                       />
-                    </label>
-                  ))}
+                    )
+                  })}
                 </div>
                 <div className="border-t border-gray-100 p-4">
                   <button
@@ -183,22 +224,22 @@ const ThreeStageBuilderScreen = ({
 
           <div className="flex-1 overflow-y-auto p-5">
             <label className="block">
-              <span className="mb-2 block text-sm font-bold text-gray-900">当前字段内容</span>
+              <span className="mb-2 block text-sm font-bold text-gray-900">当前阶段完整 Prompt</span>
               <textarea
-                className="min-h-[180px] w-full resize-y rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100"
-                value={selectedValue}
-                placeholder={selectedField.placeholder}
-                onChange={(event) => updateField(selectedStage, selectedField.id, event.target.value)}
+                className="min-h-[320px] w-full resize-y rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100"
+                value={selectedOutput}
+                placeholder={`${selectedStageDefinition.title} 完整 Prompt 会显示在这里。`}
+                readOnly
               />
             </label>
 
             <div className="mt-3 flex gap-2">
               <button
                 className="flex-1 rounded-full bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200"
-                onClick={() => copyText(selectedValue, '当前字段为空。')}
+                onClick={() => copyText(selectedOutput, `${selectedStageDefinition.title}还没有填写任何结构化内容。`)}
               >
                 <Copy className="h-4 w-4" />
-                复制字段
+                复制完整 Prompt
               </button>
               <button
                 className="rounded-full bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
@@ -260,3 +301,194 @@ const ThreeStageBuilderScreen = ({
 }
 
 export default ThreeStageBuilderScreen
+
+const shotNumberOptions = Array.from({ length: 12 }, (_, index) => index + 1)
+
+const LockedTextBlock = ({ text }: { text: string }) => (
+  <div
+    className="rounded-xl border border-transparent bg-[#fbfaf6] px-3 py-2 text-sm font-semibold leading-7 text-gray-800"
+    style={{
+      backgroundImage: 'radial-gradient(circle, rgba(17,24,39,0.12) 1px, transparent 1px)',
+      backgroundSize: '14px 14px'
+    }}
+  >
+    <pre className="whitespace-pre-wrap font-sans">{text}</pre>
+  </div>
+)
+
+const StageFieldEditor = ({
+  stage,
+  field,
+  fields,
+  active,
+  expanded,
+  onToggle,
+  onFocus,
+  onUpdateField,
+  onUpdateShotRanges
+}: {
+  stage: ThreeStageKey
+  field: FieldDefinition
+  fields: Record<string, string>
+  active: boolean
+  expanded: boolean
+  onToggle: () => void
+  onFocus: () => void
+  onUpdateField: (stage: ThreeStageKey, fieldId: string, value: string) => void
+  onUpdateShotRanges: (stage: ThreeStageKey, ranges: StoryboardShotRange[]) => void
+}) => {
+  if (field.kind === 'shotRanges') {
+    return (
+      <ShotRangeEditor
+        active={active}
+        ranges={parseStoryboardShotRanges(fields)}
+        placeholder={field.placeholder}
+        onFocus={onFocus}
+        onChange={(ranges) => onUpdateShotRanges(stage, ranges)}
+      />
+    )
+  }
+
+  const fieldValue = fields[field.id] || ''
+
+  return (
+    <div
+      className={`rounded-xl border transition ${
+        active ? 'border-gray-950 bg-gray-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200'
+      }`}
+    >
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+        onClick={onToggle}
+      >
+        <span className="min-w-0">
+          <span className="flex items-center gap-2">
+            <span className="text-sm font-bold text-gray-900">【{field.label}】</span>
+            {field.presetType === 'camera' && (
+              <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-600">镜头库</span>
+            )}
+          </span>
+          {!expanded && (
+            <span className="mt-1 block truncate text-xs leading-5 text-gray-400">
+              {fieldValue.trim() || field.placeholder}
+            </span>
+          )}
+        </span>
+        <ChevronDown className={`h-4 w-4 shrink-0 text-gray-400 transition ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      {expanded && (
+        <div className="border-t border-gray-100 px-3 pb-3 pt-2">
+          <textarea
+            className="min-h-[86px] w-full resize-y rounded-xl border border-gray-200 bg-[#f4f2ec] px-3 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100"
+            rows={field.rows || 3}
+            value={fieldValue}
+            placeholder={field.placeholder}
+            onFocus={onFocus}
+            onChange={(event) => onUpdateField(stage, field.id, event.target.value)}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+const ShotRangeEditor = ({
+  active,
+  ranges,
+  placeholder,
+  onFocus,
+  onChange
+}: {
+  active: boolean
+  ranges: StoryboardShotRange[]
+  placeholder: string
+  onFocus: () => void
+  onChange: (ranges: StoryboardShotRange[]) => void
+}) => {
+  const updateRange = (id: string, updates: Partial<StoryboardShotRange>) => {
+    onChange(ranges.map(range => range.id === id ? { ...range, ...updates } : range))
+  }
+
+  const addRange = () => {
+    onChange([...ranges, createStoryboardShotRange(Date.now())])
+  }
+
+  const removeRange = (id: string) => {
+    if (ranges.length <= 1) return
+    onChange(ranges.filter(range => range.id !== id))
+  }
+
+  return (
+    <div
+      className={`rounded-2xl border p-3 transition ${
+        active ? 'border-gray-950 bg-gray-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200'
+      }`}
+      onFocus={onFocus}
+      onClick={onFocus}
+    >
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <span className="text-sm font-bold text-gray-900">镜头格</span>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-full bg-gray-950 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-gray-800"
+          onClick={(event) => {
+            event.stopPropagation()
+            addRange()
+          }}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          新增字段
+        </button>
+      </div>
+      <div className="space-y-3">
+        {ranges.map(range => (
+          <div key={range.id} className="rounded-2xl border border-gray-200 bg-white p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-gray-950">镜头格</span>
+                <select
+                  className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-sm font-semibold text-gray-900"
+                  value={range.start}
+                  onChange={(event) => updateRange(range.id, { start: Number(event.target.value) })}
+                >
+                  {shotNumberOptions.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+                <span className="text-sm font-bold text-gray-500">-</span>
+                <select
+                  className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-sm font-semibold text-gray-900"
+                  value={range.end}
+                  onChange={(event) => updateRange(range.id, { end: Number(event.target.value) })}
+                >
+                  {shotNumberOptions.map(option => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="rounded-full p-1.5 text-gray-400 transition hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+                disabled={ranges.length <= 1}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  removeRange(range.id)
+                }}
+                title="删除镜头格"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+            <textarea
+              className="min-h-[86px] w-full resize-y rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100"
+              value={range.content}
+              placeholder={placeholder}
+              onFocus={onFocus}
+              onChange={(event) => updateRange(range.id, { content: event.target.value })}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

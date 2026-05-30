@@ -1,4 +1,6 @@
-import { Film, FolderPlus, Grid2X2 } from 'lucide-react'
+import { ArrowRight, Film, FolderPlus, Grid2X2 } from 'lucide-react'
+import { getBuilderTemplates } from '@/domain/builder-templates/builder-templates'
+import type { BuilderTemplate, BuilderTemplateId } from '@/domain/builder-templates/builder-templates'
 import { getCardDefaultTitle } from '@/utils/promptParser'
 import type { CardType } from '@/models/Card.model'
 import type { IPromptHistory } from '@/models/PromptHistory.model'
@@ -134,22 +136,31 @@ export const CreateProjectModal = ({
   onClose,
   onCreateCard,
   onCreateStoryboard,
-  onCreateThreeStage
+  onCreateThreeStage,
+  onCreateFromTemplate
 }: {
   onClose: () => void
-  onCreateCard: () => void
-  onCreateStoryboard: () => void
-  onCreateThreeStage: () => void
+  onCreateCard?: () => void
+  onCreateStoryboard?: () => void
+  onCreateThreeStage?: () => void
+  onCreateFromTemplate?: (templateId: BuilderTemplateId) => void
 }) => (
   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6" onClick={onClose}>
-    <div className="w-full max-w-3xl rounded-[28px] bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
+    <div className="max-h-[86vh] w-full max-w-3xl overflow-y-auto rounded-[28px] bg-white p-6 shadow-2xl" onClick={event => event.stopPropagation()}>
       <div className="mb-6 flex items-start justify-between gap-6">
         <div>
           <h3 className="text-2xl font-bold text-gray-950">选择项目构建模式</h3>
-          <p className="mt-2 text-sm text-gray-500">项目创建后模式固定。后续可以继续增加新的构建模式。</p>
+          <p className="mt-2 text-sm text-gray-500">项目创建依赖模板库里的模块化构建方式，创建后会进入对应编辑器。</p>
         </div>
         <button className="rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" onClick={onClose}>x</button>
       </div>
+      {onCreateFromTemplate ? (
+      <div className="space-y-3">
+        {getBuilderTemplates().map(template => (
+          <BuilderTemplateCard key={template.id} template={template} onCreate={onCreateFromTemplate} />
+        ))}
+      </div>
+      ) : (
       <div className="grid gap-4 md:grid-cols-3">
         <button
           className="rounded-[24px] border border-gray-100 bg-gray-50 p-6 text-left transition hover:-translate-y-0.5 hover:border-amber-200 hover:bg-amber-50"
@@ -182,6 +193,58 @@ export const CreateProjectModal = ({
           <p className="mt-2 text-sm leading-relaxed text-gray-500">并列制作人物版、故事版和视频生成提示词，右侧聚焦编辑当前字段。</p>
         </button>
       </div>
+      )}
     </div>
   </div>
 )
+
+const BuilderTemplateCard = ({
+  template,
+  onCreate
+}: {
+  template: BuilderTemplate
+  onCreate: (templateId: BuilderTemplateId) => void
+}) => (
+  <button
+    data-builder-template-id={template.id}
+    data-builder-template-modules={template.modules.map(module => module.id).join(' ')}
+    className="group flex w-full items-start gap-4 rounded-[20px] border border-gray-100 bg-gray-50 p-4 text-left transition hover:-translate-y-0.5 hover:border-gray-300 hover:bg-white"
+    onClick={() => onCreate(template.id)}
+  >
+    <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border bg-white shadow-sm ${template.accentClassName}`}>
+      <BuilderTemplateIcon templateId={template.id} />
+    </div>
+    <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="whitespace-normal break-words text-lg font-bold leading-snug text-gray-950">{template.title}</h4>
+        <span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-gray-500">{template.shortTitle}</span>
+      </div>
+      <p className="mt-1 whitespace-normal break-words text-sm leading-6 text-gray-500">{template.description}</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {template.capabilities.map(capability => (
+          <span key={capability} className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-gray-500">
+            {capability}
+          </span>
+        ))}
+      </div>
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        {template.modules.map(module => (
+          <div key={module.id} className="rounded-xl bg-white px-3 py-2">
+            <div className="whitespace-normal break-words text-sm font-semibold text-gray-800">{module.label}</div>
+            <div className="mt-1 line-clamp-2 whitespace-normal break-words text-xs leading-5 text-gray-500">{module.description}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+    <div className="mt-1 flex shrink-0 items-center gap-2 rounded-full bg-white px-3 py-2 text-sm font-semibold text-gray-600 transition group-hover:bg-black group-hover:text-white">
+      Create
+      <ArrowRight className="h-4 w-4" />
+    </div>
+  </button>
+)
+
+const BuilderTemplateIcon = ({ templateId }: { templateId: BuilderTemplateId }) => {
+  if (templateId === 'storyboard') return <Film className="h-8 w-8" />
+  if (templateId === 'three-stage') return <Grid2X2 className="h-8 w-8" />
+  return <FolderPlus className="h-8 w-8" />
+}

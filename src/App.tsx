@@ -7,6 +7,8 @@ import { ProjectHome } from './components/app/ProjectHome'
 import { CardBuilderScreen } from './components/app/CardBuilderScreen'
 import { StoryboardBuilderScreen } from './components/app/StoryboardBuilderScreen'
 import { MeScreen } from './components/app/MeScreen'
+import { TemplateLibraryScreen } from './components/app/TemplateLibraryScreen'
+import type { BuilderModePreviewSnapshot } from './components/app/builder-preview-contract'
 import { AddCardModal, CreateProjectModal, HistoryModal, RenameProjectModal } from './components/app/ProjectModals'
 import { useCardStore } from './stores/card.store'
 import { usePresetStore } from './stores/preset.store'
@@ -15,6 +17,8 @@ import { assemblePrompt, getCardDefaultTitle } from './utils/promptParser'
 import { findDuplicatePhrases, parsePromptToCardUpdates } from './utils/promptComposer'
 import { useI18n } from './i18n'
 import { storage } from './utils/storage'
+import { createBuilderTemplateProjectTitle, getBuilderTemplateById } from './domain/builder-templates/builder-templates'
+import type { BuilderTemplateId } from './domain/builder-templates/builder-templates'
 import type { IPreset, CardType } from './models/Card.model'
 import type { IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
@@ -57,6 +61,7 @@ function App() {
   const [showHistory, setShowHistory] = useState(false)
   const [showAddCardModal, setShowAddCardModal] = useState(false)
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false)
+  const [showTemplateLibrary, setShowTemplateLibrary] = useState(false)
   const [renameProject, setRenameProject] = useState<IPromptProject | null>(null)
   const [renameProjectTitle, setRenameProjectTitle] = useState('')
   const [duplicateMode, setDuplicateMode] = useState(false)
@@ -272,6 +277,26 @@ function App() {
       title: `三段式项目 ${projects.filter(project => project.type === 'three-stage').length + 1}`
     })
     setShowCreateProjectModal(false)
+    await openProject(newProject)
+  }
+
+  const handleCreateProjectFromTemplate = async (templateId: BuilderTemplateId, snapshot?: BuilderModePreviewSnapshot) => {
+    const template = getBuilderTemplateById(templateId)
+    const title = createBuilderTemplateProjectTitle(template, projects)
+    const meta = { builderTemplateId: template.id }
+    const newProject = template.projectType === 'storyboard'
+      ? await storage.projects.createStoryboard({ title, storyboard: snapshot?.storyboard, meta })
+      : template.projectType === 'three-stage'
+        ? await storage.projects.createThreeStage({ title, threeStage: snapshot?.threeStage, meta })
+        : await storage.projects.create({
+            title,
+            pages: snapshot?.pages?.length ? snapshot.pages : [createInitialPage()],
+            currentPage: snapshot?.currentPage || 0,
+            meta
+          })
+
+    setShowCreateProjectModal(false)
+    setShowTemplateLibrary(false)
     await openProject(newProject)
   }
 
@@ -553,11 +578,14 @@ function App() {
       setShowSettings={setShowSettings}
       onExportData={handleExportData}
     />
+  ) : showTemplateLibrary ? (
+    <TemplateLibraryScreen onCreateFromTemplate={handleCreateProjectFromTemplate} />
   ) : projectMode === 'builder' && activeProject?.type === 'storyboard' && activeProject.storyboard ? (
     <StoryboardBuilderScreen
       activeProject={activeProject}
       storyboard={activeProject.storyboard}
       onBack={handleBackToProjects}
+      onRenameProject={() => handleRenameProject(activeProject)}
       onSave={handleSave}
       onChange={handleUpdateStoryboard}
     />
@@ -567,6 +595,7 @@ function App() {
       threeStage={activeProject.threeStage}
       cameraPresets={getPresetsByType('camera')}
       onBack={handleBackToProjects}
+      onRenameProject={() => handleRenameProject(activeProject)}
       onSave={handleSave}
       onChange={handleUpdateThreeStage}
       onIncrementPresetUsage={incrementUsage}
@@ -584,6 +613,7 @@ function App() {
       duplicateResult={duplicateResult}
       activeEditMode={activeEditMode}
       onBack={handleBackToProjects}
+      onRenameProject={() => handleRenameProject(activeProject)}
       onSave={handleSave}
       onPromptChange={handlePromptChange}
       onCopyPrompt={handleCopyPrompt}
@@ -635,6 +665,7 @@ function App() {
       activeTab={activeTab}
       setActiveTab={(tab) => {
         setActiveTab(tab)
+        setShowTemplateLibrary(false)
         if (tab !== 'projects') setProjectMode('home')
       }}
       projectMode={projectMode}
@@ -642,6 +673,19 @@ function App() {
       saveStatusText={saveStatusText}
       activeProject={activeProject}
       onCreateProject={handleCreateProject}
+      onOpenTemplateLibrary={() => {
+        setActiveTab('projects')
+        setProjectMode('home')
+        setActiveProjectId(null)
+        setShowProjectTrash(false)
+        setShowTemplateLibrary(true)
+      }}
+      onShowProjectTrash={() => {
+        setActiveTab('projects')
+        setProjectMode('home')
+        setShowTemplateLibrary(false)
+        setShowProjectTrash(true)
+      }}
       showProjectUtilities={activeTab === 'projects'}
     >
       {content}
@@ -660,6 +704,7 @@ function App() {
           onCreateCard={handleCreateCardProject}
           onCreateStoryboard={handleCreateStoryboardProject}
           onCreateThreeStage={handleCreateThreeStageProject}
+          onCreateFromTemplate={handleCreateProjectFromTemplate}
         />
       )}
 

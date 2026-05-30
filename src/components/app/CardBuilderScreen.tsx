@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bot, Copy, Database, Grid2X2, Home, Plus, Trash2 } from 'lucide-react'
+import { Bot, Copy, Database, Grid2X2, Home, Pencil, Plus, Trash2 } from 'lucide-react'
 import CardComponent from '@/components/CardComponent'
 import CreativeMode from '@/components/CreativeMode'
 import PromptComposer from '@/components/PromptComposer'
@@ -23,6 +23,7 @@ export const CardBuilderScreen = ({
   duplicateResult,
   activeEditMode,
   onBack,
+  onRenameProject,
   onSave,
   onPromptChange,
   onCopyPrompt,
@@ -37,7 +38,8 @@ export const CardBuilderScreen = ({
   onCreativePresetSelect,
   onApplyAgentProposal,
   activeCardId,
-  t
+  t,
+  previewMode = false
 }: {
   activeProject: IPromptProject
   pages: IPromptProject['pages']
@@ -50,6 +52,7 @@ export const CardBuilderScreen = ({
   duplicateResult: ReturnType<typeof findDuplicatePhrases>
   activeEditMode: 'learn' | 'creative'
   onBack: () => void
+  onRenameProject?: () => void
   onSave: () => void
   onPromptChange: (prompt: string) => void
   onCopyPrompt: () => void
@@ -65,6 +68,7 @@ export const CardBuilderScreen = ({
   onApplyAgentProposal: (proposal: AgentWorkspaceProposal) => void
   activeCardId: string | null
   t: ReturnType<typeof useI18n>['t']
+  previewMode?: boolean
 }) => {
   const [rightPanelMode, setRightPanelMode] = useState<'structured' | 'agent'>('structured')
   const workspaceContext = buildCardWorkspaceContext({
@@ -83,7 +87,20 @@ export const CardBuilderScreen = ({
           <Home className="h-4 w-4" />
           项目
         </button>
-        <h1 className="text-3xl font-bold">{activeProject.title}</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="break-words text-3xl font-bold">{activeProject.title}</h1>
+          {onRenameProject && (
+            <button
+              type="button"
+              className="rounded-full p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
+              onClick={onRenameProject}
+              title="重命名项目"
+              aria-label="重命名项目"
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+          )}
+        </div>
         <p className="mt-1 text-sm text-gray-500">卡片构建模式</p>
       </div>
       <div className="flex flex-wrap gap-3">
@@ -93,7 +110,7 @@ export const CardBuilderScreen = ({
         </button>
         <button className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800" onClick={onSave}>
           <Database className="h-4 w-4" />
-          {t('save')}
+          {previewMode ? '预览不保存' : t('save')}
         </button>
       </div>
     </div>
@@ -169,7 +186,7 @@ export const CardBuilderScreen = ({
       </div>
       <aside className="rounded-[24px] border border-gray-100 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]">
         <div className="border-b border-gray-100 p-4">
-          <div className="grid grid-cols-2 gap-2 rounded-2xl bg-gray-50 p-1">
+          <div className={`grid gap-2 rounded-2xl bg-gray-50 p-1 ${previewMode ? 'grid-cols-1' : 'grid-cols-2'}`}>
             <button
               type="button"
               className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black transition ${
@@ -182,6 +199,7 @@ export const CardBuilderScreen = ({
               <Grid2X2 className="h-4 w-4" />
               结构化卡片输入
             </button>
+            {!previewMode && (
             <button
               type="button"
               className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-black transition ${
@@ -194,9 +212,10 @@ export const CardBuilderScreen = ({
               <Bot className="h-4 w-4" />
               Agent 协作
             </button>
+            )}
           </div>
         </div>
-        {rightPanelMode === 'agent' && (
+        {!previewMode && rightPanelMode === 'agent' && (
         <AgentCollaborationPanel
           title="Agent 协作"
           mode="card-workspace"

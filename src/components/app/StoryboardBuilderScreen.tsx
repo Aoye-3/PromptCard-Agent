@@ -1,4 +1,4 @@
-import { Database, Home, Image, MessageSquare, Plus, Send, Trash2 } from 'lucide-react'
+import { Database, Home, Image, MessageSquare, Pencil, Plus, Send, Trash2 } from 'lucide-react'
 import { AgentCollaborationPanel } from '@/components/AgentCollaborationPanel'
 import { buildStoryboardWorkspaceContext } from '@/utils/agent-workspace'
 import {
@@ -16,14 +16,18 @@ export const StoryboardBuilderScreen = ({
   activeProject,
   storyboard,
   onBack,
+  onRenameProject,
   onSave,
-  onChange
+  onChange,
+  previewMode = false
 }: {
   activeProject: IPromptProject
   storyboard: IStoryboardProject
   onBack: () => void
+  onRenameProject?: () => void
   onSave: () => void
   onChange: (storyboard: IStoryboardProject) => void
+  previewMode?: boolean
 }) => {
   const sequences = storyboard.sequences
   const activeSequence = sequences.find(sequence => sequence.id === storyboard.selectedSequenceId) || sequences[0]
@@ -120,7 +124,20 @@ export const StoryboardBuilderScreen = ({
             <Home className="h-4 w-4" />
             项目
           </button>
-          <h1 className="text-3xl font-bold">{activeProject.title}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="break-words text-3xl font-bold">{activeProject.title}</h1>
+            {onRenameProject && (
+              <button
+                type="button"
+                className="rounded-full p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900"
+                onClick={onRenameProject}
+                title="重命名项目"
+                aria-label="重命名项目"
+              >
+                <Pencil className="h-4 w-4" />
+              </button>
+            )}
+          </div>
           <p className="mt-1 text-sm text-gray-500">按序列组织风格、约束和单镜头字段。</p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -139,7 +156,7 @@ export const StoryboardBuilderScreen = ({
           </button>
           <button className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800" onClick={onSave}>
             <Database className="h-4 w-4" />
-            保存
+            {previewMode ? '预览不保存' : '保存'}
           </button>
         </div>
       </div>
@@ -292,12 +309,14 @@ export const StoryboardBuilderScreen = ({
           </div>
         </div>
 
+        {!previewMode && (
         <AgentCollaborationPanel
           title="Storyboard Agent"
           mode="storyboard-workspace"
           workspaceContext={workspaceContext}
           onApplyWorkspaceProposal={handleApplyStoryboardAgentProposal}
         />
+        )}
       </div>
     </section>
   )

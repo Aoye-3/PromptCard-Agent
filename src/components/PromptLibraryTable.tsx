@@ -62,32 +62,38 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-gray-200">
+    <div className="overflow-hidden">
+      <table className="w-full table-fixed divide-y divide-gray-200">
+        <colgroup>
+          <col className="w-10" />
+          <col className="w-12" />
+          <col className="w-20" />
+          <col className="w-28" />
+          <col />
+          <col className="w-16" />
+          <col className="w-28" />
+        </colgroup>
         <thead className="bg-gray-50">
           <tr>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Select
             </th>
-            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {t('sort')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {t('type')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {t('name')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {t('content')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              {t('category')}
-            </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {t('usageTimes')}
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {t('actions')}
             </th>
           </tr>
@@ -121,7 +127,7 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                     : 'hover:bg-gray-50'
               }`}
             >
-              <td className="px-4 py-4 whitespace-nowrap">
+              <td className="px-3 py-4">
                 <input
                   type="checkbox"
                   className="h-4 w-4 rounded border-gray-300 text-black focus:ring-gray-200"
@@ -129,9 +135,9 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                   onChange={() => onToggleSelect?.(preset.id)}
                 />
               </td>
-              <td className="px-4 py-4 whitespace-nowrap">
+              <td className="px-2 py-4">
                 <span
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded border text-sm ${
+                  className={`inline-flex h-7 w-7 items-center justify-center rounded border text-xs ${
                     canSort
                       ? 'cursor-grab border-gray-300 text-gray-500 hover:bg-gray-100 active:cursor-grabbing'
                       : 'cursor-not-allowed border-gray-200 text-gray-300'
@@ -141,39 +147,36 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                   <i className="fa fa-bars"></i>
                 </span>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeColor(preset.type)}`}>
+              <td className="px-3 py-4">
+                <span className={`inline-flex max-w-full rounded-full px-2 py-1 text-xs font-semibold leading-5 ${getTypeColor(preset.type)}`}>
                   {cardTypeLabel(preset.type)}
                 </span>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm font-medium text-gray-900">{preset.label}</div>
+              <td className="px-3 py-4">
+                <div className="truncate text-sm font-medium text-gray-900" title={preset.label}>{preset.label}</div>
               </td>
-              <td className="px-6 py-4">
-                <div className="text-sm text-gray-900 max-w-md line-clamp-2">
+              <td className="px-3 py-4">
+                <div className="line-clamp-2 text-sm leading-5 text-gray-900" title={preset.content}>
                   {preset.content}
                 </div>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-gray-500">{preset.category || '-'}</div>
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap">
-                <div className="text-sm text-gray-500">
-                  <i className="fa fa-eye mr-1"></i> {preset.usageCount}
+              <td className="px-3 py-4">
+                <div className="truncate text-sm text-gray-500" title={String(preset.usageCount)}>
+                  <i className="fa fa-eye mr-1"></i>{preset.usageCount}
                 </div>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+              <td className="whitespace-nowrap px-3 py-4 text-sm font-medium">
                 <button
-                  className="text-blue-600 hover:text-blue-900 mr-3"
+                  className="mr-3 text-blue-600 hover:text-blue-900"
                   onClick={() => onEdit(preset)}
                 >
-                  <i className="fa fa-edit mr-1"></i>{t('edit')}
+                  {t('edit')}
                 </button>
                 <button
                   className="text-red-600 hover:text-red-900"
                   onClick={() => onDelete(preset.id)}
                 >
-                  <i className="fa fa-trash mr-1"></i>{t('delete')}
+                  {t('delete')}
                 </button>
               </td>
             </tr>

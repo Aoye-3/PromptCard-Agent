@@ -1,16 +1,23 @@
-import { ChevronRight, Download, Info, Languages, Power, Settings, Smile, Upload, Wand2 } from 'lucide-react'
+import { ChevronRight, Clock, Download, Info, Languages, Power, Settings, Smile, Upload, Wand2 } from 'lucide-react'
+import type { IUserSettings } from '@/models/UserSettings.model'
+
+const autoSaveDelayOptions = [3, 5, 10, 20, 30]
 
 export const MeScreen = ({
   language,
   setLanguage,
   showSettings,
   setShowSettings,
+  settings,
+  onSettingsChange,
   onExportData
 }: {
   language: 'zh' | 'en'
   setLanguage: (language: 'zh' | 'en') => void
   showSettings: boolean
   setShowSettings: (value: boolean) => void
+  settings: IUserSettings
+  onSettingsChange: (settings: Partial<IUserSettings>) => void
   onExportData: () => void
 }) => {
   const handleShutdownDevServer = async () => {
@@ -70,6 +77,39 @@ export const MeScreen = ({
             <button className={`rounded-full px-5 py-2 text-sm font-semibold ${language === 'en' ? 'bg-black text-white' : 'bg-gray-100 text-gray-700'}`} onClick={() => setLanguage('en')}>
               English
             </button>
+          </div>
+          <div className="mt-6 border-t border-gray-100 pt-5">
+            <div className="mb-4 flex items-center gap-3">
+              <Clock className="h-5 w-5" />
+              <h2 className="text-lg font-bold">自动保存</h2>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl bg-gray-50 px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold text-gray-900">停止编辑后自动保存</div>
+                <div className="mt-1 text-xs text-gray-500">关闭后仍可在项目页手动保存。</div>
+              </div>
+              <button
+                className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                  settings.autoSave ? 'bg-black text-white' : 'bg-gray-200 text-gray-700'
+                }`}
+                onClick={() => onSettingsChange({ autoSave: !settings.autoSave })}
+              >
+                {settings.autoSave ? '已开启' : '已关闭'}
+              </button>
+            </div>
+            <label className="mt-4 block">
+              <span className="mb-2 block text-sm font-semibold text-gray-700">空闲保存等待时间</span>
+              <select
+                className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm font-semibold text-gray-900 outline-none focus:border-gray-300 focus:ring-2 focus:ring-gray-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                value={settings.autoSaveIdleSeconds}
+                disabled={!settings.autoSave}
+                onChange={(event) => onSettingsChange({ autoSaveIdleSeconds: Number(event.target.value) })}
+              >
+                {autoSaveDelayOptions.map(seconds => (
+                  <option key={seconds} value={seconds}>{seconds} 秒</option>
+                ))}
+              </select>
+            </label>
           </div>
           <div className="mt-6 border-t border-gray-100 pt-5">
             <div className="mb-4 flex items-center gap-3">

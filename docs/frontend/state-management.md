@@ -47,6 +47,12 @@ The store preserves `IPreset` compatibility and persists changes through `storag
 
 It delegates HTTP calls to `agent-runtime-service`.
 
+Agent permission scope is enforced before proposals reach UI execution:
+
+- `prompt-library-agent` is reserved for the Prompt Library page, where Prompt decomposition, additive write proposals, and approval live.
+- `workspace-chatbot-agent` is used by builder AIChatbotBox surfaces. It can apply current-workspace changes such as card and storyboard updates, but Prompt Library write proposals are filtered out and cannot be approved there.
+- The Agent dashboard is diagnostic; it does not own Prompt Library write approval.
+
 ## Storage Model
 
 `src/utils/storage.ts` is the persistence facade. It configures `localforage` using the `PromptCard` database name and exposes logical groups such as projects, presets, workspace, history, and export behavior.
@@ -56,6 +62,8 @@ Browser storage is the primary persistence layer. Development file storage is op
 - Presets use `/__promptcard/presets`.
 - Projects use `/__promptcard/projects`.
 - If dev file endpoints are unavailable, storage falls back to browser persistence.
+
+Project autosave is idle-based and user-configurable from `我的 -> 设置 -> 自动保存`. Builder changes wait until the user has stopped editing for the configured delay before writing to storage; the default is 10 seconds. The UI should only enter the saving state when that delayed save actually starts. If autosave is disabled, the normal manual save action remains available.
 
 ## Core Schemas
 
@@ -88,6 +96,8 @@ Supported card types include subject, action, scene, style, camera, lighting, ti
 - optional timestamps
 
 Any Agent or UI feature that writes Prompt library data should preserve this contract.
+
+Prompt Library is the only UI surface allowed to approve Agent-generated writes to this contract. Builder chatboxes may select or reuse existing presets, but must not create, update, or archive presets. Prompt Library Agent approvals are additive only; they create new presets and never update, delete, archive, overwrite, or replace existing presets.
 
 ### `IPromptProject`
 
@@ -149,9 +159,11 @@ The proposal is not a preset until the user approves it.
 - `workspace_card_update`: update existing card titles and/or content by real `cardId`
 - `workspace_card_create`: add a new card to the current card workspace
 - `storyboard_update`: update storyboard sequence or row fields
-- `prompt_library_write_proposal`: create/update/archive a Prompt library preset after approval
+- `prompt_library_write_proposal`: create a new Prompt library preset after approval in Prompt Library scope
 
-In the card builder collaboration panel, card workspace proposals are applied immediately when `autoApplyWorkspaceChanges` is enabled. Prompt library proposals are still stored as pending records until the user approves them.
+In builder AIChatbotBox surfaces, card workspace proposals are applied immediately when `autoApplyWorkspaceChanges` is enabled. Prompt library proposals are filtered out in workspace scope and can only be approved from the Prompt Library page.
+
+The Prompt Library page owns batch proposal approval. Selected pending create proposals are converted into `IPreset` drafts through `preset.store.addPreset()`, then marked approved. Batch rejection only marks proposals rejected; it does not mutate Prompt Library records.
 
 ## Merge and Normalization Behavior
 

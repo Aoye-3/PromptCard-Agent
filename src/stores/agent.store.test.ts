@@ -98,6 +98,7 @@ describe('agent store', () => {
       threadId: undefined,
       content: '补全选中卡片',
       mode: 'card-workspace',
+      permissionScope: 'workspace-chatbot-agent',
       workspaceContext
     })
     expect(serviceMock.runAgentMessage).not.toHaveBeenCalled()

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-05-27T15:56:27Z",
+  "updatedAt": "2026-05-30T20:08:39Z",
   "presets": [
     {
       "type": "action",
@@ -158,11 +158,11 @@
       "content": "画面下方的【】突然从镜头底部【猛地】站起入画，镜头焦点迅速从背景的男子转移到他身上，他的身影完全遮挡了后方的男子，动作带有喜剧版的弹性与惯性，中景特写瞬间锁定。他的表情【】",
       "category": "camera",
       "id": "preset-1779818387348",
-      "usageCount": 0,
+      "usageCount": 2,
       "meta": {},
       "createdAt": 1779818387663,
-      "updatedAt": 1779818611335,
-      "revision": 2
+      "updatedAt": 1780170853092,
+      "revision": 4
     },
     {
       "type": "camera",
@@ -183,10 +183,10 @@
       "content": "全景镜头，展示完整场景，视野开阔，包含环境信息",
       "meta": {},
       "id": "preset-17",
-      "usageCount": 0,
+      "usageCount": 1,
       "createdAt": 1779621418098,
-      "updatedAt": 1779818611335,
-      "revision": 4
+      "updatedAt": 1780171719653,
+      "revision": 5
     },
     {
       "type": "camera",

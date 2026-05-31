@@ -55,6 +55,7 @@ describe('three-stage definitions', () => {
       'environmentKeep',
       'shotRanges'
     ])
+    expect(definition.fields.find(field => field.id === 'storyMotion')?.label).toBe('故事节奏')
     expect(definition.fields.filter(field => field.presetType === 'camera').map(field => field.id)).toEqual(['cameraStyle'])
     expect(definition.fields.find(field => field.id === 'shotRanges')?.kind).toBe('shotRanges')
   })
@@ -63,9 +64,73 @@ describe('three-stage definitions', () => {
     const definition = getStageDefinition('videoPrompt')
 
     expect(definition.fields.filter(field => field.presetType === 'camera').map(field => field.id)).toEqual([
-      'shotOrder',
       'shotKeywords',
       'finalShot'
     ])
+    expect(definition.fields.find(field => field.id === 'shotKeywords')?.kind).toBe('shotRanges')
+  })
+
+  test('builds video prompt output with fixed stage-three fields', () => {
+    const output = buildThreeStageOutput('videoPrompt', {
+      storyboardRef: '用户误填内容',
+      shotOrder: '用户误填镜头顺序',
+      duration: '用户误填时长',
+      identityLock: '用户误填身份锁定',
+      shotKeywords: '追逐，滚动，回望'
+    })
+
+    expect(output).toContain('使用故事板参考 @[STORYBOARD REF] 作为 15 秒视频的完整视觉和情感叙事来源。')
+    expect(output).toContain('从左到右、从上到下依次遵循所有 12 个节拍。')
+    expect(output).toContain('将完整的 12 节拍序列压缩到 15 秒内。')
+    expect(output).toContain('保持角色参考相同的绝对核心主体身份')
+    expect(output).toContain('镜头提示词【1-4】：【追逐，滚动，回望】')
+    expect(output).not.toContain('用户误填')
+  })
+
+  test('injects storyboard output and optional audio constraints into video prompt output', () => {
+    const project = {
+      character: { fields: {}, updatedAt: 1, meta: {} },
+      storyboard: {
+        fields: {
+          theme: '松鼠追逐主题',
+          storyMotion: '松鼠跨越现代与未来',
+          cameraStyle: '手持跟拍',
+          shotRanges: JSON.stringify([{ id: 'range-1-4', start: 1, end: 4, content: '松鼠从树尖冲入画面' }])
+        },
+        updatedAt: 1,
+        meta: {}
+      },
+      videoPrompt: { fields: {}, updatedAt: 1, meta: {} },
+      selectedStage: 'videoPrompt' as const,
+      selectedFieldId: 'actionSnapshot',
+      meta: {}
+    }
+
+    const output = buildThreeStageOutput('videoPrompt', {
+      needsBackgroundBgm: 'false',
+      needsVoiceDialogue: 'false'
+    }, project)
+
+    expect(output).toContain('故事版内容注入：')
+    expect(output).toContain('主题：【松鼠追逐主题】')
+    expect(output).toContain('故事节奏：【松鼠跨越现代与未来】')
+    expect(output).not.toContain('手持跟拍')
+    expect(output).not.toContain('镜头格【1-4】：【松鼠从树尖冲入画面】')
+    expect(output).not.toContain('使用颜色标注系统')
+    expect(output).toContain('只保留物理音效，不要背景BGM音乐。')
+    expect(output).toContain('不要人声对话。')
+    expect(output).not.toContain('首帧：')
+  })
+
+  test('injects first and last frame placeholders only when enabled', () => {
+    const defaultOutput = buildThreeStageOutput('videoPrompt', {})
+    const enabledOutput = buildThreeStageOutput('videoPrompt', {
+      needsFirstLastFrame: 'true'
+    })
+
+    expect(defaultOutput).not.toContain('首帧：')
+    expect(defaultOutput).not.toContain('尾帧：')
+    expect(enabledOutput).toContain('首帧：')
+    expect(enabledOutput).toContain('尾帧：')
   })
 })

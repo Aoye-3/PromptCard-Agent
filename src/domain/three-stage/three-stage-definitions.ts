@@ -1,12 +1,18 @@
-import type { ThreeStageKey } from '@/models/PromptHistory.model'
+import type { IThreeStageProject, ThreeStageKey } from '@/models/PromptHistory.model'
 
 export type FieldDefinition = {
   id: string
   label: string
   placeholder: string
+  fixedValue?: string
   rows?: number
   presetType?: 'camera'
-  kind?: 'textarea' | 'shotRanges'
+  kind?: 'textarea' | 'shotRanges' | 'toggle'
+  toggleDefault?: boolean
+  toggleLabels?: {
+    on: string
+    off: string
+  }
 }
 
 export type StoryboardShotRange = {
@@ -22,7 +28,7 @@ export type StageDefinition = {
   description: string
   fields: FieldDefinition[]
   layout?: StageLayoutItem[]
-  buildOutput: (fields: Record<string, string>) => string
+  buildOutput: (fields: Record<string, string>, project?: IThreeStageProject) => string
 }
 
 export type StageLayoutItem =
@@ -30,6 +36,15 @@ export type StageLayoutItem =
   | { type: 'field'; fieldId: string }
 
 export const valueOf = (fields: Record<string, string>, key: string) => fields[key]?.trim() || ''
+
+export const fixedValueOf = (fieldId: string) => {
+  const field = getStageDefinition('videoPrompt').fields.find(candidate => candidate.id === fieldId)
+  return field?.fixedValue?.trim() || ''
+}
+
+export const toggleAllows = (fields: Record<string, string>, key: string) => fields[key] !== 'false'
+export const toggleEnabled = (fields: Record<string, string>, key: string, defaultValue = true) =>
+  fields[key] ? fields[key] !== 'false' : defaultValue
 
 export const bracketValue = (fields: Record<string, string>, key: string, fallback = '') =>
   `【${valueOf(fields, key) || fallback}】`
@@ -50,9 +65,9 @@ export const createStoryboardShotRange = (index = Date.now()): StoryboardShotRan
   content: ''
 })
 
-export const parseStoryboardShotRanges = (fields: Record<string, string>): StoryboardShotRange[] => {
+export const parseStoryboardShotRanges = (fields: Record<string, string>, fieldId = 'shotRanges'): StoryboardShotRange[] => {
   try {
-    const parsed = JSON.parse(fields.shotRanges || '[]') as Partial<StoryboardShotRange>[]
+    const parsed = JSON.parse(fields[fieldId] || '[]') as Partial<StoryboardShotRange>[]
     if (Array.isArray(parsed) && parsed.length > 0) {
       return parsed.map((range, index) => ({
         id: typeof range.id === 'string' && range.id ? range.id : `shot-range-${index + 1}`,
@@ -63,6 +78,10 @@ export const parseStoryboardShotRanges = (fields: Record<string, string>): Story
     }
   } catch {
     // Fall through to legacy migration/default.
+  }
+
+  if (fieldId !== 'shotRanges' && fields[fieldId]?.trim()) {
+    return [{ ...createStoryboardShotRange(1), content: fields[fieldId] }]
   }
 
   const legacyRanges = [
@@ -77,11 +96,18 @@ export const parseStoryboardShotRanges = (fields: Record<string, string>): Story
 export const stringifyStoryboardShotRanges = (ranges: StoryboardShotRange[]): string =>
   JSON.stringify(ranges)
 
-export const buildStoryboardShotRangeOutput = (fields: Record<string, string>): string => {
-  const ranges = parseStoryboardShotRanges(fields)
+export const buildStoryboardShotRangeOutput = (fields: Record<string, string>, fieldId = 'shotRanges', label = '镜头格', fallback = '这里填写镜头叙事，一个大概的剧情'): string => {
+  const ranges = parseStoryboardShotRanges(fields, fieldId)
   return ranges
-    .map(range => `镜头格【${range.start}-${range.end}】：【${range.content.trim() || '这里填写镜头叙事，一个大概的剧情'}】`)
+    .map(range => `${label}【${range.start}-${range.end}】：【${range.content.trim() || fallback}】`)
     .join('\n')
+}
+
+export const buildStoryboardInjectionForVideo = (fields: Record<string, string>): string => {
+  return joinBlocks([
+    valueOf(fields, 'theme') && `主题：${bracketValue(fields, 'theme')}`,
+    valueOf(fields, 'storyMotion') && `故事节奏：${bracketValue(fields, 'storyMotion')}`
+  ])
 }
 
 export const stageDefinitions: StageDefinition[] = [
@@ -228,7 +254,7 @@ export const stageDefinitions: StageDefinition[] = [
       },
       {
         id: 'storyMotion',
-        label: '故事 + 运镜方式',
+        label: '故事节奏',
         placeholder: '例如：专注于角色穿行、回望、推进、环绕和情绪转折',
         rows: 3
       },
@@ -344,19 +370,21 @@ ${buildStoryboardShotRangeOutput(fields)}`,
         id: 'storyboardRef',
         label: 'Storyboard Ref',
         placeholder: '使用故事板参考 @[STORYBOARD REF] 作为 15 秒视频的完整视觉和情感叙事来源。',
+        fixedValue: '使用故事板参考 @[STORYBOARD REF] 作为 15 秒视频的完整视觉和情感叙事来源。',
         rows: 3
       },
       {
         id: 'shotOrder',
         label: '镜头顺序',
         placeholder: '从左到右、从上到下依次遵循所有 12 个节拍。不要重新诠释动作、构图、镜头角度或氛围。保留故事板的镜头顺序、动静反差、构图多样性和最终高潮风格。',
-        rows: 5,
-        presetType: 'camera'
+        fixedValue: '从左到右、从上到下依次遵循所有 12 个节拍。不要重新诠释动作、构图、镜头角度或氛围。保留故事板的镜头顺序、动静反差、构图多样性和最终高潮风格。',
+        rows: 5
       },
       {
         id: 'duration',
         label: '压缩时长',
         placeholder: '将完整的 12 节拍序列压缩到 15 秒内。',
+        fixedValue: '将完整的 12 节拍序列压缩到 15 秒内。',
         rows: 2
       },
       {
@@ -369,6 +397,7 @@ ${buildStoryboardShotRangeOutput(fields)}`,
         id: 'identityLock',
         label: '角色身份锁定',
         placeholder: '保持角色参考相同的绝对核心主体身份：角色身份 / 服装 / 发型 / 道具 / 气质。不要改变角色外貌和身份。',
+        fixedValue: '保持角色参考相同的绝对核心主体身份：角色身份 / 服装 / 发型 / 道具 / 气质。不要改变角色外貌和身份。',
         rows: 5
       },
       {
@@ -386,9 +415,9 @@ ${buildStoryboardShotRangeOutput(fields)}`,
       {
         id: 'shotKeywords',
         label: '镜头关键词',
-        placeholder: '[镜头关键词]',
-        rows: 2,
-        presetType: 'camera'
+        placeholder: '这里填写每段镜头提示词，可从镜头 Prompt 库介入',
+        presetType: 'camera',
+        kind: 'shotRanges'
       },
       {
         id: 'environmentKeywords',
@@ -402,19 +431,48 @@ ${buildStoryboardShotRangeOutput(fields)}`,
         placeholder: '在低角度仰拍、强烈光线或戏剧性构图下，角色完成一个极具仪式感 / 爆发力 / 信仰感的终极姿态。画面保持静谧但充满张力，呈现电影级收束。',
         rows: 5,
         presetType: 'camera'
+      },
+      {
+        id: 'needsBackgroundBgm',
+        label: '是否需要背景 BGM',
+        placeholder: '需要背景 BGM',
+        kind: 'toggle'
+      },
+      {
+        id: 'needsVoiceDialogue',
+        label: '是否需要人声对话',
+        placeholder: '需要人声对话',
+        kind: 'toggle'
+      },
+      {
+        id: 'needsFirstLastFrame',
+        label: '首尾帧控制',
+        placeholder: '开启首尾帧控制',
+        kind: 'toggle',
+        toggleDefault: false,
+        toggleLabels: {
+          on: '开启',
+          off: '关闭'
+        }
       }
     ],
-    buildOutput: (fields) => joinBlocks([
-      valueOf(fields, 'storyboardRef'),
-      valueOf(fields, 'shotOrder'),
-      valueOf(fields, 'duration'),
+    buildOutput: (fields, project) => joinBlocks([
+      fixedValueOf('storyboardRef'),
+      fixedValueOf('shotOrder'),
+      fixedValueOf('duration'),
+      project?.storyboard && buildStoryboardInjectionForVideo(project.storyboard.fields) && `故事版内容注入：\n${buildStoryboardInjectionForVideo(project.storyboard.fields)}`,
       valueOf(fields, 'actionSnapshot'),
-      valueOf(fields, 'identityLock'),
+      fixedValueOf('identityLock'),
       valueOf(fields, 'actionKeywords'),
       valueOf(fields, 'emotionKeywords'),
-      valueOf(fields, 'shotKeywords'),
+      buildStoryboardShotRangeOutput(fields, 'shotKeywords', '镜头提示词', '这里填写每段镜头提示词'),
       valueOf(fields, 'environmentKeywords'),
-      valueOf(fields, 'finalShot')
+      valueOf(fields, 'finalShot'),
+      !toggleAllows(fields, 'needsBackgroundBgm') && '只保留物理音效，不要背景BGM音乐。',
+      !toggleAllows(fields, 'needsVoiceDialogue') && '不要人声对话。',
+      toggleEnabled(fields, 'needsFirstLastFrame', false) && `首帧：
+
+尾帧：`
     ])
   }
 ]
@@ -424,5 +482,5 @@ export const stageByKey = Object.fromEntries(stageDefinitions.map(stage => [stag
 
 export const getStageDefinition = (stage: ThreeStageKey): StageDefinition => stageByKey[stage] || stageByKey.character
 
-export const buildThreeStageOutput = (stage: ThreeStageKey, fields: Record<string, string>): string =>
-  getStageDefinition(stage).buildOutput(fields)
+export const buildThreeStageOutput = (stage: ThreeStageKey, fields: Record<string, string>, project?: IThreeStageProject): string =>
+  getStageDefinition(stage).buildOutput(fields, project)

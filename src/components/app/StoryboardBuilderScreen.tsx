@@ -1,5 +1,5 @@
 import { Database, Home, Image, MessageSquare, Pencil, Plus, Send, Trash2 } from 'lucide-react'
-import { AgentCollaborationPanel } from '@/components/AgentCollaborationPanel'
+import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { buildStoryboardWorkspaceContext } from '@/utils/agent-workspace'
 import {
   addStoryboardRow,
@@ -310,7 +310,7 @@ export const StoryboardBuilderScreen = ({
         </div>
 
         {!previewMode && (
-        <AgentCollaborationPanel
+        <AIChatbotBox
           title="Storyboard Agent"
           mode="storyboard-workspace"
           workspaceContext={workspaceContext}

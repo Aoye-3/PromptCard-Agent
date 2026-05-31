@@ -22,6 +22,7 @@ class PromptCardRuntimeMessageRequest(BaseModel):
     thread_id: str | None = Field(default=None, alias="threadId")
     content: str
     mode: str | None = None
+    permission_scope: str | None = Field(default=None, alias="permissionScope")
     workspace_context: dict[str, Any] | None = Field(default=None, alias="workspaceContext")
 
 
@@ -82,7 +83,14 @@ class PromptCardRuntimeService:
             )
             thread_id = thread_response.thread_id
 
-        prompt = build_runtime_prompt(body.content, body.workspace_context)
+        permission_scope = body.permission_scope or (
+            "workspace-chatbot-agent" if body.workspace_context else "prompt-library-agent"
+        )
+        prompt = build_runtime_prompt(
+            body.content,
+            body.workspace_context,
+            permission_scope=permission_scope,
+        )
         run_payload = await thread_runs.wait_run(
             thread_id,
             thread_runs.RunCreateRequest(
@@ -99,7 +107,11 @@ class PromptCardRuntimeService:
             request,
         )
         text = extract_assistant_text(run_payload)
-        proposals = parse_agent_workspace_proposals(text, workspace_context=body.workspace_context)
+        proposals = parse_agent_workspace_proposals(
+            text,
+            workspace_context=body.workspace_context,
+            permission_scope=permission_scope,
+        )
         return {
             "threadId": thread_id,
             "text": text,
@@ -111,7 +123,12 @@ class PromptCardRuntimeService:
 runtime_service = PromptCardRuntimeService()
 
 
-def build_runtime_prompt(content: str, workspace_context: dict[str, Any] | None = None) -> str:
+def build_runtime_prompt(
+    content: str,
+    workspace_context: dict[str, Any] | None = None,
+    *,
+    permission_scope: str = "prompt-library-agent",
+) -> str:
     prompt_library_snapshot = json.dumps(
         [
             {
@@ -129,11 +146,29 @@ def build_runtime_prompt(content: str, workspace_context: dict[str, Any] | None 
     parts = [
         "You are the embedded PMAgent collaboration agent. Reply in concise Chinese by default.",
         "You are a conversational editor for PromptCard components. Talk with the user, then return executable JSON instructions when a card change is clearly requested.",
-        "For card workspace edits, the frontend will apply workspace_card_update and workspace_card_create instructions directly. Do not describe them as pending proposals or ask for approval after the user has requested the change.",
         "If the user intent is unclear, ask a concise follow-up question in Chinese and do not return JSON.",
-        "When changing workspace cards, include a JSON block with kind agent_workspace_proposals and proposal items using workspace_card_update, workspace_card_create, storyboard_update, or prompt_library_write_proposal.",
         "Only include fields that should change. Never invent cardId, sequenceId, or rowId; use IDs from the workspace snapshot.",
+        "PromptCard manages prompts, scripts, Prompt Library assets, and storyboard data. It does not generate video.",
     ]
+    if permission_scope == "workspace-chatbot-agent":
+        parts.extend(
+            [
+                "Permission scope: workspace-chatbot-agent.",
+                "Prompt Library writes are forbidden in this workspace chatbot scope. Do not emit prompt_library_write_proposal JSON here.",
+                "If content should become a reusable Prompt Library asset, tell the user to go to the Prompt Library decomposition/write page.",
+                "For workspace edits, include a JSON block with kind agent_workspace_proposals and only workspace_card_update, workspace_card_create, or storyboard_update proposal items.",
+                "For card workspace edits, the frontend may apply workspace_card_update and workspace_card_create instructions directly when the user requested the change.",
+            ]
+        )
+    else:
+        parts.extend(
+            [
+                "Permission scope: Prompt Library scope.",
+                "Only create new Prompt Library presets. Never update, archive, delete, overwrite, or replace existing prompts.",
+                "Prompt Library scope may emit prompt_library_write_proposal JSON only with operation create.",
+                "Prompt Library is the only write entry point for reusable preset decomposition and storage.",
+            ]
+        )
     if workspace_context:
         parts.extend(["Current workspace snapshot:", json.dumps(workspace_context, ensure_ascii=False, indent=2)])
     parts.extend(["Current Prompt library snapshot:", prompt_library_snapshot, "User request:", content])
@@ -167,6 +202,7 @@ def parse_agent_workspace_proposals(
     text: str,
     *,
     workspace_context: dict[str, Any] | None = None,
+    permission_scope: str = "prompt-library-agent",
 ) -> list[dict[str, Any]]:
     proposals: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -182,7 +218,11 @@ def parse_agent_workspace_proposals(
         items = parsed.get("proposals") if parsed.get("kind") == "agent_workspace_proposals" and isinstance(parsed.get("proposals"), list) else [parsed.get("proposal") if parsed.get("kind") == "prompt_library_write_proposal" else parsed]
         for index, item in enumerate(items):
             normalized = _normalize_proposal(item, len(proposals) + index, valid_ids)
-            if normalized and normalized["id"] not in seen:
+            if (
+                normalized
+                and _proposal_is_allowed(normalized, permission_scope)
+                and normalized["id"] not in seen
+            ):
                 seen.add(normalized["id"])
                 proposals.append(normalized)
     return proposals
@@ -245,14 +285,25 @@ def _normalize_proposal(value: Any, index: int, valid_ids: dict[str, set[str]]) 
 
     proposal_draft = value.get("presetDraft")
     if (kind == "prompt_library_write_proposal" or proposal_draft) and isinstance(proposal_draft, dict):
+        if value.get("operation", "create") != "create":
+            return None
         if not proposal_draft.get("label") or not proposal_draft.get("content"):
+            return None
+        label = str(proposal_draft.get("label") or "").strip()
+        content = str(proposal_draft.get("content") or "").strip()
+        if not label or not content:
             return None
         return {
             **base,
             "kind": "prompt_library_write_proposal",
-            "operation": value.get("operation") or "create",
-            "targetPresetId": value.get("targetPresetId"),
-            "presetDraft": proposal_draft,
+            "operation": "create",
+            "targetPresetId": None,
+            "presetDraft": {
+                **proposal_draft,
+                "label": label,
+                "content": content,
+                "category": str(proposal_draft.get("category") or "agent").strip() or "agent",
+            },
         }
     return None
 
@@ -307,6 +358,12 @@ def _pick_allowed(value: Any, keys: list[str]) -> dict[str, str] | None:
         return None
     result = {key: value[key] for key in keys if isinstance(value.get(key), str)}
     return result or None
+
+
+def _proposal_is_allowed(proposal: dict[str, Any], permission_scope: str) -> bool:
+    if permission_scope == "workspace-chatbot-agent":
+        return proposal.get("kind") != "prompt_library_write_proposal"
+    return True
 
 
 def _message_text(content: Any) -> str:

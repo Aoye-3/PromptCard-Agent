@@ -358,10 +358,11 @@ export const storage = {
         theme: 'light',
         defaultMode: 'learn',
         autoSave: true,
+        autoSaveIdleSeconds: 10,
         presetSort: 'usage',
         meta: {}
       }
-      return (await localforage.getItem<IUserSettings>('settings')) || defaultSettings
+      return { ...defaultSettings, ...((await localforage.getItem<Partial<IUserSettings>>('settings')) || {}) }
     },
     async save(settings: Partial<IUserSettings>): Promise<IUserSettings> {
       const current = await this.get()

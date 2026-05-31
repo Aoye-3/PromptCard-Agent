@@ -1,7 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import {
   Bot,
-  Check,
   Database,
   Files,
   GitBranch,
@@ -34,16 +33,13 @@ export function AgentDashboard() {
     proposals,
     checkRuntime,
     sendMessage,
-    markProposalStatus,
     clearMessages
   } = useAgentStore()
-  const { presets, initialized, init, addPreset, updatePreset, deletePreset } = usePresetStore()
+  const { presets, initialized, init } = usePresetStore()
   const [draft, setDraft] = useState('用一句话回复：PromptCard Agent runtime is connected.')
 
   useEffect(() => {
-    if (!initialized) {
-      init()
-    }
+    if (!initialized) init()
     checkRuntime()
   }, [checkRuntime, init, initialized])
 
@@ -51,38 +47,14 @@ export function AgentDashboard() {
     () => models.find(model => model.name === 'deepseek-chat') || models[0],
     [models]
   )
-  const promptLibraryProposals = useMemo(
-    () => proposals.filter(isPromptLibraryProposal),
+  const promptLibraryProposalCount = useMemo(
+    () => proposals.filter(isPromptLibraryProposal).length,
     [proposals]
   )
 
   const handleSend = async (content = draft) => {
     if (!content.trim() || running) return
-    await sendMessage(content.trim(), presets)
-  }
-
-  const approveProposal = async (proposal: PromptLibraryWriteProposal) => {
-    const draftPreset = {
-      ...proposal.presetDraft,
-      meta: {
-        ...(proposal.presetDraft.meta || {}),
-        agentProposalId: proposal.id,
-        agentName: proposal.agentName,
-        rationale: proposal.rationale,
-        approvedAt: Date.now()
-      }
-    }
-
-    if (proposal.operation === 'create') {
-      await addPreset(draftPreset)
-    }
-    if (proposal.operation === 'update' && proposal.targetPresetId) {
-      await updatePreset(proposal.targetPresetId, draftPreset)
-    }
-    if (proposal.operation === 'archive' && proposal.targetPresetId) {
-      await deletePreset(proposal.targetPresetId)
-    }
-    markProposalStatus(proposal.id, 'approved')
+    await sendMessage(content.trim(), presets, { permissionScope: 'workspace-chatbot-agent' })
   }
 
   return (
@@ -92,23 +64,15 @@ export function AgentDashboard() {
           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-black text-white">
             <Bot className="h-6 w-6" />
           </div>
-          <h1 className="text-3xl font-black text-black">Agent仪表盘</h1>
-          <p className="mt-2 text-sm text-gray-500">DeerFlow Runtime、ToolUse、Skills 和 Prompt库提案集中在这里。</p>
+          <h1 className="text-3xl font-black text-black">Agent 仪表盘</h1>
+          <p className="mt-2 text-sm text-gray-500">Runtime、模型、工具和诊断对话集中在这里；Prompt 库写入只在 Prompt 库页面审批。</p>
         </div>
         <div className="flex gap-3">
-          <button
-            type="button"
-            onClick={() => checkRuntime()}
-            className="inline-flex items-center gap-2 rounded-full bg-stone-100 px-5 py-3 text-sm font-bold text-black"
-          >
+          <button type="button" onClick={() => checkRuntime()} className="inline-flex items-center gap-2 rounded-full bg-stone-100 px-5 py-3 text-sm font-bold text-black">
             <RefreshCw className="h-4 w-4" />
             重新连接
           </button>
-          <button
-            type="button"
-            onClick={clearMessages}
-            className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 text-sm font-bold text-white"
-          >
+          <button type="button" onClick={clearMessages} className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 text-sm font-bold text-white">
             <X className="h-4 w-4" />
             清空线程
           </button>
@@ -121,7 +85,7 @@ export function AgentDashboard() {
         <StatusTile icon={<Sparkles className="h-5 w-5" />} label="Model" value={deepseekModel?.name || '未加载'} active={Boolean(deepseekModel)} />
         <StatusTile icon={<Files className="h-5 w-5" />} label="Skills" value={`${skills.length} 个`} active={skills.length > 0} />
         <StatusTile icon={<Wrench className="h-5 w-5" />} label="Tools" value={`${tools.length + builtinTools.length} 个`} active={tools.length > 0} />
-        <StatusTile icon={<Database className="h-5 w-5" />} label="Prompt库" value={`${presets.length} presets`} active />
+        <StatusTile icon={<Database className="h-5 w-5" />} label="Prompt 库" value={`${presets.length} presets`} active />
       </div>
 
       {runtimeError && (
@@ -134,21 +98,15 @@ export function AgentDashboard() {
         <section className="rounded-3xl bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)]">
           <div className="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 className="text-lg font-black text-black">默认 Agent 运行</h2>
+              <h2 className="text-lg font-black text-black">诊断对话</h2>
               <p className="mt-1 text-xs font-semibold text-gray-400">
                 {activeThreadId ? `Thread ${activeThreadId}` : user?.email || '应用内自动接入中'}
               </p>
             </div>
-            <div className="flex gap-2">
-              <QuickButton
-                label="Prompt库建议"
-                onClick={() => setDraft('请检查当前 Prompt库，提出一个新的 style 类型 preset。只生成一个写入提案 JSON，不要直接修改 Prompt库。')}
-              />
-              <QuickButton
-                label="Skill 辅助执行"
-                onClick={() => setDraft('请根据当前启用的 DeerFlow Skills 和只读工具能力，说明你会如何帮助我优化 PromptCard 项目的提示词工作流。')}
-              />
-            </div>
+            <QuickButton
+              label="Runtime 检查"
+              onClick={() => setDraft('请说明当前 PromptCard Agent runtime 的连接状态、可用模型、工具和技能。不要生成 Prompt 库写入提案。')}
+            />
           </div>
 
           <textarea
@@ -164,7 +122,7 @@ export function AgentDashboard() {
               className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 text-sm font-black text-white disabled:opacity-40"
             >
               {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              发送到 DeepSeek Agent
+              发送到 Agent
             </button>
           </div>
 
@@ -173,12 +131,7 @@ export function AgentDashboard() {
               <div className="rounded-3xl bg-gray-50 p-6 text-sm font-semibold text-gray-400">暂无消息</div>
             ) : (
               messages.map(message => (
-                <div
-                  key={message.id}
-                  className={`rounded-3xl p-4 text-sm leading-6 ${
-                    message.role === 'user' ? 'bg-black text-white' : 'bg-gray-50 text-gray-800'
-                  }`}
-                >
+                <div key={message.id} className={`rounded-3xl p-4 text-sm leading-6 ${message.role === 'user' ? 'bg-black text-white' : 'bg-gray-50 text-gray-800'}`}>
                   <div className="mb-2 text-xs font-black opacity-60">{message.role === 'user' ? 'You' : 'Agent'}</div>
                   <pre className="whitespace-pre-wrap font-sans">{message.content}</pre>
                 </div>
@@ -195,7 +148,7 @@ export function AgentDashboard() {
             </div>
             <SummaryRow label="Subagent" value={subagentEnabled ? '已启用' : '未启用'} />
             <SummaryRow label="Tool Search" value={builtinTools.includes('tool_search') ? '已启用' : '未启用'} />
-            <SummaryRow label="安全工具组" value={toolGroups(tools)} />
+            <SummaryRow label="工具组" value={toolGroups(tools)} />
             <div className="mt-5">
               <CapabilityList title="Tools" items={[...builtinTools, ...tools.map(tool => `${tool.group}:${tool.name}`)].slice(0, 10)} />
               <CapabilityList title="Skills" items={skills.filter(skill => skill.enabled !== false).map(skill => skill.name).slice(0, 10)} />
@@ -203,47 +156,12 @@ export function AgentDashboard() {
           </section>
 
           <section className="rounded-3xl bg-white p-6 shadow-[0_24px_70px_rgba(15,23,42,0.08)]">
-            <h2 className="text-lg font-black text-black">Prompt库写入提案</h2>
-            <div className="mt-4 space-y-3">
-              {promptLibraryProposals.length === 0 ? (
-                <div className="rounded-2xl bg-gray-50 p-4 text-sm font-semibold text-gray-400">Agent 还没有提交提案</div>
-              ) : (
-                promptLibraryProposals.map(proposal => (
-                  <div key={proposal.id} className="rounded-2xl border border-gray-100 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-black text-black">{proposal.presetDraft.label}</div>
-                        <div className="mt-1 text-xs font-semibold text-gray-400">
-                          {proposal.operation} · {proposal.presetDraft.type}
-                        </div>
-                      </div>
-                      <span className="rounded-full bg-gray-100 px-2 py-1 text-[11px] font-black text-gray-500">{proposal.status}</span>
-                    </div>
-                    <p className="mt-3 text-xs leading-5 text-gray-500">{proposal.presetDraft.content}</p>
-                    {proposal.rationale && <p className="mt-2 text-xs leading-5 text-amber-700">{proposal.rationale}</p>}
-                    {proposal.status === 'pending' && (
-                      <div className="mt-4 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => approveProposal(proposal)}
-                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-black px-3 py-2 text-xs font-black text-white"
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                          批准
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => markProposalStatus(proposal.id, 'rejected')}
-                          className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-gray-100 px-3 py-2 text-xs font-black text-gray-600"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                          拒绝
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
+            <h2 className="text-lg font-black text-black">Prompt 库写入权限</h2>
+            <div className="mt-4 rounded-2xl bg-gray-50 p-4 text-sm font-semibold leading-6 text-gray-500">
+              Prompt 拆解、写入、更新和归档只在 Prompt 库页面处理。
+              {promptLibraryProposalCount > 0
+                ? ` 当前有 ${promptLibraryProposalCount} 个 Prompt 库提案，请前往 Prompt 库审批。`
+                : ' 当前没有待审批的 Prompt 库提案。'}
             </div>
           </section>
         </aside>
@@ -252,17 +170,7 @@ export function AgentDashboard() {
   )
 }
 
-function StatusTile({
-  icon,
-  label,
-  value,
-  active
-}: {
-  icon: ReactNode
-  label: string
-  value: string
-  active?: boolean
-}) {
+function StatusTile({ icon, label, value, active }: { icon: ReactNode; label: string; value: string; active?: boolean }) {
   return (
     <div className="rounded-3xl bg-white p-5 shadow-[0_24px_70px_rgba(15,23,42,0.08)]">
       <div className={`mb-4 flex h-10 w-10 items-center justify-center rounded-2xl ${active ? 'bg-black text-white' : 'bg-gray-100 text-gray-400'}`}>
@@ -276,11 +184,7 @@ function StatusTile({
 
 function QuickButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-2 text-xs font-black text-amber-800"
-    >
+    <button type="button" onClick={onClick} className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-4 py-2 text-xs font-black text-amber-800">
       <Sparkles className="h-4 w-4" />
       {label}
     </button>

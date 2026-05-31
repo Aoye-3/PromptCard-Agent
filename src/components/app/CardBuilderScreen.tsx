@@ -3,7 +3,7 @@ import { Bot, Copy, Database, Grid2X2, Home, Pencil, Plus, Trash2 } from 'lucide
 import CardComponent from '@/components/CardComponent'
 import CreativeMode from '@/components/CreativeMode'
 import PromptComposer from '@/components/PromptComposer'
-import { AgentCollaborationPanel } from '@/components/AgentCollaborationPanel'
+import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { buildCardWorkspaceContext } from '@/utils/agent-workspace'
 import { findDuplicatePhrases } from '@/utils/promptComposer'
 import type { IPreset } from '@/models/Card.model'
@@ -216,7 +216,7 @@ export const CardBuilderScreen = ({
           </div>
         </div>
         {!previewMode && rightPanelMode === 'agent' && (
-        <AgentCollaborationPanel
+        <AIChatbotBox
           title="Agent 协作"
           mode="card-workspace"
           workspaceContext={workspaceContext}

@@ -3,6 +3,7 @@ import { ArchiveRestore, Plus, Search, Trash2, X } from 'lucide-react'
 import { usePresetStore } from '@/stores/preset.store'
 import PromptLibraryTable from './PromptLibraryTable'
 import PromptLibraryForm from './PromptLibraryForm'
+import { PromptLibraryAgentPanel } from './PromptLibraryAgentPanel'
 import type { CardType, IPreset } from '@/models/Card.model'
 import { useI18n } from '@/i18n'
 import { storage } from '@/utils/storage'
@@ -121,8 +122,8 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
   }
 
   return (
-    <div className={embedded ? 'bg-white' : 'min-h-screen bg-white'}>
-      <div className="px-6 pt-5">
+    <div className={embedded ? 'flex h-full flex-col overflow-hidden bg-white' : 'flex h-screen flex-col overflow-hidden bg-white'}>
+      <div className="shrink-0 px-6 pt-5">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{t('promptLibrary')}</h1>
@@ -161,8 +162,10 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-4 py-8 pb-28 sm:px-6 lg:px-8">
-        <div className="mb-8 rounded-[24px] border border-gray-100 bg-white p-5 shadow-[0_18px_45px_rgba(15,23,42,0.04)]">
+      <div className="min-h-0 flex-1 px-4 py-6 sm:px-6 lg:px-8">
+        <div className="mx-auto grid h-full max-w-[1900px] gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(500px,0.88fr)]">
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+        <div className="mb-5 shrink-0 rounded-[24px] border border-gray-100 bg-white p-5 shadow-[0_18px_45px_rgba(15,23,42,0.04)]">
           <div className="mb-4 flex items-center gap-3">
             <span className="fa fa-filter text-gray-500 text-lg"></span>
             <h3 className="text-base font-semibold text-gray-900">{t('categoryFilter')}</h3>
@@ -194,7 +197,7 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
           </div>
         </div>
 
-        <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="mb-5 grid shrink-0 grid-cols-2 gap-4 md:grid-cols-4">
           <LibraryStat icon="fa-database" label={t('totalCount')} value={visiblePresets.length} />
           <LibraryStat icon="fa-puzzle-piece" label={t('cardTypeCount')} value={cardTypes.length} />
           <LibraryStat
@@ -226,8 +229,8 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
           />
         )}
 
-        <div className="overflow-hidden rounded-[24px] border border-gray-100 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]">
-          <div className="border-b border-gray-100 bg-gray-50 px-6 py-3 text-sm text-gray-600">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-gray-100 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]">
+          <div className="shrink-0 border-b border-gray-100 bg-gray-50 px-6 py-3 text-sm text-gray-600">
             {activeCategory === 'all'
               ? t('selectCategoryToSort')
               : isSearchActive
@@ -236,15 +239,20 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
                   ? t('dragToSort')
                   : t('notEnoughToSort')}
           </div>
-          <PromptLibraryTable
-            presets={filteredPresets}
-            selectedIds={showTrash ? selectedTrashIds : selectedIds}
-            onEdit={handleEditPreset}
-            onDelete={handleDeletePreset}
-            onToggleSelect={showTrash ? toggleTrashSelected : toggleSelected}
-            onReorder={handleReorderPresets}
-            sortable={!showTrash && canReorder}
-          />
+          <div data-testid="prompt-library-list-scroll" className="min-h-0 flex-1 overflow-y-auto">
+            <PromptLibraryTable
+              presets={filteredPresets}
+              selectedIds={showTrash ? selectedTrashIds : selectedIds}
+              onEdit={handleEditPreset}
+              onDelete={handleDeletePreset}
+              onToggleSelect={showTrash ? toggleTrashSelected : toggleSelected}
+              onReorder={handleReorderPresets}
+              sortable={!showTrash && canReorder}
+            />
+          </div>
+        </div>
+        </div>
+        <PromptLibraryAgentPanel />
         </div>
       </div>
 

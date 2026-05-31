@@ -4,6 +4,7 @@ import type {
   AgentAuthStatus,
   AgentInfo,
   AgentMessage,
+  AgentPermissionScope,
   AgentModelInfo,
   AgentRuntimeStatus,
   AgentSkillInfo,
@@ -35,7 +36,11 @@ interface AgentState {
   sendMessage: (
     content: string,
     presets: IPreset[],
-    options?: { workspaceContext?: AgentWorkspaceContext; mode?: AgentWorkspaceMode }
+    options?: {
+      workspaceContext?: AgentWorkspaceContext
+      mode?: AgentWorkspaceMode
+      permissionScope?: AgentPermissionScope
+    }
   ) => Promise<AgentWorkspaceProposal[]>
   markProposalStatus: (id: string, status: 'approved' | 'rejected') => void
   clearMessages: () => void
@@ -126,6 +131,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         threadId: get().activeThreadId,
         content,
         mode: options?.mode,
+        permissionScope: options?.permissionScope || (options?.workspaceContext ? 'workspace-chatbot-agent' : 'prompt-library-agent'),
         workspaceContext: options?.workspaceContext
       })
       const proposals = result.proposals.map(proposal => ({

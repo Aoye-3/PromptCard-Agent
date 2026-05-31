@@ -6,8 +6,7 @@ import type {
   AgentMessage,
   AgentWorkspaceContext,
   AgentWorkspaceMode,
-  AgentWorkspaceProposal,
-  PromptLibraryWriteProposal
+  AgentWorkspaceProposal
 } from '@/models/Agent.model'
 
 interface AgentCollaborationPanelProps {
@@ -36,7 +35,7 @@ export function AgentCollaborationPanel({
     sendMessage,
     markProposalStatus
   } = useAgentStore()
-  const { presets, initialized, init, addPreset, updatePreset, deletePreset } = usePresetStore()
+  const { presets, initialized, init } = usePresetStore()
   const [draft, setDraft] = useState('告诉 Agent 你想怎么修改当前选中的提示词卡片。')
   const [appliedMessages, setAppliedMessages] = useState<AgentMessage[]>([])
 
@@ -46,7 +45,10 @@ export function AgentCollaborationPanel({
   }, [checkRuntime, init, initialized])
 
   const visibleProposals = useMemo(
-    () => proposals.filter(proposal => !proposal.contextId || proposal.contextId === workspaceContext.contextId),
+    () => proposals.filter(proposal =>
+      isWorkspaceExecutableProposal(proposal) &&
+      (!proposal.contextId || proposal.contextId === workspaceContext.contextId)
+    ),
     [proposals, workspaceContext.contextId]
   )
 
@@ -57,7 +59,11 @@ export function AgentCollaborationPanel({
 
   const handleSend = async (content = draft) => {
     if (!content.trim() || running) return
-    const returnedProposals = await sendMessage(content.trim(), presets, { workspaceContext, mode })
+    const returnedProposals = await sendMessage(content.trim(), presets, {
+      workspaceContext,
+      mode,
+      permissionScope: 'workspace-chatbot-agent'
+    })
 
     if (autoApplyWorkspaceChanges) {
       const workspaceProposals = returnedProposals.filter(isDirectWorkspaceProposal)
@@ -82,11 +88,8 @@ export function AgentCollaborationPanel({
   }
 
   const handleApprove = async (proposal: AgentWorkspaceProposal) => {
-    if (isPromptLibraryProposal(proposal)) {
-      await approvePromptLibraryProposal(proposal, { addPreset, updatePreset, deletePreset })
-    } else {
-      await onApplyWorkspaceProposal(proposal)
-    }
+    if (!isWorkspaceExecutableProposal(proposal)) return
+    await onApplyWorkspaceProposal(proposal)
     markProposalStatus(proposal.id, 'approved')
   }
 
@@ -254,36 +257,14 @@ function ProposalCard({
   )
 }
 
-async function approvePromptLibraryProposal(
-  proposal: PromptLibraryWriteProposal,
-  actions: {
-    addPreset: ReturnType<typeof usePresetStore.getState>['addPreset']
-    updatePreset: ReturnType<typeof usePresetStore.getState>['updatePreset']
-    deletePreset: ReturnType<typeof usePresetStore.getState>['deletePreset']
-  }
-) {
-  const draftPreset = {
-    ...proposal.presetDraft,
-    meta: {
-      ...(proposal.presetDraft.meta || {}),
-      agentProposalId: proposal.id,
-      agentName: proposal.agentName,
-      rationale: proposal.rationale,
-      approvedAt: Date.now()
-    }
-  }
-
-  if (proposal.operation === 'create') await actions.addPreset(draftPreset)
-  if (proposal.operation === 'update' && proposal.targetPresetId) await actions.updatePreset(proposal.targetPresetId, draftPreset)
-  if (proposal.operation === 'archive' && proposal.targetPresetId) await actions.deletePreset(proposal.targetPresetId)
-}
-
-function isPromptLibraryProposal(proposal: AgentWorkspaceProposal): proposal is PromptLibraryWriteProposal {
-  return proposal.kind === 'prompt_library_write_proposal' || Boolean((proposal as PromptLibraryWriteProposal).presetDraft)
-}
-
 function isDirectWorkspaceProposal(proposal: AgentWorkspaceProposal) {
   return proposal.kind === 'workspace_card_create' || proposal.kind === 'workspace_card_update'
+}
+
+function isWorkspaceExecutableProposal(proposal: AgentWorkspaceProposal) {
+  return proposal.kind === 'workspace_card_create' ||
+    proposal.kind === 'workspace_card_update' ||
+    proposal.kind === 'storyboard_update'
 }
 
 function summarizeAppliedChanges(proposals: AgentWorkspaceProposal[]) {
@@ -302,15 +283,17 @@ function proposalTitle(proposal: AgentWorkspaceProposal) {
   if (proposal.kind === 'workspace_card_create') return `Create ${proposal.cardDraft.type} card`
   if (proposal.kind === 'workspace_card_update') return `Update ${proposal.updates.length} card${proposal.updates.length > 1 ? 's' : ''}`
   if (proposal.kind === 'storyboard_update') return `Update storyboard ${proposal.rowId ? 'row' : 'sequence'}`
-  return (proposal as PromptLibraryWriteProposal).presetDraft?.label || 'Prompt library proposal'
+  return 'Unsupported workspace proposal'
 }
 
 function proposalSummary(proposal: AgentWorkspaceProposal) {
   if (proposal.kind === 'workspace_card_create') return proposal.cardDraft.content
   if (proposal.kind === 'workspace_card_update') return proposal.updates.map(update => `${update.cardId}: ${update.title || ''} ${update.content || ''}`).join('\n')
   if (proposal.kind === 'storyboard_update') return JSON.stringify({ sequenceUpdates: proposal.sequenceUpdates, rowUpdates: proposal.rowUpdates }, null, 2)
-  return (proposal as PromptLibraryWriteProposal).presetDraft?.content || ''
+  return ''
 }
+
+export const AIChatbotBox = AgentCollaborationPanel
 
 function statusText(status: string) {
   if (status === 'connected') return 'Runtime connected'

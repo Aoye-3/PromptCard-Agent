@@ -79,6 +79,8 @@ export interface PromptLibraryWriteProposal {
 
 export type AgentWorkspaceMode = 'card-workspace' | 'storyboard-workspace'
 
+export type AgentPermissionScope = 'workspace-chatbot-agent' | 'prompt-library-agent'
+
 export interface AgentWorkspaceContext {
   contextId: string
   mode: AgentWorkspaceMode

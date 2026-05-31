@@ -146,15 +146,14 @@ def prompt_library_search(query: str = "", card_type: str | None = None, limit: 
 
 @tool
 def prompt_library_propose_write(
-    operation: Literal["create", "update", "archive"],
     label: str,
     content: str,
     card_type: str = "style",
     category: str = "agent",
     rationale: str = "",
-    target_preset_id: str | None = None,
+    operation: Literal["create"] = "create",
 ) -> str:
-    """Create a Prompt库 write proposal. This tool never writes to the library directly."""
+    """Create an additive Prompt Library write proposal. This tool never updates, archives, deletes, or writes directly."""
     if card_type not in CARD_TYPES:
         card_type = "custom"
 
@@ -163,8 +162,8 @@ def prompt_library_propose_write(
         "threadId": None,
         "runId": None,
         "agentName": "DeepSeek Agent",
-        "operation": operation,
-        "targetPresetId": target_preset_id,
+        "operation": "create",
+        "targetPresetId": None,
         "presetDraft": {
             "type": card_type,
             "category": category or "agent",

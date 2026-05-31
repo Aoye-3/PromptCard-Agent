@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.gateway.routers import promptcard_runtime
 from app.gateway.promptcard_runtime import parse_agent_workspace_proposals
+from app.gateway.promptcard_runtime import build_runtime_prompt
 
 
 def test_parse_agent_workspace_proposals_filters_unknown_card_ids():
@@ -45,6 +46,163 @@ def test_parse_agent_workspace_proposals_filters_unknown_card_ids():
 
     assert [proposal["id"] for proposal in proposals] == ["keep"]
     assert proposals[0]["updates"] == [{"cardId": "card-1", "content": "Updated"}]
+
+
+def test_workspace_permission_scope_rejects_prompt_library_write_proposals():
+    text = """
+```json
+{
+  "kind": "prompt_library_write_proposal",
+  "proposal": {
+    "id": "library-write",
+    "agentName": "DeepSeek Agent",
+    "operation": "create",
+    "targetPresetId": null,
+    "presetDraft": {
+      "type": "style",
+      "category": "agent",
+      "label": "Library only",
+      "content": "Must not be executable from workspace chat"
+    },
+    "rationale": "wrong scope",
+    "status": "pending",
+    "createdAt": 1
+  }
+}
+```
+"""
+
+    proposals = parse_agent_workspace_proposals(
+        text,
+        permission_scope="workspace-chatbot-agent",
+    )
+
+    assert proposals == []
+
+
+def test_prompt_library_permission_scope_allows_prompt_library_write_proposals():
+    text = """
+```json
+{
+  "kind": "prompt_library_write_proposal",
+  "proposal": {
+    "id": "library-write",
+    "agentName": "DeepSeek Agent",
+    "operation": "create",
+    "targetPresetId": null,
+    "presetDraft": {
+      "type": "style",
+      "category": "agent",
+      "label": "Library only",
+      "content": "Prompt Library owns this write"
+    },
+    "rationale": "right scope",
+    "status": "pending",
+    "createdAt": 1
+  }
+}
+```
+"""
+
+    proposals = parse_agent_workspace_proposals(
+        text,
+        permission_scope="prompt-library-agent",
+    )
+
+    assert [proposal["id"] for proposal in proposals] == ["library-write"]
+
+
+def test_prompt_library_permission_scope_rejects_update_and_archive_proposals():
+    text = """
+```json
+{
+  "kind": "agent_workspace_proposals",
+  "proposals": [
+    {
+      "kind": "prompt_library_write_proposal",
+      "id": "create",
+      "agentName": "DeepSeek Agent",
+      "operation": "create",
+      "targetPresetId": null,
+      "presetDraft": {
+        "type": "style",
+        "category": "agent",
+        "label": "Create",
+        "content": "Allowed"
+      },
+      "rationale": "additive",
+      "status": "pending",
+      "createdAt": 1
+    },
+    {
+      "kind": "prompt_library_write_proposal",
+      "id": "update",
+      "agentName": "DeepSeek Agent",
+      "operation": "update",
+      "targetPresetId": "preset-1",
+      "presetDraft": {
+        "type": "style",
+        "category": "agent",
+        "label": "Update",
+        "content": "Rejected"
+      },
+      "rationale": "not allowed",
+      "status": "pending",
+      "createdAt": 2
+    },
+    {
+      "kind": "prompt_library_write_proposal",
+      "id": "archive",
+      "agentName": "DeepSeek Agent",
+      "operation": "archive",
+      "targetPresetId": "preset-2",
+      "presetDraft": {
+        "type": "style",
+        "category": "agent",
+        "label": "Archive",
+        "content": "Rejected"
+      },
+      "rationale": "not allowed",
+      "status": "pending",
+      "createdAt": 3
+    }
+  ]
+}
+```
+"""
+
+    proposals = parse_agent_workspace_proposals(
+        text,
+        permission_scope="prompt-library-agent",
+    )
+
+    assert [proposal["id"] for proposal in proposals] == ["create"]
+
+
+def test_workspace_runtime_prompt_documents_prompt_library_write_boundary(monkeypatch):
+    monkeypatch.setattr("app.gateway.promptcard_runtime._load_presets", lambda: [])
+
+    prompt = build_runtime_prompt(
+        "improve current card",
+        workspace_context={"contextId": "card:project:0", "snapshot": {"cards": []}},
+        permission_scope="workspace-chatbot-agent",
+    )
+
+    assert "Prompt Library writes are forbidden in this workspace chatbot scope" in prompt
+    assert "prompt_library_write_proposal" in prompt
+
+
+def test_prompt_library_runtime_prompt_allows_library_write_proposals(monkeypatch):
+    monkeypatch.setattr("app.gateway.promptcard_runtime._load_presets", lambda: [])
+
+    prompt = build_runtime_prompt(
+        "split these prompts into presets",
+        permission_scope="prompt-library-agent",
+    )
+
+    assert "Prompt Library scope" in prompt
+    assert "Only create new Prompt Library presets" in prompt
+    assert "prompt_library_write_proposal" in prompt
 
 
 def test_messages_endpoint_uses_promptcard_runtime_service(monkeypatch):

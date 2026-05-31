@@ -2,6 +2,8 @@
 
 PromptCard-Manager owns a small runtime boundary API in front of the DeerFlow-derived Agent Runtime. The frontend should treat DeerFlow internals as private implementation detail.
 
+The product boundary is prompt, script, Prompt Library, and storyboard management. PromptCard-Manager does not provide video generation. Future image generation APIs may be integrated as optional output targets, but they must remain separate from the Prompt Library and workspace editing permission model.
+
 ## Boundary Layers
 
 ```mermaid
@@ -36,9 +38,18 @@ The older DeerFlow routes under `/api/threads`, `/api/models`, `/api/tools`, `/a
 
 - Frontend store: UI state, active thread id, visible messages, pending proposals.
 - Frontend service: HTTP calls to the PromptCard boundary and legacy proposal parser compatibility only.
-- PromptCard adapter: PMAgent prompt construction, Prompt Library snapshot loading, DeerFlow thread/run orchestration, assistant text extraction, proposal parsing, and workspace-id validation.
+- PromptCard adapter: PMAgent prompt construction, Prompt Library snapshot loading, DeerFlow thread/run orchestration, assistant text extraction, proposal parsing, permission-scope filtering, and workspace-id validation.
 - DeerFlow internals: auth/session, thread/run persistence, model execution, skills, tools, and sandbox/runtime plumbing.
 - Storage service: durable Prompt Library and project JSON persistence.
+
+## Permission Scopes
+
+Agent Runtime requests carry one of two PromptCard permission scopes:
+
+- `prompt-library-agent`: used only by the Prompt Library page. It may produce `prompt_library_write_proposal` records for user-approved create operations only.
+- `workspace-chatbot-agent`: used by fixed AIChatbotBox surfaces inside card, storyboard, three-stage, and future Canvas builders. It may help build, rewrite, select, and complete the current workspace, but it must not emit or execute Prompt Library writes.
+
+Prompt Library is the only write entry point for reusable prompt decomposition and storage. Builder chatboxes may read or refer to existing Prompt Library content, but if a workspace result should become reusable, the Agent should tell the user to go to Prompt Library rather than creating a write proposal in place. Agent-generated library writes are additive: no Agent path may update, archive, delete, overwrite, or replace existing presets.
 
 ## Proposal Safety
 
@@ -47,7 +58,7 @@ The adapter validates model-returned workspace instructions before they reach th
 - `workspace_card_update` keeps only updates whose `cardId` exists in the workspace snapshot when a snapshot is available.
 - `storyboard_update` rejects unknown `sequenceId` or `rowId` when those ids are known.
 - `workspace_card_create` requires a draft type and content.
-- `prompt_library_write_proposal` remains a proposal flow; direct library writes still require explicit approval elsewhere.
+- `prompt_library_write_proposal` is accepted only in `prompt-library-agent` scope, only with `operation: "create"`, and still requires explicit approval in the Prompt Library page.
 
 ## Local Runtime Contract
 

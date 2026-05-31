@@ -1,6 +1,7 @@
 import type {
   AgentInfo,
   AgentModelInfo,
+  AgentPermissionScope,
   AgentSkillInfo,
   AgentToolInfo,
   AgentWorkspaceProposal,
@@ -139,6 +140,7 @@ export const agentRuntimeService = {
     threadId?: string
     content: string
     mode?: string
+    permissionScope?: AgentPermissionScope
     workspaceContext?: unknown
   }) =>
     requestJson<{
@@ -150,7 +152,10 @@ export const agentRuntimeService = {
       method: 'POST',
       headers: jsonHeaders(),
       body: JSON.stringify(body)
-    }),
+    }).then(response => ({
+      ...response,
+      proposals: filterProposalsForPermissionScope(response.proposals, body.permissionScope)
+    })),
 
   parsePromptLibraryProposals,
   parseAgentWorkspaceProposals
@@ -185,7 +190,10 @@ export function parsePromptLibraryProposals(text: string): PromptLibraryWritePro
   return parseAgentWorkspaceProposals(text).filter(isPromptLibraryProposal)
 }
 
-export function parseAgentWorkspaceProposals(text: string): AgentWorkspaceProposal[] {
+export function parseAgentWorkspaceProposals(
+  text: string,
+  options: { permissionScope?: AgentPermissionScope } = {}
+): AgentWorkspaceProposal[] {
   const proposals: AgentWorkspaceProposal[] = []
   const seenProposalIds = new Set<string>()
   const jsonCandidates = [
@@ -202,7 +210,11 @@ export function parseAgentWorkspaceProposals(text: string): AgentWorkspacePropos
 
       for (const item of items) {
         const normalized = normalizeProposal(item, proposals.length)
-        if (normalized && !seenProposalIds.has(normalized.id)) {
+        if (
+          normalized &&
+          isProposalAllowedForPermissionScope(normalized, options.permissionScope) &&
+          !seenProposalIds.has(normalized.id)
+        ) {
           seenProposalIds.add(normalized.id)
           proposals.push(normalized)
         }
@@ -231,12 +243,22 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
   }
 
   if ((kind === 'prompt_library_write_proposal' || proposal.presetDraft) && proposal.presetDraft?.label && proposal.presetDraft?.content) {
+    if ((proposal.operation || 'create') !== 'create') return null
+    const label = String(proposal.presetDraft.label || '').trim()
+    const content = String(proposal.presetDraft.content || '').trim()
+    if (!label || !content) return null
     return {
       ...base,
       kind: 'prompt_library_write_proposal',
-      operation: proposal.operation || 'create',
-      targetPresetId: proposal.targetPresetId ?? null,
-      presetDraft: proposal.presetDraft
+      operation: 'create',
+      targetPresetId: null,
+      presetDraft: {
+        ...proposal.presetDraft,
+        type: isKnownCardType(proposal.presetDraft.type) ? proposal.presetDraft.type : 'custom',
+        category: String(proposal.presetDraft.category || 'agent').trim() || 'agent',
+        label,
+        content
+      }
     }
   }
 
@@ -296,4 +318,25 @@ function pickAllowed(value: unknown, keys: string[]) {
 
 function isPromptLibraryProposal(proposal: AgentWorkspaceProposal): proposal is PromptLibraryWriteProposal {
   return proposal.kind === 'prompt_library_write_proposal' || Boolean((proposal as PromptLibraryWriteProposal).presetDraft)
+}
+
+function isKnownCardType(value: unknown) {
+  return ['subject', 'action', 'scene', 'style', 'camera', 'lighting', 'timing', 'audio', 'constraint', 'custom'].includes(String(value))
+}
+
+function filterProposalsForPermissionScope(
+  proposals: AgentWorkspaceProposal[],
+  permissionScope?: AgentPermissionScope
+) {
+  return proposals.filter(proposal => isProposalAllowedForPermissionScope(proposal, permissionScope))
+}
+
+function isProposalAllowedForPermissionScope(
+  proposal: AgentWorkspaceProposal,
+  permissionScope?: AgentPermissionScope
+) {
+  if (permissionScope === 'workspace-chatbot-agent') {
+    return !isPromptLibraryProposal(proposal)
+  }
+  return true
 }

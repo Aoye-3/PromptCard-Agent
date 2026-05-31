@@ -22,8 +22,18 @@ import type { BuilderTemplateId } from './domain/builder-templates/builder-templ
 import type { IPreset, CardType } from './models/Card.model'
 import type { IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
+import type { IUserSettings } from './models/UserSettings.model'
 import type { MainTab, ProjectMode, SaveStatus } from './features/app/app-types'
 import type { TrashEntry } from './storage/storage-service-client'
+
+const DEFAULT_USER_SETTINGS: IUserSettings = {
+  theme: 'light',
+  defaultMode: 'learn',
+  autoSave: true,
+  autoSaveIdleSeconds: 10,
+  presetSort: 'usage',
+  meta: {}
+}
 
 function App() {
   const { language, setLanguage, t, cardTypeLabel } = useI18n()
@@ -67,6 +77,7 @@ function App() {
   const [duplicateMode, setDuplicateMode] = useState(false)
   const [activeEditMode, setActiveEditMode] = useState<'learn' | 'creative'>('creative')
   const [showSettings, setShowSettings] = useState(false)
+  const [userSettings, setUserSettings] = useState<IUserSettings>(DEFAULT_USER_SETTINGS)
   const lastHistoryContentRef = useRef('')
 
   const currentCards = pages[currentPage]?.cards || []
@@ -94,11 +105,12 @@ function App() {
 
     const loadAppData = async () => {
       try {
-        const [savedProjects, trash, workspace, history] = await Promise.all([
+        const [savedProjects, trash, workspace, history, settings] = await Promise.all([
           storage.projects.getAll(),
           storage.projects.getTrash(),
           storage.workspace.get(),
-          storage.history.getAll()
+          storage.history.getAll(),
+          storage.settings.get()
         ])
 
         if (cancelled) return
@@ -120,6 +132,7 @@ function App() {
         setProjects(nextProjects)
         setProjectTrash(trash)
         setPromptHistory(history)
+        setUserSettings(settings)
         lastHistoryContentRef.current = history[0]?.content || ''
         setSaveStatus('saved')
       } catch (error) {
@@ -140,11 +153,11 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!isHydrated || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'card') return
+    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'card') return
 
-    setSaveStatus('saving')
     const timeoutId = window.setTimeout(async () => {
       try {
+        setSaveStatus('saving')
         const savedAt = Date.now()
         const updatedProject = await storage.projects.update(activeProjectId, {
           pages,
@@ -155,7 +168,11 @@ function App() {
         await storage.workspace.save({ pages, currentPage, savedAt })
 
         if (updatedProject) {
-          setProjects(await storage.projects.getAll())
+          setProjects(currentProjects => currentProjects.map(project =>
+            project.id === activeProjectId && project.updatedAt <= savedAt
+              ? updatedProject
+              : project
+          ))
         }
 
         const trimmedPrompt = currentPrompt.trim()
@@ -180,17 +197,17 @@ function App() {
         console.error('Auto-save failed:', error)
         setSaveStatus('error')
       }
-    }, 700)
+    }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.title, activeProject?.type, activeProjectId, allCards, currentPage, currentPrompt, isHydrated, pages, projectMode])
+  }, [activeProject?.title, activeProject?.type, activeProjectId, allCards, currentPage, currentPrompt, isHydrated, pages, projectMode, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
-    if (!isHydrated || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'storyboard' || !activeProject.storyboard) return
+    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'storyboard' || !activeProject.storyboard) return
 
-    setSaveStatus('saving')
     const timeoutId = window.setTimeout(async () => {
       try {
+        setSaveStatus('saving')
         const savedAt = Date.now()
         const updatedProject = await storage.projects.update(activeProjectId, {
           storyboard: activeProject.storyboard,
@@ -199,7 +216,11 @@ function App() {
         })
 
         if (updatedProject) {
-          setProjects(await storage.projects.getAll())
+          setProjects(currentProjects => currentProjects.map(project =>
+            project.id === activeProjectId && project.updatedAt <= savedAt
+              ? updatedProject
+              : project
+          ))
         }
 
         setLastSavedAt(savedAt)
@@ -208,17 +229,17 @@ function App() {
         console.error('Storyboard auto-save failed:', error)
         setSaveStatus('error')
       }
-    }, 700)
+    }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.storyboard, activeProject?.type, activeProjectId, isHydrated, projectMode, storyboardSnapshot])
+  }, [activeProject?.storyboard, activeProject?.type, activeProjectId, isHydrated, projectMode, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
-    if (!isHydrated || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'three-stage' || !activeProject.threeStage) return
+    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'three-stage' || !activeProject.threeStage) return
 
-    setSaveStatus('saving')
     const timeoutId = window.setTimeout(async () => {
       try {
+        setSaveStatus('saving')
         const savedAt = Date.now()
         const updatedProject = await storage.projects.update(activeProjectId, {
           threeStage: activeProject.threeStage,
@@ -236,10 +257,10 @@ function App() {
         console.error('Three-stage auto-save failed:', error)
         setSaveStatus('error')
       }
-    }, 700)
+    }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.threeStage, activeProject?.type, activeProjectId, isHydrated, projectMode, threeStageSnapshot])
+  }, [activeProject?.threeStage, activeProject?.type, activeProjectId, isHydrated, projectMode, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   const refreshProjects = async () => {
     const [nextProjects, nextTrash] = await Promise.all([
@@ -409,6 +430,11 @@ function App() {
     ))
   }
 
+  const handleUpdateUserSettings = async (settings: Partial<IUserSettings>) => {
+    const updated = await storage.settings.save(settings)
+    setUserSettings(updated)
+  }
+
   const handleCopyPrompt = async () => {
     if (!currentPrompt.trim()) {
       alert(t('noPromptToCopy'))
@@ -543,7 +569,9 @@ function App() {
     alert('导出数据已复制到剪贴板。')
   }
 
-  const saveStatusText = saveStatus === 'loading'
+  const saveStatusText = !userSettings.autoSave
+    ? '自动保存已关闭'
+    : saveStatus === 'loading'
     ? '加载存档...'
     : saveStatus === 'saving'
       ? '自动保存中...'
@@ -576,6 +604,8 @@ function App() {
       setLanguage={setLanguage}
       showSettings={showSettings}
       setShowSettings={setShowSettings}
+      settings={userSettings}
+      onSettingsChange={handleUpdateUserSettings}
       onExportData={handleExportData}
     />
   ) : showTemplateLibrary ? (

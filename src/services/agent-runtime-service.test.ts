@@ -81,6 +81,146 @@ describe('agent runtime proposal parsing', () => {
     expect(parseAgentWorkspaceProposals('plain text only')).toEqual([])
   })
 
+  it('filters Prompt Library writes out of workspace chatbot proposals', () => {
+    const text = `\`\`\`json
+{
+  "kind": "agent_workspace_proposals",
+  "proposals": [
+    {
+      "kind": "workspace_card_create",
+      "id": "proposal-card",
+      "agentName": "DeepSeek Agent",
+      "cardDraft": {
+        "type": "subject",
+        "title": "Subject",
+        "content": "A clearer subject card"
+      },
+      "rationale": "Build the current workspace",
+      "status": "pending",
+      "createdAt": 1
+    },
+    {
+      "kind": "prompt_library_write_proposal",
+      "id": "proposal-library",
+      "agentName": "DeepSeek Agent",
+      "operation": "create",
+      "targetPresetId": null,
+      "presetDraft": {
+        "type": "style",
+        "category": "agent",
+        "label": "Library-only",
+        "content": "Should only be handled inside Prompt Library"
+      },
+      "rationale": "Library write",
+      "status": "pending",
+      "createdAt": 2
+    }
+  ]
+}
+\`\`\``
+
+    const proposals = parseAgentWorkspaceProposals(text, {
+      permissionScope: 'workspace-chatbot-agent'
+    })
+
+    expect(proposals).toHaveLength(1)
+    expect(proposals[0].kind).toBe('workspace_card_create')
+  })
+
+  it('keeps Prompt Library writes available in Prompt Library agent scope', () => {
+    const text = `\`\`\`json
+{
+  "kind": "prompt_library_write_proposal",
+  "proposal": {
+    "id": "proposal-library",
+    "agentName": "DeepSeek Agent",
+    "operation": "create",
+    "targetPresetId": null,
+    "presetDraft": {
+      "type": "style",
+      "category": "agent",
+      "label": "Library-only",
+      "content": "Prompt Library owns this write"
+    },
+    "rationale": "Library write",
+    "status": "pending",
+    "createdAt": 2
+  }
+}
+\`\`\``
+
+    const proposals = parseAgentWorkspaceProposals(text, {
+      permissionScope: 'prompt-library-agent'
+    })
+
+    expect(proposals).toHaveLength(1)
+    expect(proposals[0].kind).toBe('prompt_library_write_proposal')
+  })
+
+  it('rejects update and archive Prompt Library proposals in Prompt Library agent scope', () => {
+    const text = `\`\`\`json
+{
+  "kind": "agent_workspace_proposals",
+  "proposals": [
+    {
+      "kind": "prompt_library_write_proposal",
+      "id": "proposal-create",
+      "agentName": "DeepSeek Agent",
+      "operation": "create",
+      "targetPresetId": null,
+      "presetDraft": {
+        "type": "style",
+        "category": "agent",
+        "label": "Create only",
+        "content": "Allowed new preset"
+      },
+      "rationale": "Additive",
+      "status": "pending",
+      "createdAt": 1
+    },
+    {
+      "kind": "prompt_library_write_proposal",
+      "id": "proposal-update",
+      "agentName": "DeepSeek Agent",
+      "operation": "update",
+      "targetPresetId": "preset-1",
+      "presetDraft": {
+        "type": "style",
+        "category": "agent",
+        "label": "Update",
+        "content": "Should be rejected"
+      },
+      "rationale": "Not allowed",
+      "status": "pending",
+      "createdAt": 2
+    },
+    {
+      "kind": "prompt_library_write_proposal",
+      "id": "proposal-archive",
+      "agentName": "DeepSeek Agent",
+      "operation": "archive",
+      "targetPresetId": "preset-2",
+      "presetDraft": {
+        "type": "style",
+        "category": "agent",
+        "label": "Archive",
+        "content": "Should be rejected"
+      },
+      "rationale": "Not allowed",
+      "status": "pending",
+      "createdAt": 3
+    }
+  ]
+}
+\`\`\``
+
+    const proposals = parseAgentWorkspaceProposals(text, {
+      permissionScope: 'prompt-library-agent'
+    })
+
+    expect(proposals.map(proposal => proposal.id)).toEqual(['proposal-create'])
+  })
+
   it('sends PromptCard runtime messages through the boundary endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

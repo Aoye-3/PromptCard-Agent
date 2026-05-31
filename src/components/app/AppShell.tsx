@@ -67,7 +67,7 @@ export const AppShell = ({
       )}
     </header>
 
-    <main className="min-h-[calc(100vh-160px)] pb-28">{children}</main>
+    <main className={activeTab === 'library' ? 'h-[calc(100vh-160px)] overflow-hidden' : 'min-h-[calc(100vh-160px)] pb-28'}>{children}</main>
 
     {showProjectUtilities && (
       <div className="fixed bottom-[92px] left-6 z-50 flex gap-3">

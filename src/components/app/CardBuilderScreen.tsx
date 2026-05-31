@@ -219,6 +219,7 @@ export const CardBuilderScreen = ({
         <AIChatbotBox
           title="Agent 协作"
           mode="card-workspace"
+          sessionKey={`workspace:card:${activeProject.id}`}
           workspaceContext={workspaceContext}
           onApplyWorkspaceProposal={onApplyAgentProposal}
           autoApplyWorkspaceChanges

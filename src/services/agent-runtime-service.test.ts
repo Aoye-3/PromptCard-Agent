@@ -237,6 +237,8 @@ describe('agent runtime proposal parsing', () => {
       threadId: 'thread-1',
       content: '补全选中卡片',
       mode: 'card-workspace',
+      sessionKey: 'workspace:card:project-1',
+      projectId: 'project-1',
       workspaceContext: {
         contextId: 'card:project-1:0',
         mode: 'card-workspace',
@@ -255,6 +257,8 @@ describe('agent runtime proposal parsing', () => {
           threadId: 'thread-1',
           content: '补全选中卡片',
           mode: 'card-workspace',
+          sessionKey: 'workspace:card:project-1',
+          projectId: 'project-1',
           workspaceContext: {
             contextId: 'card:project-1:0',
             mode: 'card-workspace',
@@ -265,5 +269,81 @@ describe('agent runtime proposal parsing', () => {
         })
       })
     )
+  })
+
+  it('parses three-stage field update proposals', () => {
+    const text = `\`\`\`json
+{
+  "kind": "agent_workspace_proposals",
+  "proposals": [
+    {
+      "kind": "three_stage_field_update",
+      "id": "proposal-three-stage",
+      "contextId": "three-stage:project:characterBoard:characterCore",
+      "agentName": "DeepSeek Agent",
+      "stageKey": "characterBoard",
+      "fieldId": "characterCore",
+      "mode": "replace",
+      "content": "Sharper character core",
+      "rationale": "Improve specificity",
+      "status": "pending",
+      "createdAt": 4
+    }
+  ]
+}
+\`\`\``
+
+    const proposals = parseAgentWorkspaceProposals(text, {
+      permissionScope: 'workspace-chatbot-agent'
+    })
+
+    expect(proposals).toHaveLength(1)
+    expect(proposals[0]).toMatchObject({
+      kind: 'three_stage_field_update',
+      stageKey: 'characterBoard',
+      fieldId: 'characterCore',
+      mode: 'replace',
+      content: 'Sharper character core'
+    })
+  })
+
+  it('reads, saves, and tests DeepSeek model config through runtime boundary', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          enabled: true,
+          apiBase: 'https://api.deepseek.com',
+          apiKeyConfigured: true,
+          apiKeyPreview: 'sk-...abcd',
+          modelName: 'deepseek-chat',
+          temperature: 0.3,
+          maxTokens: 4096,
+          availableModels: ['deepseek-chat']
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ enabled: true, apiBase: 'https://api.deepseek.com', apiKeyConfigured: true, modelName: 'deepseek-chat', temperature: 0.2, maxTokens: 3000, availableModels: ['deepseek-chat'] })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true, message: 'DeepSeek connection ok' })
+      })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    await expect(agentRuntimeService.getModelConfig()).resolves.toMatchObject({
+      modelName: 'deepseek-chat',
+      apiKeyConfigured: true
+    })
+    await agentRuntimeService.saveModelConfig({ temperature: 0.2, maxTokens: 3000 })
+    await expect(agentRuntimeService.testModelConfig()).resolves.toEqual({
+      success: true,
+      message: 'DeepSeek connection ok'
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/agent-api/promptcard/runtime/model-config', expect.objectContaining({ credentials: 'include' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/agent-api/promptcard/runtime/model-config', expect.objectContaining({ method: 'PUT' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/agent-api/promptcard/runtime/model-config/test', expect.objectContaining({ method: 'POST' }))
   })
 })

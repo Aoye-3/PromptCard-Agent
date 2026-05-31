@@ -11,6 +11,26 @@ import type {
 const AGENT_API_BASE = '/agent-api'
 const PROMPTCARD_RUNTIME_BASE = `${AGENT_API_BASE}/promptcard/runtime`
 
+export interface DeepSeekModelConfig {
+  enabled: boolean
+  apiBase: string
+  apiKeyConfigured: boolean
+  apiKeyPreview?: string | null
+  modelName: string
+  temperature: number
+  maxTokens: number
+  availableModels: string[]
+}
+
+export interface DeepSeekModelConfigUpdate {
+  enabled?: boolean
+  apiBase?: string
+  apiKey?: string
+  modelName?: string
+  temperature?: number
+  maxTokens?: number
+}
+
 const jsonHeaders = () => {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json'
@@ -141,6 +161,8 @@ export const agentRuntimeService = {
     content: string
     mode?: string
     permissionScope?: AgentPermissionScope
+    sessionKey?: string
+    projectId?: string
     workspaceContext?: unknown
   }) =>
     requestJson<{
@@ -156,6 +178,23 @@ export const agentRuntimeService = {
       ...response,
       proposals: filterProposalsForPermissionScope(response.proposals, body.permissionScope)
     })),
+
+  getModelConfig: () =>
+    requestJson<DeepSeekModelConfig>(`${PROMPTCARD_RUNTIME_BASE}/model-config`),
+
+  saveModelConfig: (body: DeepSeekModelConfigUpdate) =>
+    requestJson<DeepSeekModelConfig>(`${PROMPTCARD_RUNTIME_BASE}/model-config`, {
+      method: 'PUT',
+      headers: jsonHeaders(),
+      body: JSON.stringify(body)
+    }),
+
+  testModelConfig: (body: DeepSeekModelConfigUpdate = {}) =>
+    requestJson<{ success: boolean; message: string }>(`${PROMPTCARD_RUNTIME_BASE}/model-config/test`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify(body)
+    }),
 
   parsePromptLibraryProposals,
   parseAgentWorkspaceProposals
@@ -300,6 +339,17 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
       rowId: proposal.rowId ?? null,
       sequenceUpdates: pickAllowed(proposal.sequenceUpdates, ['name', 'description', 'style', 'constraints']),
       rowUpdates: pickAllowed(proposal.rowUpdates, ['cutLabel', 'timeRange', 'subject', 'action', 'scene', 'camera', 'lighting', 'audio', 'duration'])
+    }
+  }
+
+  if (kind === 'three_stage_field_update' && proposal.stageKey && proposal.fieldId && proposal.content) {
+    return {
+      ...base,
+      kind: 'three_stage_field_update',
+      stageKey: String(proposal.stageKey),
+      fieldId: String(proposal.fieldId),
+      mode: proposal.mode === 'append' ? 'append' : 'replace',
+      content: String(proposal.content)
     }
   }
 

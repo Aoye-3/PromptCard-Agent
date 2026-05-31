@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.gateway.deps import get_local_provider
+from app.gateway.deps import get_local_provider, get_thread_store
 from app.gateway.routers import agents, auth, models, skills, thread_runs, threads, tools
 from deerflow.config.app_config import get_app_config
+from deerflow.config.model_config import ModelConfig
 from deerflow.tools.promptcard_library import _load_presets
 
 
@@ -23,7 +26,20 @@ class PromptCardRuntimeMessageRequest(BaseModel):
     content: str
     mode: str | None = None
     permission_scope: str | None = Field(default=None, alias="permissionScope")
+    session_key: str | None = Field(default=None, alias="sessionKey")
+    project_id: str | None = Field(default=None, alias="projectId")
     workspace_context: dict[str, Any] | None = Field(default=None, alias="workspaceContext")
+
+
+class PromptCardModelConfigRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    enabled: bool | None = None
+    api_base: str | None = Field(default=None, alias="apiBase")
+    api_key: str | None = Field(default=None, alias="apiKey")
+    model_name: str | None = Field(default=None, alias="modelName")
+    temperature: float | None = None
+    max_tokens: int | None = Field(default=None, alias="maxTokens")
 
 
 class PromptCardRuntimeService:
@@ -52,6 +68,7 @@ class PromptCardRuntimeService:
 
     async def catalog(self, request: Request) -> dict[str, Any]:
         config = _request_config(request)
+        apply_model_config_to_runtime(config)
         model_payload = await models.list_models(config)
         tool_payload = await tools.list_tools(config)
         try:
@@ -72,39 +89,98 @@ class PromptCardRuntimeService:
             "agents": _model_or_value(agent_payload).get("agents", []),
         }
 
+    async def get_model_config(self, request: Request) -> dict[str, Any]:
+        config = _request_config(request)
+        apply_model_config_to_runtime(config)
+        return model_config_response(config)
+
+    async def save_model_config(self, body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
+        config = _request_config(request)
+        current = read_model_config(config)
+        next_config = {
+            **current,
+            **{key: value for key, value in {
+                "enabled": body.enabled,
+                "apiBase": body.api_base,
+                "apiKey": body.api_key,
+                "modelName": body.model_name,
+                "temperature": body.temperature,
+                "maxTokens": body.max_tokens,
+            }.items() if value is not None},
+        }
+        if body.api_key == "":
+            next_config["apiKey"] = ""
+        persist_model_config(next_config)
+        apply_model_config_to_runtime(config, next_config)
+        return model_config_response(config)
+
+    async def test_model_config(self, body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
+        config = _request_config(request)
+        candidate = {
+            **read_model_config(config),
+            **{key: value for key, value in {
+                "enabled": body.enabled,
+                "apiBase": body.api_base,
+                "apiKey": body.api_key,
+                "modelName": body.model_name,
+                "temperature": body.temperature,
+                "maxTokens": body.max_tokens,
+            }.items() if value is not None},
+        }
+        api_key = str(candidate.get("apiKey") or "").strip()
+        if not api_key:
+            return {"success": False, "message": "DeepSeek API Key is not configured."}
+        api_base = str(candidate.get("apiBase") or "https://api.deepseek.com").rstrip("/")
+        request_url = f"{api_base}/models"
+        try:
+            req = urllib.request.Request(request_url, headers={"Authorization": f"Bearer {api_key}"})
+            with urllib.request.urlopen(req, timeout=8) as response:
+                if 200 <= response.status < 300:
+                    return {"success": True, "message": "DeepSeek connection ok."}
+                return {"success": False, "message": f"DeepSeek returned HTTP {response.status}."}
+        except urllib.error.HTTPError as exc:
+            return {"success": False, "message": f"DeepSeek returned HTTP {exc.code}."}
+        except OSError as exc:
+            return {"success": False, "message": f"DeepSeek connection failed: {exc}"}
+
     async def send_message(self, body: PromptCardRuntimeMessageRequest, request: Request) -> dict[str, Any]:
         thread_id = body.thread_id
+        permission_scope = body.permission_scope or (
+            "workspace-chatbot-agent" if body.workspace_context else "prompt-library-agent"
+        )
+        project_id = body.project_id or _workspace_project_id(body.workspace_context)
+        thread_metadata = _thread_metadata(body, permission_scope, project_id)
         if not thread_id:
             thread_response = await threads.create_thread(
                 threads.ThreadCreateRequest(
-                    metadata={"source": "promptcard-runtime-boundary"},
+                    metadata=thread_metadata,
                 ),
                 request,
             )
             thread_id = thread_response.thread_id
-
-        permission_scope = body.permission_scope or (
-            "workspace-chatbot-agent" if body.workspace_context else "prompt-library-agent"
-        )
+        else:
+            await validate_thread_metadata(thread_id, thread_metadata, request)
         prompt = build_runtime_prompt(
             body.content,
             body.workspace_context,
             permission_scope=permission_scope,
         )
+        apply_model_config_to_runtime(_request_config(request))
+        model_name = default_model_name(_request_config(request))
         run_payload = await thread_runs.wait_run(
-            thread_id,
-            thread_runs.RunCreateRequest(
+            thread_id=thread_id,
+            body=thread_runs.RunCreateRequest(
                 assistant_id="lead_agent",
                 input={"messages": [{"role": "user", "content": prompt}]},
                 context={
-                    "model_name": "deepseek-chat",
+                    "model_name": model_name,
                     "thinking_enabled": False,
                     "subagent_enabled": True,
                     "max_concurrent_subagents": 2,
                 },
                 stream_mode=["values"],
             ),
-            request,
+            request=request,
         )
         text = extract_assistant_text(run_payload)
         proposals = parse_agent_workspace_proposals(
@@ -116,11 +192,174 @@ class PromptCardRuntimeService:
             "threadId": thread_id,
             "text": text,
             "proposals": proposals,
-            "diagnostics": {"proposalCount": len(proposals)},
+            "diagnostics": {
+                "proposalCount": len(proposals),
+                "sessionKey": body.session_key,
+                "projectId": project_id,
+                "mode": body.mode,
+            },
         }
 
 
 runtime_service = PromptCardRuntimeService()
+
+
+def _workspace_project_id(workspace_context: dict[str, Any] | None) -> str | None:
+    if not isinstance(workspace_context, dict):
+        return None
+    value = workspace_context.get("projectId")
+    return str(value) if value else None
+
+
+def _thread_metadata(
+    body: PromptCardRuntimeMessageRequest,
+    permission_scope: str,
+    project_id: str | None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "source": "promptcard-runtime-boundary",
+        "mode": body.mode,
+        "permissionScope": permission_scope,
+    }
+    if body.session_key:
+        metadata["sessionKey"] = body.session_key
+    if project_id:
+        metadata["projectId"] = project_id
+    return metadata
+
+
+async def validate_thread_metadata(thread_id: str, expected: dict[str, Any], request: Request) -> None:
+    session_key = expected.get("sessionKey")
+    if not session_key:
+        return
+    thread_store = get_thread_store(request)
+    record = await thread_store.get(thread_id)
+    metadata = record.get("metadata", {}) if isinstance(record, dict) else {}
+    if not metadata:
+        raise HTTPException(status_code=409, detail="Agent thread is missing PromptCard session metadata.")
+    checks = [
+        ("sessionKey", session_key),
+        ("projectId", expected.get("projectId")),
+        ("permissionScope", expected.get("permissionScope")),
+    ]
+    for key, expected_value in checks:
+        if expected_value is None:
+            continue
+        actual_value = metadata.get(key)
+        if actual_value != expected_value:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Agent thread metadata mismatch for {key}.",
+            )
+
+
+def model_config_path() -> Path:
+    home = Path(os.getenv("DEER_FLOW_HOME") or ".deer-flow")
+    return home / "promptcard-model-config.json"
+
+
+def read_model_config(config: Any) -> dict[str, Any]:
+    model = _first_model(config)
+    base = {
+        "enabled": True,
+        "apiBase": str(getattr(model, "base_url", None) or "https://api.deepseek.com"),
+        "apiKey": str(getattr(model, "api_key", None) or ""),
+        "modelName": str(getattr(model, "name", None) or "deepseek-chat"),
+        "temperature": float(getattr(model, "temperature", 0.3) or 0.3),
+        "maxTokens": int(getattr(model, "max_tokens", 4096) or 4096),
+    }
+    path = model_config_path()
+    if path.exists():
+        try:
+            stored = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(stored, dict):
+                base.update({key: value for key, value in stored.items() if key in base})
+        except (OSError, json.JSONDecodeError):
+            pass
+    return base
+
+
+def persist_model_config(data: dict[str, Any]) -> None:
+    path = model_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "enabled": bool(data.get("enabled", True)),
+        "apiBase": str(data.get("apiBase") or "https://api.deepseek.com").rstrip("/"),
+        "apiKey": str(data.get("apiKey") or ""),
+        "modelName": str(data.get("modelName") or "deepseek-chat"),
+        "temperature": float(data.get("temperature", 0.3)),
+        "maxTokens": int(data.get("maxTokens", 4096)),
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def apply_model_config_to_runtime(config: Any, data: dict[str, Any] | None = None) -> None:
+    if config is None:
+        return
+    data = data or read_model_config(config)
+    model_name = str(data.get("modelName") or "deepseek-chat")
+    models_list = getattr(config, "models", [])
+    model = _first_model(config)
+    if model is None:
+        model = ModelConfig(
+            name=model_name,
+            display_name="DeepSeek",
+            use="langchain_deepseek:ChatDeepSeek",
+            model=model_name,
+            api_key=str(data.get("apiKey") or ""),
+            base_url=str(data.get("apiBase") or "https://api.deepseek.com").rstrip("/"),
+            timeout=600.0,
+            max_retries=2,
+            max_tokens=int(data.get("maxTokens", 4096)),
+            temperature=float(data.get("temperature", 0.3)),
+            supports_thinking=False,
+            supports_vision=False,
+        )
+        models_list.append(model)
+        return
+    setattr(model, "name", model_name)
+    setattr(model, "model", model_name)
+    setattr(model, "display_name", getattr(model, "display_name", None) or "DeepSeek")
+    setattr(model, "use", getattr(model, "use", None) or "langchain_deepseek:ChatDeepSeek")
+    setattr(model, "api_key", str(data.get("apiKey") or ""))
+    setattr(model, "base_url", str(data.get("apiBase") or "https://api.deepseek.com").rstrip("/"))
+    setattr(model, "temperature", float(data.get("temperature", 0.3)))
+    setattr(model, "max_tokens", int(data.get("maxTokens", 4096)))
+
+
+def model_config_response(config: Any) -> dict[str, Any]:
+    data = read_model_config(config)
+    available = [str(getattr(model, "name", "")) for model in getattr(config, "models", []) if getattr(model, "name", "")]
+    model_name = str(data.get("modelName") or "deepseek-chat")
+    if model_name not in available:
+        available.insert(0, model_name)
+    api_key = str(data.get("apiKey") or "")
+    return {
+        "enabled": bool(data.get("enabled", True)),
+        "apiBase": str(data.get("apiBase") or "https://api.deepseek.com").rstrip("/"),
+        "apiKeyConfigured": bool(api_key),
+        "apiKeyPreview": _mask_api_key(api_key) if api_key else None,
+        "modelName": model_name,
+        "temperature": float(data.get("temperature", 0.3)),
+        "maxTokens": int(data.get("maxTokens", 4096)),
+        "availableModels": available,
+    }
+
+
+def default_model_name(config: Any) -> str:
+    data = read_model_config(config)
+    return str(data.get("modelName") or getattr(_first_model(config), "name", None) or "deepseek-chat")
+
+
+def _first_model(config: Any) -> Any | None:
+    models_list = getattr(config, "models", None) or []
+    return models_list[0] if models_list else None
+
+
+def _mask_api_key(api_key: str) -> str:
+    if len(api_key) <= 8:
+        return "****"
+    return f"{api_key[:3]}...{api_key[-4:]}"
 
 
 def build_runtime_prompt(
@@ -157,6 +396,7 @@ def build_runtime_prompt(
                 "Prompt Library writes are forbidden in this workspace chatbot scope. Do not emit prompt_library_write_proposal JSON here.",
                 "If content should become a reusable Prompt Library asset, tell the user to go to the Prompt Library decomposition/write page.",
                 "For workspace edits, include a JSON block with kind agent_workspace_proposals and only workspace_card_update, workspace_card_create, or storyboard_update proposal items.",
+                "For three-stage workspace edits, emit three_stage_field_update with stageKey, fieldId, mode replace or append, and content.",
                 "For card workspace edits, the frontend may apply workspace_card_update and workspace_card_create instructions directly when the user requested the change.",
             ]
         )
@@ -208,7 +448,7 @@ def parse_agent_workspace_proposals(
     seen: set[str] = set()
     valid_ids = _workspace_ids(workspace_context)
     candidates = [match.group(1) for match in re.finditer(r"```json\s*([\s\S]*?)```", text, re.IGNORECASE)]
-    candidates.extend(match.group(1) for match in re.finditer(r'(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update)"[\s\S]*\})', text, re.IGNORECASE))
+    candidates.extend(match.group(1) for match in re.finditer(r'(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|three_stage_field_update)"[\s\S]*\})', text, re.IGNORECASE))
 
     for candidate in candidates:
         try:
@@ -283,6 +523,25 @@ def _normalize_proposal(value: Any, index: int, valid_ids: dict[str, set[str]]) 
             return None
         return {**base, "kind": "storyboard_update", "sequenceId": sequence_id, "rowId": row_id, "sequenceUpdates": sequence_updates, "rowUpdates": row_updates}
 
+    if kind == "three_stage_field_update":
+        stage_key = str(value.get("stageKey") or "")
+        field_id = str(value.get("fieldId") or "")
+        if stage_key and not _id_is_allowed(stage_key, valid_ids["three_stage_stages"]):
+            return None
+        if field_id and not _id_is_allowed(f"{stage_key}:{field_id}", valid_ids["three_stage_fields"]):
+            return None
+        content = str(value.get("content") or "").strip()
+        if not stage_key or not field_id or not content:
+            return None
+        return {
+            **base,
+            "kind": "three_stage_field_update",
+            "stageKey": stage_key,
+            "fieldId": field_id,
+            "mode": "append" if value.get("mode") == "append" else "replace",
+            "content": content,
+        }
+
     proposal_draft = value.get("presetDraft")
     if (kind == "prompt_library_write_proposal" or proposal_draft) and isinstance(proposal_draft, dict):
         if value.get("operation", "create") != "create":
@@ -318,7 +577,7 @@ def _card_update(update: dict[str, Any]) -> dict[str, str] | None:
 
 
 def _workspace_ids(workspace_context: dict[str, Any] | None) -> dict[str, set[str]]:
-    ids = {"cards": set(), "rows": set(), "sequences": set()}
+    ids = {"cards": set(), "rows": set(), "sequences": set(), "three_stage_stages": set(), "three_stage_fields": set()}
     snapshot = workspace_context.get("snapshot") if isinstance(workspace_context, dict) else None
     _collect_ids(snapshot, ids)
     return ids
@@ -346,6 +605,12 @@ def _collect_ids(value: Any, ids: dict[str, set[str]]) -> None:
             ids["rows"].update(str(item["id"]) for item in child if isinstance(item, dict) and isinstance(item.get("id"), str))
         elif key == "sequences" and isinstance(child, list):
             ids["sequences"].update(str(item["id"]) for item in child if isinstance(item, dict) and isinstance(item.get("id"), str))
+        elif key == "sections" and isinstance(child, dict):
+            for stage_key, section in child.items():
+                ids["three_stage_stages"].add(str(stage_key))
+                fields = section.get("fields") if isinstance(section, dict) else None
+                if isinstance(fields, dict):
+                    ids["three_stage_fields"].update(f"{stage_key}:{field_id}" for field_id in fields.keys())
         _collect_ids(child, ids)
 
 

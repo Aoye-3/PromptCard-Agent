@@ -23,6 +23,7 @@ flowchart TD
   Files["Storage JSON Files<br/>data/projects.json<br/>data/project-trash.json<br/>data/prompt-library-presets.json<br/>data/prompt-library-trash.json"]
   RuntimeBoundary["PromptCard Runtime API<br/>/api/promptcard/runtime/*"]
   Runtime["DeerFlow Runtime Internals<br/>agent-runtime/backend<br/>127.0.0.1:8001"]
+  DeepSeekConfig["DeepSeek Model Config<br/>agent-runtime/.deer-flow/promptcard-model-config.json"]
   DeepSeek["DeepSeek<br/>https://api.deepseek.com"]
 
   User --> App
@@ -41,6 +42,7 @@ flowchart TD
   RuntimeService --> Vite
   Vite --> RuntimeBoundary
   RuntimeBoundary --> Runtime
+  Runtime --> DeepSeekConfig
   Runtime --> DeepSeek
 ```
 
@@ -52,9 +54,9 @@ flowchart TD
 - **State stores**: `src/stores/` owns card workspace state, Prompt library presets, Agent runtime state, and related ordering/persistence helpers.
 - **Storage facade and adapters**: `src/utils/storage.ts` preserves the app-facing storage API; `src/storage/storage-service-client.ts` calls the local storage service for project and Prompt Library durable writes; project normalization is delegated to `src/domain/projects/`.
 - **Local storage service**: `promptcard_storage/` owns revision-aware project and Prompt Library persistence, Trash files, migration, and atomic JSON writes.
-- **Agent service layer**: `src/services/agent-runtime-service.ts` is a thin client for the PromptCard Runtime Boundary under `/agent-api/promptcard/runtime/*`.
+- **Agent service layer**: `src/services/agent-runtime-service.ts` is a thin client for the PromptCard Runtime Boundary under `/agent-api/promptcard/runtime/*`, including message routing, catalog/status reads, and DeepSeek model configuration.
 - **Development middleware**: `vite/plugins/promptcard-dev-storage.ts` exposes local-only endpoints for Prompt library data, project data, and dev server shutdown; `vite.config.ts` wires those plugins into Vite.
-- **Agent Runtime**: `agent-runtime/` contains the PromptCard boundary router/adapter plus DeerFlow-derived internals, config, public skills, and scripts for local DeepSeek testing.
+- **Agent Runtime**: `agent-runtime/` contains the PromptCard boundary router/adapter plus DeerFlow-derived internals, DeepSeek model configuration, public skills, ToolUse catalog, and scripts for local runtime testing.
 
 ## Data Flows
 
@@ -68,7 +70,24 @@ Prompt presets use the `IPreset` compatibility contract. The `preset.store` rema
 
 ### Agent Proposal Flow
 
-The Agent dashboard sends user content and optional workspace context to `/agent-api/promptcard/runtime/messages`. The backend builds the PMAgent prompt, adds a bounded Prompt Library snapshot, runs DeerFlow, extracts assistant text, validates workspace ids, and returns normalized proposals. Prompt Library writes remain pending until the user approves or rejects them in the UI.
+The Agent dashboard and every `AIChatbotBox` send user content plus optional workspace context to `/agent-api/promptcard/runtime/messages`. The backend builds the PMAgent prompt, adds a bounded Prompt Library snapshot, runs DeerFlow with the configured DeepSeek model, extracts assistant text, validates workspace ids, and returns normalized proposals. Prompt Library writes remain pending until the user approves or rejects them in the UI.
+
+Workspace surfaces share the same runtime and differ by context plus permission scope:
+
+- Prompt Library Agent uses `prompt-library-agent`.
+- Card, storyboard, and three-stage Chatbox surfaces use `workspace-chatbot-agent`.
+
+Three-stage Chatbox proposals use `three_stage_field_update` and are constrained to legal fields in the active three-stage workspace context.
+
+### Agent Model Config Flow
+
+The Agent Dashboard model service page calls the PromptCard Runtime Boundary instead of writing browser-local AI settings:
+
+- `GET /agent-api/promptcard/runtime/model-config`
+- `PUT /agent-api/promptcard/runtime/model-config`
+- `POST /agent-api/promptcard/runtime/model-config/test`
+
+The backend persists the DeepSeek-only configuration to `agent-runtime/.deer-flow/promptcard-model-config.json`, masks API keys in responses, and merges saved values into the active runtime model settings. The browser never sends test requests directly to DeepSeek.
 
 ### Local Storage Service Flow
 

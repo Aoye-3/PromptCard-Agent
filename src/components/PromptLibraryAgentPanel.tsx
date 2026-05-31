@@ -9,8 +9,14 @@ import {
   rejectPromptLibraryProposalBatch
 } from '@/utils/prompt-library-agent-proposals'
 
+const PROMPT_LIBRARY_SESSION_KEY = 'prompt-library:global'
+
 export function PromptLibraryAgentPanel() {
-  const { runtimeStatus, runtimeError, running, proposals, checkRuntime, sendMessage, markProposalStatus } = useAgentStore()
+  const { runtimeStatus, runtimeError, getAgentSession, checkRuntime, sendMessage, markProposalStatus } = useAgentStore()
+  const session = getAgentSession(PROMPT_LIBRARY_SESSION_KEY)
+  const running = session.running
+  const proposals = session.proposals
+  const visibleRuntimeError = session.runtimeError || runtimeError
   const { presets, initialized, init, addPreset } = usePresetStore()
   const [draft, setDraft] = useState('请根据这个需求生成一组可入库提示词：')
   const [selectedProposalIds, setSelectedProposalIds] = useState<string[]>([])
@@ -37,7 +43,10 @@ export function PromptLibraryAgentPanel() {
     await sendMessage(
       `请把用户输入拆解成多个可复用 Prompt 库条目。只生成 create 类型的 prompt_library_write_proposal，不要更新、归档、删除或覆盖已有条目。\n\n用户输入：${draft.trim()}`,
       presets,
-      { permissionScope: 'prompt-library-agent' }
+      {
+        sessionKey: PROMPT_LIBRARY_SESSION_KEY,
+        permissionScope: 'prompt-library-agent'
+      }
     )
     setDraft('')
   }
@@ -51,13 +60,15 @@ export function PromptLibraryAgentPanel() {
   const approveSelected = async (ids = selectedProposalIds) => {
     await approvePromptLibraryProposalBatch(promptLibraryProposals, ids, {
       addPreset,
-      markProposalStatus
+      markProposalStatus: (id: string, status: 'approved' | 'rejected') => markProposalStatus(id, status, PROMPT_LIBRARY_SESSION_KEY)
     })
     setSelectedProposalIds(current => current.filter(id => !ids.includes(id)))
   }
 
   const rejectSelected = (ids = selectedProposalIds) => {
-    rejectPromptLibraryProposalBatch(promptLibraryProposals, ids, { markProposalStatus })
+    rejectPromptLibraryProposalBatch(promptLibraryProposals, ids, {
+      markProposalStatus: (id: string, status: 'approved' | 'rejected') => markProposalStatus(id, status, PROMPT_LIBRARY_SESSION_KEY)
+    })
     setSelectedProposalIds(current => current.filter(id => !ids.includes(id)))
   }
 
@@ -93,9 +104,9 @@ export function PromptLibraryAgentPanel() {
               清空对话
             </button>
           </div>
-          {runtimeError && (
+          {visibleRuntimeError && (
             <div className="mt-4 rounded-2xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-              {runtimeError}
+              {visibleRuntimeError}
             </div>
           )}
         </div>

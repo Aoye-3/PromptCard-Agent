@@ -16,6 +16,17 @@ export interface AgentMessage {
   createdAt: number
 }
 
+export type AgentSessionKey = string
+
+export interface AgentConversationSession {
+  threadId?: string
+  messages: AgentMessage[]
+  proposals: AgentWorkspaceProposal[]
+  running: boolean
+  runtimeError?: string
+  updatedAt: number
+}
+
 export interface AgentUser {
   id?: string
   email?: string
@@ -77,7 +88,7 @@ export interface PromptLibraryWriteProposal {
   createdAt: number
 }
 
-export type AgentWorkspaceMode = 'card-workspace' | 'storyboard-workspace'
+export type AgentWorkspaceMode = 'card-workspace' | 'storyboard-workspace' | 'three-stage-workspace'
 
 export type AgentPermissionScope = 'workspace-chatbot-agent' | 'prompt-library-agent'
 
@@ -141,11 +152,28 @@ export interface AgentStoryboardUpdateProposal {
   createdAt: number
 }
 
+export interface AgentThreeStageFieldUpdateProposal {
+  kind: 'three_stage_field_update'
+  contextId?: string
+  id: string
+  threadId?: string | null
+  runId?: string | null
+  agentName: string
+  stageKey: string
+  fieldId: string
+  mode: 'replace' | 'append'
+  content: string
+  rationale: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: number
+}
+
 export type AgentWorkspaceProposal =
   | PromptLibraryWriteProposal
   | AgentCardCreateProposal
   | AgentCardUpdateProposal
   | AgentStoryboardUpdateProposal
+  | AgentThreeStageFieldUpdateProposal
 
 export type PromptLibrarySnapshotPreset = Pick<
   IPreset,

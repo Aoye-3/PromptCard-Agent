@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, Copy, Database, Eraser, Home, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Bot, ChevronDown, Copy, Database, Eraser, Home, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
+import { buildThreeStageWorkspaceContext } from '@/utils/agent-workspace'
 import type { IPreset } from '@/models/Card.model'
 import type { IPromptProject, IThreeStageProject, IThreeStageSection, ThreeStageKey } from '@/models/PromptHistory.model'
+import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import {
   buildStoryboardInjectionForVideo,
   createStoryboardShotRange,
@@ -41,6 +44,7 @@ const ThreeStageBuilderScreen = ({
   const [presetSearch, setPresetSearch] = useState('')
   const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set())
   const [activeShotRangeByField, setActiveShotRangeByField] = useState<Record<string, string>>({})
+  const [rightPanelMode, setRightPanelMode] = useState<'field' | 'agent'>('field')
   const selectedStage = getStageDefinition(threeStage.selectedStage).key
   const selectedStageDefinition = getStageDefinition(selectedStage)
   const selectedField = selectedStageDefinition.fields.find(field => field.id === threeStage.selectedFieldId && !field.fixedValue) ||
@@ -49,6 +53,11 @@ const ThreeStageBuilderScreen = ({
   const selectedValue = valueOf(getSection(threeStage, selectedStage).fields, selectedField.id)
   const selectedFieldIsFixed = Boolean(selectedField.fixedValue)
   const selectedOutput = selectedStageDefinition.buildOutput(getSection(threeStage, selectedStage).fields, threeStage)
+  const workspaceContext = buildThreeStageWorkspaceContext({
+    activeProject,
+    threeStage,
+    selectedOutput
+  })
 
   const filteredCameraPresets = useMemo(() => {
     const keyword = presetSearch.trim().toLowerCase()
@@ -100,6 +109,19 @@ const ThreeStageBuilderScreen = ({
     }
     await navigator.clipboard.writeText(text)
     window.alert('已复制到剪贴板。')
+  }
+
+  const handleApplyAgentProposal = (proposal: AgentWorkspaceProposal): void => {
+    if (proposal.kind !== 'three_stage_field_update') return
+    const stage = stageDefinitions.find(definition => definition.key === proposal.stageKey)?.key
+    if (!stage) return
+    const field = getStageDefinition(stage).fields.find(candidate => candidate.id === proposal.fieldId && !candidate.fixedValue)
+    if (!field) return
+    const currentValue = valueOf(getSection(threeStage, stage).fields, field.id)
+    const nextValue = proposal.mode === 'append' && currentValue.trim()
+      ? `${currentValue}\n${proposal.content}`
+      : proposal.content
+    updateField(stage, field.id, nextValue)
   }
 
   const applyPreset = async (preset: IPreset, mode: 'append' | 'replace') => {
@@ -257,11 +279,39 @@ const ThreeStageBuilderScreen = ({
 
         <aside className="sticky top-24 flex h-[calc(100vh-136px)] min-h-[680px] flex-col rounded-[24px] border border-gray-200 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.05)]">
           <div className="border-b border-gray-100 p-5">
+            <div className="mb-4 grid grid-cols-2 gap-2 rounded-2xl bg-gray-50 p-1">
+              <button
+                type="button"
+                className={`rounded-xl px-3 py-2 text-sm font-black transition ${rightPanelMode === 'field' ? 'bg-white text-gray-950 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                onClick={() => setRightPanelMode('field')}
+              >
+                字段编辑
+              </button>
+              {!previewMode && (
+                <button
+                  type="button"
+                  className={`inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-black transition ${rightPanelMode === 'agent' ? 'bg-white text-gray-950 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
+                  onClick={() => setRightPanelMode('agent')}
+                >
+                  <Bot className="h-4 w-4" />
+                  Agent
+                </button>
+              )}
+            </div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">字段编辑器</div>
             <h2 className="text-lg font-bold text-gray-950">{selectedField.label}</h2>
             <p className="mt-1 text-sm text-gray-500">{selectedStageDefinition.title}</p>
           </div>
 
+          {!previewMode && rightPanelMode === 'agent' ? (
+            <AIChatbotBox
+              title="Three-stage Agent"
+              mode="three-stage-workspace"
+              sessionKey={`workspace:three-stage:${activeProject.id}`}
+              workspaceContext={workspaceContext}
+              onApplyWorkspaceProposal={handleApplyAgentProposal}
+            />
+          ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
             <label className="block">
               <span className="mb-2 block text-sm font-bold text-gray-900">当前阶段完整 Prompt</span>
@@ -337,6 +387,7 @@ const ThreeStageBuilderScreen = ({
               </div>
             )}
           </div>
+          )}
         </aside>
       </div>
     </section>

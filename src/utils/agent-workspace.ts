@@ -1,6 +1,6 @@
 import type { ICard } from '@/models/Card.model'
 import type { AgentWorkspaceContext } from '@/models/Agent.model'
-import type { IPromptProject, IStoryboardProject } from '@/models/PromptHistory.model'
+import type { IPromptProject, IStoryboardProject, IThreeStageProject } from '@/models/PromptHistory.model'
 import type { IPage } from '@/stores/card-initial-state'
 
 const MAX_TEXT_LENGTH = 1200
@@ -120,3 +120,45 @@ export function buildStoryboardWorkspaceContext({
     }
   }
 }
+
+export function buildThreeStageWorkspaceContext({
+  activeProject,
+  threeStage,
+  selectedOutput
+}: {
+  activeProject: IPromptProject
+  threeStage: IThreeStageProject
+  selectedOutput: string
+}): AgentWorkspaceContext {
+  const selectedStage = threeStage.selectedStage
+  const selectedFieldId = threeStage.selectedFieldId
+
+  return {
+    contextId: `three-stage:${activeProject.id}:${selectedStage}:${selectedFieldId}`,
+    mode: 'three-stage-workspace',
+    projectId: activeProject.id,
+    projectTitle: activeProject.title,
+    snapshot: {
+      projectType: activeProject.type,
+      selectedStage,
+      selectedFieldId,
+      selectedOutput: compactText(selectedOutput),
+      sections: {
+        character: compactThreeStageSection(threeStage.character),
+        storyboard: compactThreeStageSection(threeStage.storyboard),
+        videoPrompt: compactThreeStageSection(threeStage.videoPrompt)
+      }
+    }
+  }
+}
+
+function compactThreeStageSection(section: IThreeStageSectionLike) {
+  return {
+    focusedFieldId: section.focusedFieldId,
+    fields: Object.fromEntries(
+      Object.entries(section.fields).map(([key, value]) => [key, compactText(String(value))])
+    )
+  }
+}
+
+type IThreeStageSectionLike = IThreeStageProject['character']

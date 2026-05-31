@@ -13,6 +13,7 @@ interface AgentCollaborationPanelProps {
   title: string
   mode: AgentWorkspaceMode
   workspaceContext: AgentWorkspaceContext
+  sessionKey?: string
   onApplyWorkspaceProposal: (proposal: AgentWorkspaceProposal) => Promise<void> | void
   autoApplyWorkspaceChanges?: boolean
 }
@@ -21,20 +22,25 @@ export function AgentCollaborationPanel({
   title,
   mode,
   workspaceContext,
+  sessionKey: sessionKeyProp,
   onApplyWorkspaceProposal,
   autoApplyWorkspaceChanges = false
 }: AgentCollaborationPanelProps) {
+  const sessionKey = sessionKeyProp || `workspace:${mode.replace('-workspace', '')}:${workspaceContext.projectId}`
   const {
     runtimeStatus,
     authStatus,
     runtimeError,
-    messages,
-    running,
-    proposals,
+    getAgentSession,
     checkRuntime,
     sendMessage,
     markProposalStatus
   } = useAgentStore()
+  const session = getAgentSession(sessionKey)
+  const messages = session.messages
+  const running = session.running
+  const proposals = session.proposals
+  const visibleRuntimeError = session.runtimeError || runtimeError
   const { presets, initialized, init } = usePresetStore()
   const [draft, setDraft] = useState('告诉 Agent 你想怎么修改当前选中的提示词卡片。')
   const [appliedMessages, setAppliedMessages] = useState<AgentMessage[]>([])
@@ -62,14 +68,15 @@ export function AgentCollaborationPanel({
     const returnedProposals = await sendMessage(content.trim(), presets, {
       workspaceContext,
       mode,
-      permissionScope: 'workspace-chatbot-agent'
+      permissionScope: 'workspace-chatbot-agent',
+      sessionKey
     })
 
     if (autoApplyWorkspaceChanges) {
       const workspaceProposals = returnedProposals.filter(isDirectWorkspaceProposal)
       for (const proposal of workspaceProposals) {
         await onApplyWorkspaceProposal(proposal)
-        markProposalStatus(proposal.id, 'approved')
+        markProposalStatus(proposal.id, 'approved', sessionKey)
       }
       if (workspaceProposals.length > 0) {
         setAppliedMessages(current => [
@@ -90,7 +97,7 @@ export function AgentCollaborationPanel({
   const handleApprove = async (proposal: AgentWorkspaceProposal) => {
     if (!isWorkspaceExecutableProposal(proposal)) return
     await onApplyWorkspaceProposal(proposal)
-    markProposalStatus(proposal.id, 'approved')
+    markProposalStatus(proposal.id, 'approved', sessionKey)
   }
 
   return (
@@ -117,9 +124,9 @@ export function AgentCollaborationPanel({
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
-        {runtimeError && (
+        {visibleRuntimeError && (
           <div className="rounded-2xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-            {runtimeError}
+            {visibleRuntimeError}
           </div>
         )}
       </div>
@@ -197,7 +204,7 @@ export function AgentCollaborationPanel({
                   key={proposal.id}
                   proposal={proposal}
                   onApprove={() => handleApprove(proposal)}
-                  onReject={() => markProposalStatus(proposal.id, 'rejected')}
+                  onReject={() => markProposalStatus(proposal.id, 'rejected', sessionKey)}
                 />
               ))
             )}
@@ -264,7 +271,8 @@ function isDirectWorkspaceProposal(proposal: AgentWorkspaceProposal) {
 function isWorkspaceExecutableProposal(proposal: AgentWorkspaceProposal) {
   return proposal.kind === 'workspace_card_create' ||
     proposal.kind === 'workspace_card_update' ||
-    proposal.kind === 'storyboard_update'
+    proposal.kind === 'storyboard_update' ||
+    proposal.kind === 'three_stage_field_update'
 }
 
 function summarizeAppliedChanges(proposals: AgentWorkspaceProposal[]) {
@@ -283,6 +291,7 @@ function proposalTitle(proposal: AgentWorkspaceProposal) {
   if (proposal.kind === 'workspace_card_create') return `Create ${proposal.cardDraft.type} card`
   if (proposal.kind === 'workspace_card_update') return `Update ${proposal.updates.length} card${proposal.updates.length > 1 ? 's' : ''}`
   if (proposal.kind === 'storyboard_update') return `Update storyboard ${proposal.rowId ? 'row' : 'sequence'}`
+  if (proposal.kind === 'three_stage_field_update') return `Update ${proposal.stageKey}.${proposal.fieldId}`
   return 'Unsupported workspace proposal'
 }
 
@@ -290,6 +299,7 @@ function proposalSummary(proposal: AgentWorkspaceProposal) {
   if (proposal.kind === 'workspace_card_create') return proposal.cardDraft.content
   if (proposal.kind === 'workspace_card_update') return proposal.updates.map(update => `${update.cardId}: ${update.title || ''} ${update.content || ''}`).join('\n')
   if (proposal.kind === 'storyboard_update') return JSON.stringify({ sequenceUpdates: proposal.sequenceUpdates, rowUpdates: proposal.rowUpdates }, null, 2)
+  if (proposal.kind === 'three_stage_field_update') return proposal.content
   return ''
 }
 

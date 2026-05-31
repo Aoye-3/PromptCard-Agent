@@ -5,7 +5,11 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.gateway.promptcard_runtime import PromptCardRuntimeMessageRequest, runtime_service
+from app.gateway.promptcard_runtime import (
+    PromptCardModelConfigRequest,
+    PromptCardRuntimeMessageRequest,
+    runtime_service,
+)
 
 router = APIRouter(prefix="/api/promptcard/runtime", tags=["promptcard-runtime"])
 
@@ -32,6 +36,21 @@ async def bootstrap(request: Request, response: Response) -> dict[str, Any]:
 @router.get("/catalog")
 async def catalog(request: Request) -> dict[str, Any]:
     return await runtime_service.catalog(request)
+
+
+@router.get("/model-config")
+async def model_config(request: Request) -> dict[str, Any]:
+    return await runtime_service.get_model_config(request)
+
+
+@router.put("/model-config")
+async def save_model_config(body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
+    return await runtime_service.save_model_config(body, request)
+
+
+@router.post("/model-config/test")
+async def test_model_config(body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
+    return await runtime_service.test_model_config(body, request)
 
 
 @router.post("/messages", response_model=PromptCardRuntimeMessageResponse)

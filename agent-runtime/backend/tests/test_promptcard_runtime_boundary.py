@@ -210,6 +210,8 @@ def test_messages_endpoint_uses_promptcard_runtime_service(monkeypatch):
         assert body.thread_id is None
         assert body.content == "补全选中卡片"
         assert body.mode == "card-workspace"
+        assert body.session_key == "workspace:card:project-1"
+        assert body.project_id == "project-1"
         assert body.workspace_context["contextId"] == "card:project-1:0"
         return {
             "threadId": "thread-1",
@@ -228,6 +230,8 @@ def test_messages_endpoint_uses_promptcard_runtime_service(monkeypatch):
             json={
                 "content": "补全选中卡片",
                 "mode": "card-workspace",
+                "sessionKey": "workspace:card:project-1",
+                "projectId": "project-1",
                 "workspaceContext": {
                     "contextId": "card:project-1:0",
                     "mode": "card-workspace",
@@ -240,6 +244,63 @@ def test_messages_endpoint_uses_promptcard_runtime_service(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["threadId"] == "thread-1"
+
+
+def test_parse_three_stage_field_update_filters_unknown_fields():
+    text = """
+```json
+{
+  "kind": "agent_workspace_proposals",
+  "proposals": [
+    {
+      "kind": "three_stage_field_update",
+      "id": "keep",
+      "agentName": "DeepSeek Agent",
+      "stageKey": "characterBoard",
+      "fieldId": "characterCore",
+      "mode": "replace",
+      "content": "Sharper character",
+      "rationale": "ok",
+      "status": "pending",
+      "createdAt": 1
+    },
+    {
+      "kind": "three_stage_field_update",
+      "id": "drop",
+      "agentName": "DeepSeek Agent",
+      "stageKey": "characterBoard",
+      "fieldId": "missingField",
+      "mode": "replace",
+      "content": "Nope",
+      "rationale": "bad",
+      "status": "pending",
+      "createdAt": 2
+    }
+  ]
+}
+```
+"""
+    workspace_context = {
+        "snapshot": {
+            "selectedStage": "characterBoard",
+            "selectedFieldId": "characterCore",
+            "sections": {
+                "characterBoard": {
+                    "fields": {"characterCore": "Existing"}
+                }
+            },
+        }
+    }
+
+    proposals = parse_agent_workspace_proposals(
+        text,
+        workspace_context=workspace_context,
+        permission_scope="workspace-chatbot-agent",
+    )
+
+    assert [proposal["id"] for proposal in proposals] == ["keep"]
+    assert proposals[0]["kind"] == "three_stage_field_update"
+    assert proposals[0]["content"] == "Sharper character"
 
 
 def test_status_endpoint_returns_promptcard_runtime_sections(monkeypatch):

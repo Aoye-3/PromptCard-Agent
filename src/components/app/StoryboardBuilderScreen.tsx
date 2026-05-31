@@ -313,6 +313,7 @@ export const StoryboardBuilderScreen = ({
         <AIChatbotBox
           title="Storyboard Agent"
           mode="storyboard-workspace"
+          sessionKey={`workspace:storyboard:${activeProject.id}`}
           workspaceContext={workspaceContext}
           onApplyWorkspaceProposal={handleApplyStoryboardAgentProposal}
         />

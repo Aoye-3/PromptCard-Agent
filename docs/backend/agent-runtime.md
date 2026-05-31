@@ -6,7 +6,7 @@ The Agent Runtime is a Python service under `agent-runtime/`. It is DeerFlow-der
 
 - `app/gateway/app.py`: FastAPI app composition and router mounting.
 - `app/gateway/routers/promptcard_runtime.py`: HTTP boundary under `/api/promptcard/runtime/*`.
-- `app/gateway/promptcard_runtime.py`: PromptCard adapter service, prompt construction, DeerFlow orchestration, text extraction, proposal parsing, and workspace-id validation.
+- `app/gateway/promptcard_runtime.py`: PromptCard adapter service, DeepSeek model configuration persistence, prompt construction, DeerFlow orchestration, text extraction, proposal parsing, and workspace-id validation.
 - `app/gateway/routers/*`: DeerFlow-native routes retained for internal use and compatibility.
 - `packages/harness/deerflow/tools/promptcard_library.py`: PromptCard tools exposed to the model for reading/proposing Prompt Library and project changes.
 
@@ -16,7 +16,7 @@ The Agent Runtime is a Python service under `agent-runtime/`. It is DeerFlow-der
 2. Vite proxies to `127.0.0.1:8001/api/promptcard/runtime/messages`.
 3. The PromptCard adapter creates or reuses a DeerFlow thread.
 4. The adapter builds the PMAgent prompt with workspace context and a bounded Prompt Library snapshot.
-5. DeerFlow runs `lead_agent` with `deepseek-chat`.
+5. DeerFlow runs `lead_agent` with the configured DeepSeek default model, which defaults to `deepseek-chat`.
 6. The adapter extracts assistant text and normalizes safe PromptCard proposals.
 7. The frontend receives text plus proposals and applies UI rules.
 
@@ -34,7 +34,21 @@ npm.cmd run agent:check
 
 ## Configuration
 
-`agent-runtime/config.yaml` configures the local model, tool surface, skills path, SQLite runtime state, and enabled DeerFlow features. Secrets are read by scripts and exported as environment variables; never commit keys or copy them into docs.
+`agent-runtime/config.yaml` configures the initial local model, tool surface, skills path, SQLite runtime state, and enabled DeerFlow features. Secrets are read by scripts and exported as environment variables; never commit keys or copy them into docs.
+
+The Agent panel model service writes the unified DeepSeek configuration to the runtime local config file, normally:
+
+```text
+agent-runtime/.deer-flow/promptcard-model-config.json
+```
+
+The PromptCard boundary exposes:
+
+- `GET /api/promptcard/runtime/model-config`
+- `PUT /api/promptcard/runtime/model-config`
+- `POST /api/promptcard/runtime/model-config/test`
+
+The API key is stored only in the backend config file, merged into the active runtime model settings, and returned to the frontend only as `apiKeyConfigured` plus a masked preview. The test endpoint runs from the backend so the browser never calls DeepSeek directly.
 
 ## Compatibility
 

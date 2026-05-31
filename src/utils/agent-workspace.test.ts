@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 import type { IPage } from '@/stores/card-initial-state'
-import { buildCardWorkspaceContext, buildStoryboardWorkspaceContext } from './agent-workspace'
+import { buildCardWorkspaceContext, buildStoryboardWorkspaceContext, buildThreeStageWorkspaceContext } from './agent-workspace'
 
 describe('agent workspace context', () => {
   it('builds a bounded card workspace snapshot', () => {
@@ -100,5 +100,55 @@ describe('agent workspace context', () => {
     expect(context.mode).toBe('storyboard-workspace')
     expect(context.snapshot.selectedRowId).toBe('row-1')
     expect(JSON.stringify(context.snapshot)).toContain('Hero')
+  })
+
+  it('builds a three-stage workspace snapshot for the selected field', () => {
+    const project: IPromptProject = {
+      id: 'project-3',
+      title: 'Three stage project',
+      type: 'three-stage',
+      revision: 1,
+      pages: [],
+      currentPage: 0,
+      threeStage: {
+        selectedStage: 'character',
+        selectedFieldId: 'characterNotes',
+        character: {
+          fields: { characterNotes: 'A precise character description' },
+          focusedFieldId: 'characterNotes',
+          updatedAt: 1,
+          meta: {}
+        },
+        storyboard: {
+          fields: { storyTheme: 'A calm morning' },
+          focusedFieldId: 'storyTheme',
+          updatedAt: 1,
+          meta: {}
+        },
+        videoPrompt: {
+          fields: { finalPrompt: 'Final generated prompt' },
+          focusedFieldId: 'finalPrompt',
+          updatedAt: 1,
+          meta: {}
+        },
+        meta: {}
+      },
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: 1,
+      meta: {}
+    }
+
+    const context = buildThreeStageWorkspaceContext({
+      activeProject: project,
+      threeStage: project.threeStage!,
+      selectedOutput: 'Selected stage output'
+    })
+
+    expect(context.contextId).toBe('three-stage:project-3:character:characterNotes')
+    expect(context.mode).toBe('three-stage-workspace')
+    expect(context.snapshot.selectedStage).toBe('character')
+    expect(context.snapshot.selectedFieldId).toBe('characterNotes')
+    expect(JSON.stringify(context.snapshot)).toContain('Selected stage output')
   })
 })

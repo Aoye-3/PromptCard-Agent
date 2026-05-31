@@ -41,6 +41,70 @@ Returns the PromptCard UI catalog:
 }
 ```
 
+### `GET /agent-api/promptcard/runtime/model-config`
+
+Returns the unified DeepSeek model configuration used by the Agent Runtime. The API key is never returned in clear text:
+
+```json
+{
+  "enabled": true,
+  "apiBase": "https://api.deepseek.com",
+  "apiKeyConfigured": true,
+  "apiKeyPreview": "sk-...abcd",
+  "modelName": "deepseek-chat",
+  "temperature": 0.7,
+  "maxTokens": 4096,
+  "availableModels": [
+    "deepseek-chat",
+    "deepseek-reasoner"
+  ]
+}
+```
+
+### `PUT /agent-api/promptcard/runtime/model-config`
+
+Saves the local DeepSeek model configuration and updates the active runtime model settings.
+
+Request:
+
+```json
+{
+  "enabled": true,
+  "apiBase": "https://api.deepseek.com",
+  "apiKey": "sk-...",
+  "modelName": "deepseek-chat",
+  "temperature": 0.7,
+  "maxTokens": 4096
+}
+```
+
+Fields may be omitted for partial updates. Omitting `apiKey` keeps the existing key. Sending an empty `apiKey` clears it. The response uses the same masked shape as `GET`.
+
+### `POST /agent-api/promptcard/runtime/model-config/test`
+
+Tests the current or supplied DeepSeek configuration from the backend. Browsers must not call DeepSeek directly.
+
+Request:
+
+```json
+{
+  "apiBase": "https://api.deepseek.com",
+  "apiKey": "optional-test-key",
+  "modelName": "deepseek-chat"
+}
+```
+
+Response:
+
+```json
+{
+  "success": true,
+  "message": "DeepSeek connection ok."
+}
+```
+
+Failures return `success: false` and a short diagnostic without exposing the API key.
+
 ### `POST /agent-api/promptcard/runtime/messages`
 
 Request:
@@ -48,8 +112,11 @@ Request:
 ```json
 {
   "threadId": "optional-existing-thread",
-  "content": "用户消息",
+  "content": "User message",
   "mode": "card-workspace",
+  "permissionScope": "workspace-chatbot-agent",
+  "sessionKey": "workspace:card:project",
+  "projectId": "project",
   "workspaceContext": {
     "contextId": "card:project:0",
     "mode": "card-workspace",
@@ -71,7 +138,11 @@ Response:
 }
 ```
 
-The backend owns thread creation, prompt construction, DeerFlow run execution, assistant text extraction, and proposal parsing.
+Supported workspace modes are `prompt-library`, `card-workspace`, `storyboard-workspace`, and `three-stage-workspace`. Card, storyboard, and three-stage Chatbox surfaces should use the `workspace-chatbot-agent` permission scope. Prompt Library Agent surfaces should use `prompt-library-agent`.
+
+New PromptCard UI calls must include `sessionKey`. The backend stores `sessionKey`, `projectId`, `mode`, and `permissionScope` in DeerFlow thread metadata when creating a thread and rejects later attempts to reuse that thread from a different session or project.
+
+The backend owns thread creation, prompt construction, configured DeepSeek model selection, DeerFlow run execution, assistant text extraction, and proposal parsing.
 
 ## Compatibility Routes
 

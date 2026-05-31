@@ -21,7 +21,7 @@ The bottom navigation exposes four primary areas:
 
 - **Projects**: project home, card builder, and storyboard builder.
 - **Prompt Library**: embedded Prompt library management UI.
-- **Agent Dashboard**: runtime status, model/skill/tool summaries, Agent run panel, and Prompt library proposals.
+- **Agent Dashboard**: unified Agent management page with DeepSeek model service configuration, default model, ToolUse visibility, skills, runtime status, diagnostics chat, and Prompt Library proposal review.
 - **Me**: profile/settings area, export action, language setting, and development server shutdown.
 
 The app uses `MainTab` for top-level navigation and `ProjectMode` for project home versus builder state.
@@ -32,7 +32,7 @@ PromptCard-Manager supports three project types:
 
 - **Card projects** use PromptCard pages and cards. They are edited through the card builder surface and assembled into a prompt with prompt parser utilities.
 - **Storyboard projects** use a sequence/row model. They store shared sequence style/constraints and per-shot fields such as subject, action, scene, camera, timing, lighting, and audio.
-- **Three-stage projects** use three parallel structured forms for character-board prompts, storyboard prompts, and final video-generation prompts. Each form has its own copyable output, while the right rail edits the currently focused field and exposes camera presets for shot-related fields.
+- **Three-stage projects** use three parallel structured forms for character-board prompts, storyboard prompts, and final video-generation prompts. Each form has its own copyable output, while the right rail can switch between focused field editing/camera presets and the shared Agent Chatbox.
 
 The project home screen creates, opens, deletes, and saves projects. Autosave updates project records after workspace changes.
 
@@ -50,7 +50,9 @@ Prompt library details are documented in [Prompt Library](./prompt-library.md).
 
 ## Agent Dashboard UI
 
-`AgentDashboard` reads from `agent.store` and the preset store. It displays runtime health/auth/model/tool/skill status, sends Agent prompts, renders responses, and lets users approve or reject Prompt library write proposals.
+`AgentDashboard` reads from `agent.store` and the preset store. It is the primary Agent configuration surface: a left menu selects `Model Service`, `Default Model`, `Tools / ToolUse`, `Skills`, or `Agent Session Diagnostics`, while the right pane shows the selected detail view.
+
+The model service page is DeepSeek-only. It saves API base, API key, model name, temperature, and token limits through the backend model-config boundary; API keys stay on the backend and are returned only as masked previews. The diagnostics chat, card builder Chatbox, storyboard Chatbox, and three-stage Chatbox all use `agentRuntimeService.sendMessage()` and differ only by workspace context and `permissionScope`.
 
 Agent integration details are documented in [Agent Runtime Boundary](../architecture/agent-runtime-boundary.md).
 
@@ -63,10 +65,10 @@ This is intended for local app testing convenience. It is not a production API.
 ## Component Ownership
 
 - `CardComponent`, `PromptComposer`, and `CreativeMode` support card editing and prompt composition.
-- `ThreeStageBuilder` supports the three-stage structured input workflow and field-focused Prompt library assistance while reusing definitions from `src/domain/three-stage/three-stage-definitions.ts`.
+- `ThreeStageBuilder` supports the three-stage structured input workflow, field-focused Prompt library assistance, and a right-rail Agent Chatbox while reusing definitions from `src/domain/three-stage/three-stage-definitions.ts`.
 - `PromptLibrary`, `PromptLibraryForm`, and `PromptLibraryTable` support preset management.
-- `AgentDashboard` owns Agent runtime presentation and proposal review UI.
-- `AISettingsPanel` and `EvaluationPanel` remain part of the existing evaluation/AI support surface.
+- `AgentDashboard` owns Agent runtime presentation, DeepSeek model configuration, ToolUse/skill visibility, diagnostics chat, and proposal review UI.
+- `AISettingsPanel` is no longer the primary model configuration entry point. `EvaluationPanel` should read the unified DeepSeek runtime configuration for any AI-backed evaluation path, or stay rule-only when no runtime call is needed.
 
 ## Refactor Guidance
 

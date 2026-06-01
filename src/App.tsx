@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PromptLibrary from './components/PromptLibrary'
 import ThreeStageBuilderScreen from './components/ThreeStageBuilder'
 import { AgentDashboard } from './components/AgentDashboard'
@@ -19,6 +19,7 @@ import { useI18n } from './i18n'
 import { storage } from './utils/storage'
 import { createBuilderTemplateProjectTitle, getBuilderTemplateById } from './domain/builder-templates/builder-templates'
 import type { BuilderTemplateId } from './domain/builder-templates/builder-templates'
+import { sortProjects } from './domain/projects/project-normalization'
 import type { IPreset, CardType } from './models/Card.model'
 import type { IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
@@ -96,6 +97,48 @@ function App() {
   const activePresetCard = activePresetCardId ? currentCards.find(card => card.id === activePresetCardId) : null
   const presetsForActiveCard = activePresetCard ? getPresetsByType(activePresetCard.type) : []
 
+  const upsertProject = useCallback((project: IPromptProject) => {
+    setProjects(currentProjects => sortProjects([
+      project,
+      ...currentProjects.filter(currentProject => currentProject.id !== project.id)
+    ]))
+  }, [])
+
+  const replaceExistingProject = useCallback((project: IPromptProject, savedAt?: number) => {
+    setProjects(currentProjects => {
+      const existingProject = currentProjects.find(currentProject => currentProject.id === project.id)
+      if (!existingProject) return currentProjects
+      if (typeof savedAt === 'number' && existingProject.updatedAt > savedAt) return currentProjects
+
+      return sortProjects(currentProjects.map(currentProject =>
+        currentProject.id === project.id ? project : currentProject
+      ))
+    })
+  }, [])
+
+  const removeProjectsFromState = useCallback((ids: string[]) => {
+    const idSet = new Set(ids)
+    setProjects(currentProjects => currentProjects.filter(project => !idSet.has(project.id)))
+  }, [])
+
+  const appendProjectTrashEntries = useCallback((trashedProjects: IPromptProject[], deletedAt = Date.now()) => {
+    if (trashedProjects.length === 0) return
+
+    setProjectTrash(currentTrash => {
+      const trashedIds = new Set(trashedProjects.map(project => project.id))
+      return [
+        ...currentTrash.filter(entry => !trashedIds.has(entry.id)),
+        ...trashedProjects.map(project => ({
+          id: project.id,
+          deletedAt,
+          deletedBy: 'user' as const,
+          deleteReason: null,
+          payload: project
+        }))
+      ]
+    })
+  }, [])
+
   useEffect(() => {
     initPresets()
   }, [initPresets])
@@ -164,15 +207,11 @@ function App() {
           currentPage,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        })
+        }, { revision: activeProject.revision })
         await storage.workspace.save({ pages, currentPage, savedAt })
 
         if (updatedProject) {
-          setProjects(currentProjects => currentProjects.map(project =>
-            project.id === activeProjectId && project.updatedAt <= savedAt
-              ? updatedProject
-              : project
-          ))
+          replaceExistingProject(updatedProject, savedAt)
         }
 
         const trimmedPrompt = currentPrompt.trim()
@@ -200,7 +239,7 @@ function App() {
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.title, activeProject?.type, activeProjectId, allCards, currentPage, currentPrompt, isHydrated, pages, projectMode, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProject?.revision, activeProject?.title, activeProject?.type, activeProjectId, allCards, currentPage, currentPrompt, isHydrated, pages, projectMode, replaceExistingProject, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
     if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'storyboard' || !activeProject.storyboard) return
@@ -213,14 +252,10 @@ function App() {
           storyboard: activeProject.storyboard,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        })
+        }, { revision: activeProject.revision })
 
         if (updatedProject) {
-          setProjects(currentProjects => currentProjects.map(project =>
-            project.id === activeProjectId && project.updatedAt <= savedAt
-              ? updatedProject
-              : project
-          ))
+          replaceExistingProject(updatedProject, savedAt)
         }
 
         setLastSavedAt(savedAt)
@@ -232,7 +267,7 @@ function App() {
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.storyboard, activeProject?.type, activeProjectId, isHydrated, projectMode, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProject?.revision, activeProject?.storyboard, activeProject?.type, activeProjectId, isHydrated, projectMode, replaceExistingProject, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
     if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'three-stage' || !activeProject.threeStage) return
@@ -245,10 +280,10 @@ function App() {
           threeStage: activeProject.threeStage,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        })
+        }, { revision: activeProject.revision })
 
         if (updatedProject) {
-          setProjects(await storage.projects.getAll())
+          replaceExistingProject(updatedProject, savedAt)
         }
 
         setLastSavedAt(savedAt)
@@ -260,16 +295,7 @@ function App() {
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.threeStage, activeProject?.type, activeProjectId, isHydrated, projectMode, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
-
-  const refreshProjects = async () => {
-    const [nextProjects, nextTrash] = await Promise.all([
-      storage.projects.getAll(),
-      storage.projects.getTrash()
-    ])
-    setProjects(nextProjects)
-    setProjectTrash(nextTrash)
-  }
+  }, [activeProject?.revision, activeProject?.threeStage, activeProject?.type, activeProjectId, isHydrated, projectMode, replaceExistingProject, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   const handleCreateProject = () => {
     setShowCreateProjectModal(true)
@@ -282,7 +308,7 @@ function App() {
       currentPage: 0
     })
     setShowCreateProjectModal(false)
-    await openProject(newProject)
+    openProject(newProject, { touchLastOpened: false })
   }
 
   const handleCreateStoryboardProject = async () => {
@@ -290,7 +316,7 @@ function App() {
       title: `分镜项目 ${projects.filter(project => project.type === 'storyboard').length + 1}`
     })
     setShowCreateProjectModal(false)
-    await openProject(newProject)
+    openProject(newProject, { touchLastOpened: false })
   }
 
   const handleCreateThreeStageProject = async () => {
@@ -298,7 +324,7 @@ function App() {
       title: `三段式项目 ${projects.filter(project => project.type === 'three-stage').length + 1}`
     })
     setShowCreateProjectModal(false)
-    await openProject(newProject)
+    openProject(newProject, { touchLastOpened: false })
   }
 
   const handleCreateProjectFromTemplate = async (templateId: BuilderTemplateId, snapshot?: BuilderModePreviewSnapshot) => {
@@ -318,33 +344,78 @@ function App() {
 
     setShowCreateProjectModal(false)
     setShowTemplateLibrary(false)
-    await openProject(newProject)
+    openProject(newProject, { touchLastOpened: false })
   }
 
-  const openProject = async (project: IPromptProject) => {
+  const openProject = async (project: IPromptProject, options: { touchLastOpened?: boolean } = {}) => {
+    const touchLastOpened = options.touchLastOpened ?? true
+    const openedAt = Math.max(Date.now(), ...projects.map(currentProject => currentProject.lastOpenedAt || 0)) + 1
+    const optimisticProject = touchLastOpened
+      ? { ...project, updatedAt: openedAt, lastOpenedAt: openedAt }
+      : project
+
     if (project.type === 'card') {
       restoreWorkspace({
         pages: project.pages,
         currentPage: project.currentPage
       })
     }
-    await storage.projects.setLastOpened(project.id)
     setActiveProjectId(project.id)
     setActiveTab('projects')
     setProjectMode('builder')
-    await refreshProjects()
+    upsertProject(optimisticProject)
+
+    if (!touchLastOpened) return
+
+    try {
+      const updatedProject = await storage.projects.setLastOpened(project.id, {
+        revision: project.revision,
+        projects
+      })
+      if (updatedProject) {
+        replaceExistingProject(updatedProject, openedAt)
+      }
+    } catch (error) {
+      console.error('Failed to update project last opened time:', error)
+      setSaveStatus('error')
+    }
   }
 
   const handleDeleteProject = async (projectId: string) => {
     if (!confirm('确定要删除这个项目吗？历史快照会暂时保留。')) return
-    await storage.projects.delete(projectId)
+    const projectToDelete = projects.find(project => project.id === projectId)
+    if (!projectToDelete) return
+
+    const previousProjects = projects
+    const previousProjectTrash = projectTrash
+    const previousActiveProjectId = activeProjectId
+    const previousProjectMode = projectMode
+    const previousWorkspace = { pages, currentPage }
+    const deletedAt = Date.now()
+
+    removeProjectsFromState([projectId])
+    appendProjectTrashEntries([projectToDelete], deletedAt)
     setSelectedProjectIds(ids => ids.filter(id => id !== projectId))
+
     if (activeProjectId === projectId) {
       setActiveProjectId(null)
       setProjectMode('home')
       restoreWorkspace({ pages: [createInitialPage()], currentPage: 0 })
     }
-    await refreshProjects()
+
+    try {
+      const trashedProjects = await storage.projects.delete(projectId)
+      appendProjectTrashEntries(trashedProjects, deletedAt)
+    } catch (error) {
+      console.error('Failed to delete project:', error)
+      setProjects(previousProjects)
+      setProjectTrash(previousProjectTrash)
+      setActiveProjectId(previousActiveProjectId)
+      setProjectMode(previousProjectMode)
+      restoreWorkspace(previousWorkspace)
+      setSaveStatus('error')
+      alert('Failed to delete project.')
+    }
   }
 
   const handleToggleProjectSelection = (projectId: string) => {
@@ -358,29 +429,88 @@ function App() {
   const handleTrashSelectedProjects = async () => {
     if (selectedProjectIds.length === 0) return
     if (!confirm(`Move ${selectedProjectIds.length} project(s) to trash?`)) return
-    await storage.projects.trash(selectedProjectIds)
-    if (activeProjectId && selectedProjectIds.includes(activeProjectId)) {
+    const idsToTrash = selectedProjectIds
+    const projectsToTrash = projects.filter(project => idsToTrash.includes(project.id))
+    const previousProjects = projects
+    const previousProjectTrash = projectTrash
+    const previousActiveProjectId = activeProjectId
+    const previousProjectMode = projectMode
+    const previousWorkspace = { pages, currentPage }
+    const deletedAt = Date.now()
+
+    removeProjectsFromState(idsToTrash)
+    appendProjectTrashEntries(projectsToTrash, deletedAt)
+    if (activeProjectId && idsToTrash.includes(activeProjectId)) {
       setActiveProjectId(null)
       setProjectMode('home')
       restoreWorkspace({ pages: [createInitialPage()], currentPage: 0 })
     }
     setSelectedProjectIds([])
-    await refreshProjects()
+
+    try {
+      const trashedProjects = await storage.projects.trash(idsToTrash)
+      appendProjectTrashEntries(trashedProjects, deletedAt)
+    } catch (error) {
+      console.error('Failed to move projects to trash:', error)
+      setProjects(previousProjects)
+      setProjectTrash(previousProjectTrash)
+      setActiveProjectId(previousActiveProjectId)
+      setProjectMode(previousProjectMode)
+      restoreWorkspace(previousWorkspace)
+      setSelectedProjectIds(idsToTrash)
+      setSaveStatus('error')
+      alert('Failed to move projects to trash.')
+    }
   }
 
   const handleRestoreSelectedProjects = async () => {
     if (selectedProjectTrashIds.length === 0) return
-    await storage.projects.restore(selectedProjectTrashIds)
+    const idsToRestore = selectedProjectTrashIds
+    const entriesToRestore = projectTrash.filter(entry => idsToRestore.includes(entry.id))
+    const previousProjects = projects
+    const previousProjectTrash = projectTrash
+
+    setProjectTrash(currentTrash => currentTrash.filter(entry => !idsToRestore.includes(entry.id)))
+    setProjects(currentProjects => sortProjects([
+      ...entriesToRestore.map(entry => entry.payload),
+      ...currentProjects.filter(project => !idsToRestore.includes(project.id))
+    ]))
     setSelectedProjectTrashIds([])
-    await refreshProjects()
+
+    try {
+      const restoredProjects = await storage.projects.restore(idsToRestore)
+      setProjects(currentProjects => sortProjects([
+        ...restoredProjects,
+        ...currentProjects.filter(project => !idsToRestore.includes(project.id))
+      ]))
+    } catch (error) {
+      console.error('Failed to restore projects:', error)
+      setProjects(previousProjects)
+      setProjectTrash(previousProjectTrash)
+      setSelectedProjectTrashIds(idsToRestore)
+      setSaveStatus('error')
+      alert('Failed to restore projects.')
+    }
   }
 
   const handleDeleteSelectedProjectsForever = async () => {
     if (selectedProjectTrashIds.length === 0) return
     if (!confirm(`Permanently delete ${selectedProjectTrashIds.length} project(s)? This cannot be undone.`)) return
-    await storage.projects.deleteForever(selectedProjectTrashIds)
+    const idsToDelete = selectedProjectTrashIds
+    const previousProjectTrash = projectTrash
+
+    setProjectTrash(currentTrash => currentTrash.filter(entry => !idsToDelete.includes(entry.id)))
     setSelectedProjectTrashIds([])
-    await refreshProjects()
+
+    try {
+      await storage.projects.deleteForever(idsToDelete)
+    } catch (error) {
+      console.error('Failed to permanently delete projects:', error)
+      setProjectTrash(previousProjectTrash)
+      setSelectedProjectTrashIds(idsToDelete)
+      setSaveStatus('error')
+      alert('Failed to permanently delete projects.')
+    }
   }
   const handleRenameProject = async (project: IPromptProject) => {
     setRenameProject(project)
@@ -399,9 +529,9 @@ function App() {
     const updatedProject = await storage.projects.update(renameProject.id, {
       title: nextTitle,
       updatedAt: Date.now()
-    })
+    }, { revision: renameProject.revision })
     if (updatedProject) {
-      setProjects(await storage.projects.getAll())
+      replaceExistingProject(updatedProject)
     }
     setRenameProject(null)
     setRenameProjectTitle('')
@@ -464,37 +594,41 @@ function App() {
     try {
       const savedAt = Date.now()
       if (activeProject?.type === 'storyboard') {
-        await storage.projects.update(activeProjectId, {
+        const updatedProject = await storage.projects.update(activeProjectId, {
           storyboard: activeProject.storyboard,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        })
+        }, { revision: activeProject.revision })
+        if (updatedProject) {
+          replaceExistingProject(updatedProject, savedAt)
+        }
         setLastSavedAt(savedAt)
         setSaveStatus('saved')
-        await refreshProjects()
         alert(t('saveSuccess'))
         return
       }
 
       if (activeProject?.type === 'three-stage') {
-        await storage.projects.update(activeProjectId, {
+        const updatedProject = await storage.projects.update(activeProjectId, {
           threeStage: activeProject.threeStage,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        })
+        }, { revision: activeProject.revision })
+        if (updatedProject) {
+          replaceExistingProject(updatedProject, savedAt)
+        }
         setLastSavedAt(savedAt)
         setSaveStatus('saved')
-        await refreshProjects()
         alert(t('saveSuccess'))
         return
       }
 
-      await storage.projects.update(activeProjectId, {
+      const updatedProject = await storage.projects.update(activeProjectId, {
         pages,
         currentPage,
         updatedAt: savedAt,
         lastOpenedAt: savedAt
-      })
+      }, { revision: activeProject?.revision })
       await storage.workspace.save({ pages, currentPage, savedAt })
 
       if (currentPrompt.trim()) {
@@ -514,7 +648,9 @@ function App() {
 
       setLastSavedAt(savedAt)
       setSaveStatus('saved')
-      await refreshProjects()
+      if (updatedProject) {
+        replaceExistingProject(updatedProject, savedAt)
+      }
       alert(t('saveSuccess'))
     } catch (error) {
       console.error('Save failed:', error)

@@ -145,10 +145,14 @@ describe('agent workspace context', () => {
       selectedOutput: 'Selected stage output'
     })
 
-    expect(context.contextId).toBe('three-stage:project-3:character:characterNotes')
+    expect(context.contextId).toContain('three-stage:project-3:')
     expect(context.mode).toBe('three-stage-workspace')
     expect(context.snapshot.selectedStage).toBe('character')
     expect(context.snapshot.selectedFieldId).toBe('characterNotes')
+    expect(context.snapshot.selectedPageId).toBeTruthy()
+    expect(context.snapshot.selectedFormId).toBeTruthy()
+    expect(context.snapshot.selectedPairId).toBe(null)
+    expect(Array.isArray(context.snapshot.pages)).toBe(true)
     expect(JSON.stringify(context.snapshot)).toContain('Selected stage output')
   })
 })

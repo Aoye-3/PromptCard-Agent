@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
 import type { IPromptProject } from '@/models/PromptHistory.model'
-import { createThreeStageProject, mergeProjects, normalizeProject } from './project-normalization'
+import { mergeProjects, normalizeProject } from './project-normalization'
 
 describe('project normalization', () => {
   test('defaults legacy projects to card projects with normalized pages', () => {
@@ -37,7 +37,10 @@ describe('project normalization', () => {
       meta: {}
     } as IPromptProject)
 
-    expect(project.threeStage).toEqual(createThreeStageProject(1))
+    expect(project.threeStage?.pages).toHaveLength(1)
+    expect(project.threeStage?.pages?.[0].items.map(item => item.kind)).toEqual(['character', 'storyVideoPair'])
+    expect(project.threeStage?.selectedStage).toBe('character')
+    expect(project.threeStage?.selectedFieldId).toBe('characterNotes')
   })
 
   test('merges duplicate browser and file projects by newer updatedAt and sorts by activity', () => {

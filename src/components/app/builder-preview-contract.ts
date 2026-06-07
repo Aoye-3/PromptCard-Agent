@@ -8,4 +8,4 @@ export interface BuilderModePreviewSnapshot {
   threeStage?: IThreeStageProject
 }
 
-export const builderPreviewIds: BuilderTemplateId[] = ['card', 'storyboard', 'three-stage']
+export const builderPreviewIds: BuilderTemplateId[] = ['free-canvas', 'card', 'storyboard', 'three-stage']

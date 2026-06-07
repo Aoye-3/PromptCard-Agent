@@ -129,11 +129,24 @@ export function buildStoryboardWorkspaceContext({
 export function buildThreeStageWorkspaceContext({
   activeProject,
   threeStage,
-  selectedOutput
+  selectedOutput,
+  freeCanvas
 }: {
   activeProject: IPromptProject
   threeStage: IThreeStageProject
   selectedOutput: string
+  freeCanvas?: {
+    selectedNodeId?: string | null
+    selectedNodeType?: string | null
+    selectedMediaAssetId?: string | null
+    nodes?: Array<{
+      id: string
+      kind: string
+      title?: string
+      formId?: string
+      mediaAssetId?: string | null
+    }>
+  }
 }): AgentWorkspaceContext {
   const syncedThreeStage = syncThreeStageLegacyFields(threeStage)
   const selectedStage = syncedThreeStage.selectedStage
@@ -186,7 +199,19 @@ export function buildThreeStageWorkspaceContext({
               videoPromptFormId: item.videoPromptForm.id,
               number: item.storyboardForm.number
             })
-      }))
+      })),
+      freeCanvas: freeCanvas ? {
+        selectedNodeId: freeCanvas.selectedNodeId || null,
+        selectedNodeType: freeCanvas.selectedNodeType || null,
+        selectedMediaAssetId: freeCanvas.selectedMediaAssetId || null,
+        nodes: (freeCanvas.nodes || []).slice(0, MAX_CARDS).map(node => ({
+          id: node.id,
+          kind: node.kind,
+          title: compactText(node.title),
+          formId: node.formId,
+          mediaAssetId: node.mediaAssetId || null
+        }))
+      } : undefined
     }
   }
 }

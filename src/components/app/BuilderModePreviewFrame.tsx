@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import ThreeStageBuilderScreen from '@/components/ThreeStageBuilder'
+import FreeCanvasBuilderScreen from '@/components/canvas/FreeCanvasBuilderScreen'
 import { CardBuilderScreen } from './CardBuilderScreen'
 import { StoryboardBuilderScreen } from './StoryboardBuilderScreen'
 import { useCardStore } from '@/stores/card.store'
@@ -27,7 +28,9 @@ export const BuilderModePreviewFrame = ({
   onSnapshotChange: (snapshot: BuilderModePreviewSnapshot) => void
 }) => (
   <div className="min-w-0 rounded-[28px] border border-gray-100 bg-white shadow-sm" data-builder-interactive-preview>
-    {template.id === 'storyboard' ? (
+    {template.id === 'free-canvas' ? (
+      <FreeCanvasPreviewHost key={template.id} template={template} snapshot={snapshot} onSnapshotChange={onSnapshotChange} />
+    ) : template.id === 'storyboard' ? (
       <StoryboardPreviewHost key={template.id} template={template} snapshot={snapshot} onSnapshotChange={onSnapshotChange} />
     ) : template.id === 'three-stage' ? (
       <ThreeStagePreviewHost key={template.id} template={template} snapshot={snapshot} onSnapshotChange={onSnapshotChange} />
@@ -292,6 +295,48 @@ const ThreeStagePreviewHost = ({
         onSave={() => window.alert('预览模式不会保存项目或历史。')}
         onChange={setThreeStage}
         onIncrementPresetUsage={async () => undefined}
+        previewMode
+      />
+    </>
+  )
+}
+
+const FreeCanvasPreviewHost = ({
+  template,
+  snapshot,
+  onSnapshotChange
+}: {
+  template: BuilderTemplate
+  snapshot: BuilderModePreviewSnapshot
+  onSnapshotChange: (snapshot: BuilderModePreviewSnapshot) => void
+}) => {
+  const baseProject = useMemo(() => createPreviewProject(template), [template])
+  const [previewTitle, setPreviewTitle] = useState(baseProject.title)
+  const activeProject = useMemo(() => ({
+    ...baseProject,
+    title: previewTitle
+  }), [baseProject, previewTitle])
+  const [threeStage, setThreeStage] = useState<IThreeStageProject>(() => snapshot.threeStage || activeProject.threeStage || createThreeStageProject())
+
+  const handleRenamePreviewProject = () => {
+    const nextTitle = window.prompt('重命名项目', previewTitle)?.trim()
+    if (nextTitle) setPreviewTitle(nextTitle)
+  }
+
+  useEffect(() => {
+    onSnapshotChange({ threeStage })
+  }, [onSnapshotChange, threeStage])
+
+  return (
+    <>
+      <PreviewNotice />
+      <FreeCanvasBuilderScreen
+        activeProject={activeProject}
+        threeStage={threeStage}
+        onBack={() => undefined}
+        onRenameProject={handleRenamePreviewProject}
+        onSave={() => window.alert('预览模式不会保存项目或历史。')}
+        onChange={setThreeStage}
         previewMode
       />
     </>

@@ -44,7 +44,9 @@ Shot-related fields can reuse Prompt Library presets, especially `camera` preset
 
 Field definitions and output assembly live in `src/domain/three-stage/three-stage-definitions.ts`. The React component imports those definitions and should not duplicate stage field IDs, camera-field membership, or output ordering.
 
-Autosave should not reload the whole project list after saving a three-stage snapshot. The editor already holds the newest local copy; merging an older async save response over it can restore text the user just deleted. If a save response needs to update project metadata, only merge it when the local project `updatedAt` is not newer than that save.
+Autosave should not reload or replace the whole project after saving a three-stage snapshot. The editor already holds the newest local copy; merging an older async save response over it can restore text or nodes the user just deleted.
+
+Three-stage and free-canvas edits must increment the project edit sequence in `App.tsx`. Autosave captures that sequence before calling storage. When the response returns, only the matching current sequence may confirm `saved` status or advance `updatedAt`. Stale responses may merge `revision` and `lastOpenedAt` only; they must not overwrite `threeStage`, form fields, `form.meta.canvas.position`, or `threeStage.meta.freeCanvas.mediaNodes`.
 
 Camera preset fields should keep the Prompt Library picker usable inside the right field editor. When a selected field has `presetType: 'camera'`, reserve vertical space for the picker instead of letting the read-only full prompt preview consume the panel.
 
@@ -76,6 +78,18 @@ Three-stage Agent context is built by `buildThreeStageWorkspaceContext()` in `sr
 
 The Agent `sessionKey` remains project-scoped, but the `contextId` includes the selected page and form. This keeps the conversation surface stable while proposals target the current form.
 
+## Free Canvas Projection
+
+The free canvas builder is a three-stage project variant selected by `meta.builderTemplateId: "free-canvas"`. It does not introduce a new durable project type. The standard three-stage data model remains the source of truth while React Flow renders a draggable canvas projection:
+
+- `character`, `storyboard`, and `videoPrompt` forms become canvas nodes.
+- Bound storyboard/video-prompt pairs become canvas edges.
+- Form node positions are stored in `form.meta.canvas.position`.
+- Project-local media nodes live in `threeStage.meta.freeCanvas.mediaNodes`.
+- Supported media node kinds are `imageAsset`, `textOverlay`, `arrowAnnotation`, and `mediaGroup`.
+
+The media layer is PromptCard-owned. tldraw may be studied as a reference for shape/store patterns, but it is not a production dependency. Media nodes are not Prompt Library presets, and Agent paths must keep using `workspace-chatbot-agent` rather than Prompt Library write permissions.
+
 ## Tests
 
 When changing a stage definition, update or add tests in `src/domain/three-stage/three-stage-definitions.test.ts`.
@@ -83,3 +97,5 @@ When changing a stage definition, update or add tests in `src/domain/three-stage
 When changing page, copy, delete, numbering, or pair-binding behavior, update `src/domain/three-stage/three-stage-pages.test.ts`.
 
 When changing Agent context fields, update `src/utils/agent-workspace.test.ts`.
+
+When changing free canvas graph projection or media node persistence, update `src/domain/free-canvas/free-canvas.test.ts`.

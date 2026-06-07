@@ -6,6 +6,7 @@ import { AppShell } from './components/app/AppShell'
 import { ProjectHome } from './components/app/ProjectHome'
 import { CardBuilderScreen } from './components/app/CardBuilderScreen'
 import { StoryboardBuilderScreen } from './components/app/StoryboardBuilderScreen'
+import FreeCanvasBuilderScreen from './components/canvas/FreeCanvasBuilderScreen'
 import { MeScreen } from './components/app/MeScreen'
 import { TemplateLibraryScreen } from './components/app/TemplateLibraryScreen'
 import type { BuilderModePreviewSnapshot } from './components/app/builder-preview-contract'
@@ -80,6 +81,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [userSettings, setUserSettings] = useState<IUserSettings>(DEFAULT_USER_SETTINGS)
   const lastHistoryContentRef = useRef('')
+  const projectEditSeqRef = useRef<Record<string, number>>({})
 
   const currentCards = pages[currentPage]?.cards || []
   const currentPrompt = assemblePrompt(pages)
@@ -112,6 +114,33 @@ function App() {
 
       return sortProjects(currentProjects.map(currentProject =>
         currentProject.id === project.id ? project : currentProject
+      ))
+    })
+  }, [])
+
+  const markProjectEdited = useCallback((projectId: string) => {
+    projectEditSeqRef.current[projectId] = (projectEditSeqRef.current[projectId] || 0) + 1
+  }, [])
+
+  const getProjectEditSeq = useCallback((projectId: string) => projectEditSeqRef.current[projectId] || 0, [])
+
+  const confirmAutoSavedProject = useCallback((project: IPromptProject, savedAt: number, editSeq: number) => {
+    setProjects(currentProjects => {
+      const existingProject = currentProjects.find(currentProject => currentProject.id === project.id)
+      if (!existingProject) return currentProjects
+      const saveIsCurrent = (projectEditSeqRef.current[project.id] || 0) === editSeq
+
+      return sortProjects(currentProjects.map(currentProject =>
+        currentProject.id === project.id
+          ? {
+              ...currentProject,
+              revision: project.revision,
+              updatedAt: saveIsCurrent
+                ? Math.max(currentProject.updatedAt, project.updatedAt || savedAt)
+                : currentProject.updatedAt,
+              lastOpenedAt: Math.max(currentProject.lastOpenedAt || 0, project.lastOpenedAt || savedAt)
+            }
+          : currentProject
       ))
     })
   }, [])
@@ -202,6 +231,7 @@ function App() {
       try {
         setSaveStatus('saving')
         const savedAt = Date.now()
+        const editSeq = getProjectEditSeq(activeProjectId)
         const updatedProject = await storage.projects.update(activeProjectId, {
           pages,
           currentPage,
@@ -210,12 +240,13 @@ function App() {
         }, { revision: activeProject.revision })
         await storage.workspace.save({ pages, currentPage, savedAt })
 
+        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
         if (updatedProject) {
-          replaceExistingProject(updatedProject, savedAt)
+          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
         }
 
         const trimmedPrompt = currentPrompt.trim()
-        if (trimmedPrompt && trimmedPrompt !== lastHistoryContentRef.current) {
+        if (saveIsCurrent && trimmedPrompt && trimmedPrompt !== lastHistoryContentRef.current) {
           const snapshot = await storage.history.addSnapshot({
             content: trimmedPrompt,
             cards: allCards,
@@ -230,8 +261,10 @@ function App() {
           }
         }
 
-        setLastSavedAt(savedAt)
-        setSaveStatus('saved')
+        if (saveIsCurrent) {
+          setLastSavedAt(savedAt)
+          setSaveStatus('saved')
+        }
       } catch (error) {
         console.error('Auto-save failed:', error)
         setSaveStatus('error')
@@ -239,7 +272,7 @@ function App() {
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.title, activeProject?.type, activeProjectId, allCards, currentPage, currentPrompt, isHydrated, pages, projectMode, replaceExistingProject, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProject?.revision, activeProject?.title, activeProject?.type, activeProjectId, allCards, confirmAutoSavedProject, currentPage, currentPrompt, getProjectEditSeq, isHydrated, pages, projectMode, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
     if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'storyboard' || !activeProject.storyboard) return
@@ -248,18 +281,22 @@ function App() {
       try {
         setSaveStatus('saving')
         const savedAt = Date.now()
+        const editSeq = getProjectEditSeq(activeProjectId)
         const updatedProject = await storage.projects.update(activeProjectId, {
           storyboard: activeProject.storyboard,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
         }, { revision: activeProject.revision })
 
+        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
         if (updatedProject) {
-          replaceExistingProject(updatedProject, savedAt)
+          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
         }
 
-        setLastSavedAt(savedAt)
-        setSaveStatus('saved')
+        if (saveIsCurrent) {
+          setLastSavedAt(savedAt)
+          setSaveStatus('saved')
+        }
       } catch (error) {
         console.error('Storyboard auto-save failed:', error)
         setSaveStatus('error')
@@ -267,7 +304,7 @@ function App() {
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.storyboard, activeProject?.type, activeProjectId, isHydrated, projectMode, replaceExistingProject, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProject?.revision, activeProject?.storyboard, activeProject?.type, activeProjectId, confirmAutoSavedProject, getProjectEditSeq, isHydrated, projectMode, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
     if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'three-stage' || !activeProject.threeStage) return
@@ -276,18 +313,22 @@ function App() {
       try {
         setSaveStatus('saving')
         const savedAt = Date.now()
+        const editSeq = getProjectEditSeq(activeProjectId)
         const updatedProject = await storage.projects.update(activeProjectId, {
           threeStage: activeProject.threeStage,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
         }, { revision: activeProject.revision })
 
+        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
         if (updatedProject) {
-          replaceExistingProject(updatedProject, savedAt)
+          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
         }
 
-        setLastSavedAt(savedAt)
-        setSaveStatus('saved')
+        if (saveIsCurrent) {
+          setLastSavedAt(savedAt)
+          setSaveStatus('saved')
+        }
       } catch (error) {
         console.error('Three-stage auto-save failed:', error)
         setSaveStatus('error')
@@ -295,7 +336,7 @@ function App() {
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.threeStage, activeProject?.type, activeProjectId, isHydrated, projectMode, replaceExistingProject, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProject?.revision, activeProject?.threeStage, activeProject?.type, activeProjectId, confirmAutoSavedProject, getProjectEditSeq, isHydrated, projectMode, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   const handleCreateProject = () => {
     setShowCreateProjectModal(true)
@@ -544,6 +585,7 @@ function App() {
 
   const handleUpdateStoryboard = (storyboard: IStoryboardProject) => {
     if (!activeProjectId) return
+    markProjectEdited(activeProjectId)
     setProjects(currentProjects => currentProjects.map(project =>
       project.id === activeProjectId
         ? { ...project, storyboard, updatedAt: Date.now() }
@@ -553,6 +595,7 @@ function App() {
 
   const handleUpdateThreeStage = (threeStage: IThreeStageProject) => {
     if (!activeProjectId) return
+    markProjectEdited(activeProjectId)
     setProjects(currentProjects => currentProjects.map(project =>
       project.id === activeProjectId
         ? { ...project, threeStage, updatedAt: Date.now() }
@@ -593,17 +636,21 @@ function App() {
     if (!activeProjectId) return
     try {
       const savedAt = Date.now()
+      const editSeq = getProjectEditSeq(activeProjectId)
       if (activeProject?.type === 'storyboard') {
         const updatedProject = await storage.projects.update(activeProjectId, {
           storyboard: activeProject.storyboard,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
         }, { revision: activeProject.revision })
+        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
         if (updatedProject) {
-          replaceExistingProject(updatedProject, savedAt)
+          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
         }
-        setLastSavedAt(savedAt)
-        setSaveStatus('saved')
+        if (saveIsCurrent) {
+          setLastSavedAt(savedAt)
+          setSaveStatus('saved')
+        }
         alert(t('saveSuccess'))
         return
       }
@@ -614,11 +661,14 @@ function App() {
           updatedAt: savedAt,
           lastOpenedAt: savedAt
         }, { revision: activeProject.revision })
+        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
         if (updatedProject) {
-          replaceExistingProject(updatedProject, savedAt)
+          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
         }
-        setLastSavedAt(savedAt)
-        setSaveStatus('saved')
+        if (saveIsCurrent) {
+          setLastSavedAt(savedAt)
+          setSaveStatus('saved')
+        }
         alert(t('saveSuccess'))
         return
       }
@@ -755,6 +805,15 @@ function App() {
       onSave={handleSave}
       onChange={handleUpdateStoryboard}
     />
+  ) : projectMode === 'builder' && activeProject?.type === 'three-stage' && activeProject.threeStage && activeProject.meta?.builderTemplateId === 'free-canvas' ? (
+    <FreeCanvasBuilderScreen
+      activeProject={activeProject}
+      threeStage={activeProject.threeStage}
+      onBack={handleBackToProjects}
+      onRenameProject={() => handleRenameProject(activeProject)}
+      onSave={handleSave}
+      onChange={handleUpdateThreeStage}
+    />
   ) : projectMode === 'builder' && activeProject?.type === 'three-stage' && activeProject.threeStage ? (
     <ThreeStageBuilderScreen
       activeProject={activeProject}
@@ -852,7 +911,7 @@ function App() {
         setShowTemplateLibrary(false)
         setShowProjectTrash(true)
       }}
-      showProjectUtilities={activeTab === 'projects'}
+      showProjectUtilities={activeTab === 'projects' && projectMode === 'home'}
     >
       {content}
 

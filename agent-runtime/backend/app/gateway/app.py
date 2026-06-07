@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -384,7 +385,11 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
         Returns:
             Service health status information.
         """
-        return {"status": "healthy", "service": "deer-flow-gateway"}
+        return {
+            "status": "healthy",
+            "service": "deer-flow-gateway",
+            "deerFlowHome": os.environ.get("DEER_FLOW_HOME", ""),
+        }
 
     return app
 

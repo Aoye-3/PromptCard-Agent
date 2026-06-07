@@ -3,7 +3,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/png" href="/app-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PromptCard-Agent</title>
     <!-- 引入Font Awesome解决图标不显示问题 -->
@@ -12,9 +12,107 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+      html,
+      body,
+      #root {
+        min-height: 100%;
+      }
+
+      body {
+        background: #f5f4ed;
+      }
+
+      .boot-screen {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f5f4ed;
+        color: #141413;
+        font-family: Georgia, "Noto Sans SC", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", serif;
+      }
+
+      .boot-panel {
+        width: min(420px, calc(100vw - 48px));
+        border: 1px solid #e8e6dc;
+        background: #faf9f5;
+        padding: 28px;
+        box-shadow: 0 18px 50px rgba(20, 20, 19, 0.08);
+      }
+
+      .boot-brand {
+        margin-bottom: 20px;
+        font-size: 26px;
+        font-weight: 800;
+        font-style: italic;
+        letter-spacing: 0;
+      }
+
+      .boot-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #5e5d59;
+        font-size: 14px;
+      }
+
+      .boot-spinner {
+        width: 18px;
+        height: 18px;
+        border: 2px solid #e2ded1;
+        border-top-color: #c96442;
+        border-radius: 50%;
+        animation: boot-spin 900ms linear infinite;
+        flex: none;
+      }
+
+      .boot-progress {
+        position: relative;
+        height: 3px;
+        margin-top: 22px;
+        overflow: hidden;
+        background: #e8e6dc;
+      }
+
+      .boot-progress::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 42%;
+        background: #c96442;
+        animation: boot-progress 1.35s ease-in-out infinite;
+      }
+
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes boot-progress {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(260%);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="boot-screen" role="status" aria-live="polite">
+        <div class="boot-panel">
+          <div class="boot-brand">PMAgent</div>
+          <div class="boot-row">
+            <div class="boot-spinner" aria-hidden="true"></div>
+            <span>正在启动工作台...</span>
+          </div>
+          <div class="boot-progress" aria-hidden="true"></div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

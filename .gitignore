@@ -31,6 +31,8 @@ coverage
 # Production
 dist
 dist-ssr
+src-tauri/gen/
+src-tauri/target/
 *.local
 
 # Editor directories and files
@@ -143,16 +145,17 @@ NewVison/Prompt Guide/
 !tsconfig.json
 !tsconfig.node.json
 !vercel.json
+!src-tauri/tauri.conf.json
+!src-tauri/capabilities/**/*.json
 !public/**/*.json
 !data/**/*.json
-data/projects.json
-data/project-trash.json
-data/prompt-library-trash.json
 *.xml
 *.yaml
 !agent-runtime/config.yaml
 *.yml
 *.toml
+!src-tauri/Cargo.toml
+!src-tauri/permissions/**/*.toml
 *.ini
 *.cfg
 *.conf

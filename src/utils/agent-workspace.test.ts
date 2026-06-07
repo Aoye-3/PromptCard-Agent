@@ -212,4 +212,68 @@ describe('agent workspace context', () => {
     })
     expect(JSON.stringify(context.snapshot.freeCanvas)).toContain('Image node')
   })
+
+  it('adds free-canvas selected chain context to three-stage snapshots', () => {
+    const project: IPromptProject = {
+      id: 'project-5',
+      title: 'Free canvas chain project',
+      type: 'three-stage',
+      revision: 1,
+      pages: [],
+      currentPage: 0,
+      threeStage: {
+        selectedStage: 'storyboard',
+        selectedFieldId: 'theme',
+        character: {
+          fields: { characterNotes: 'A lone pilot' },
+          focusedFieldId: 'characterNotes',
+          updatedAt: 1,
+          meta: {}
+        },
+        storyboard: {
+          fields: { theme: 'A launch sequence' },
+          focusedFieldId: 'theme',
+          updatedAt: 1,
+          meta: {}
+        },
+        videoPrompt: {
+          fields: { actionSnapshot: 'Rocket rises through fog' },
+          focusedFieldId: 'actionSnapshot',
+          updatedAt: 1,
+          meta: {}
+        },
+        meta: {}
+      },
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: 1,
+      meta: { builderTemplateId: 'free-canvas' }
+    }
+
+    const context = buildThreeStageWorkspaceContext({
+      activeProject: project,
+      threeStage: project.threeStage!,
+      selectedOutput: 'Storyboard output',
+      freeCanvas: {
+        selectedEdgeId: 'edge-chain',
+        selectedChainNodeIds: ['character-node', 'storyboard-node', 'prompt-node', 'text-node'],
+        nodes: [],
+        selectedChainNodes: [
+          { id: 'character-node', kind: 'threeStageForm', title: '人物版 #1', formType: 'character', output: 'A lone pilot' },
+          { id: 'storyboard-node', kind: 'threeStageForm', title: '故事版 #1', formType: 'storyboard', output: 'A launch sequence' },
+          { id: 'prompt-node', kind: 'threeStageForm', title: '提示词版 #1', formType: 'videoPrompt', output: 'Rocket rises through fog' },
+          { id: 'text-node', kind: 'textOverlay', title: '文字标注', text: 'Use dusk lighting' }
+        ],
+        selectedChainEdges: [{ id: 'edge-chain', source: 'character-node', target: 'storyboard-node', label: 'context' }]
+      }
+    })
+
+    expect(context.snapshot.freeCanvas).toMatchObject({
+      selectedEdgeId: 'edge-chain',
+      selectedChainNodeIds: ['character-node', 'storyboard-node', 'prompt-node', 'text-node']
+    })
+    expect(JSON.stringify(context.snapshot.freeCanvas)).toContain('A lone pilot')
+    expect(JSON.stringify(context.snapshot.freeCanvas)).toContain('Rocket rises through fog')
+    expect(JSON.stringify(context.snapshot.freeCanvas)).toContain('Use dusk lighting')
+  })
 })

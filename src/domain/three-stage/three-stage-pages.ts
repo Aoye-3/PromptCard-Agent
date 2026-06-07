@@ -367,6 +367,39 @@ export const duplicateThreeStagePage = (threeStage: IThreeStageProject, pageId: 
   return selectThreeStageForm({ ...threeStage, pages: [...pages, page], selectedPageId: page.id }, page.id, firstForm.id)
 }
 
+export const addThreeStagePage = (threeStage: IThreeStageProject): IThreeStageProject => {
+  const pages = normalizeThreeStagePages(threeStage)
+  const timestamp = Date.now()
+  const characterForm = createThreeStageForm({
+    type: 'character',
+    number: maxFormNumber(pages, 'character') + 1,
+    timestamp
+  })
+  const pairNumber = maxPairNumber(pages) + 1
+  const storyboardForm = createThreeStageForm({
+    type: 'storyboard',
+    number: pairNumber,
+    timestamp
+  })
+  const videoPromptForm = createThreeStageForm({
+    type: 'videoPrompt',
+    number: pairNumber,
+    timestamp
+  })
+  const pair = createStoryVideoPairItem({ number: pairNumber, storyboardForm, videoPromptForm, timestamp })
+  const page: IThreeStagePage = {
+    id: `${timestamp}-three-stage-page-${pages.length + 1}`,
+    title: `Page ${pages.length + 1}`,
+    items: [createCharacterItem(characterForm, timestamp), pair],
+    selectedItemId: characterForm.id,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    meta: {}
+  }
+
+  return selectThreeStageForm({ ...threeStage, pages: [...pages, page], selectedPageId: page.id }, page.id, characterForm.id)
+}
+
 export const addCharacterFormToPage = (threeStage: IThreeStageProject, pageId: string, sourceFormId?: string): IThreeStageProject => {
   const pages = normalizeThreeStagePages(threeStage)
   const sourceForm = allForms(pages).filter(form => form.type === 'character').find(form => form.id === sourceFormId) ||

@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { buildThreeStageOutput } from './three-stage-definitions'
 import {
+  addThreeStagePage,
   addStoryVideoPairToPage,
   duplicateThreeStagePage,
   getSelectedThreeStageFormContext,
   normalizeThreeStagePages,
+  removeThreeStagePage,
   removeThreeStageItem,
   selectThreeStageForm,
   syncThreeStageLegacyFields
@@ -83,6 +85,32 @@ describe('three-stage pages', () => {
     expect(pairs[1].videoPromptForm.number).toBe(2)
     expect(pairs[1].storyboardForm.sourceFormId).toBe(pairs[0].storyboardForm.id)
     expect(pairs[1].videoPromptForm.sourceFormId).toBe(pairs[0].videoPromptForm.id)
+  })
+
+  test('adds a blank page with fresh character and story/video forms', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(350)
+    const source = syncThreeStageLegacyFields(legacyProject())
+
+    const next = addThreeStagePage(source)
+    const pages = normalizeThreeStagePages(next)
+
+    expect(pages).toHaveLength(2)
+    expect(next.selectedPageId).toBe(pages[1].id)
+    expect(pages[1].items.map(item => item.kind)).toEqual(['character', 'storyVideoPair'])
+    expect(getSelectedThreeStageFormContext(next).form.type).toBe('character')
+    expect(getSelectedThreeStageFormContext(next).form.number).toBe(2)
+    expect(pairsOf(next)[1].storyboardForm.number).toBe(2)
+  })
+
+  test('removes a page and selects the remaining page', () => {
+    const source = addThreeStagePage(syncThreeStageLegacyFields(legacyProject()))
+    const removedPageId = source.pages![1].id
+
+    const next = removeThreeStagePage(source, removedPageId)
+
+    expect(next.pages).toHaveLength(1)
+    expect(next.pages?.some(page => page.id === removedPageId)).toBe(false)
+    expect(next.selectedPageId).toBe(next.pages![0].id)
   })
 
   test('creates a story/video pair from an existing bound pair source', () => {

@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "vite --strictPort",
     "dev:with-agent": "powershell -ExecutionPolicy Bypass -File scripts/start-dev-with-agent.ps1",
+    "desktop:dev-services": "powershell -ExecutionPolicy Bypass -File scripts/start-desktop-dev-services.ps1",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "storage:dev": "powershell -ExecutionPolicy Bypass -File scripts/start-storage-service.ps1",
     "storage:test": "python -m unittest promptcard_storage.tests.test_store",
     "agent:dev": "powershell -ExecutionPolicy Bypass -File scripts/start-agent-runtime.ps1",
@@ -18,6 +21,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
     "@xyflow/react": "^12.11.0",
     "axios": "^1.6.0",
     "localforage": "^1.10.0",
@@ -29,6 +33,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.40.1",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@typescript-eslint/eslint-plugin": "^6.14.0",

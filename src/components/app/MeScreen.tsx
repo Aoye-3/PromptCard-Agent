@@ -1,5 +1,7 @@
-import { ChevronRight, Clock, Download, Info, Languages, Power, Settings, Smile, Upload, Wand2 } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronRight, Clock, Download, GitPullRequest, Info, Languages, Loader2, Power, Settings, Smile, Upload, Wand2 } from 'lucide-react'
 import type { IUserSettings } from '@/models/UserSettings.model'
+import { desktopShellService, type GitPullResult } from '@/services/desktop-shell-service'
 
 const autoSaveDelayOptions = [3, 5, 10, 20, 30]
 
@@ -20,6 +22,27 @@ export const MeScreen = ({
   onSettingsChange: (settings: Partial<IUserSettings>) => void
   onExportData: () => void
 }) => {
+  const [isPullingSource, setIsPullingSource] = useState(false)
+  const [gitPullResult, setGitPullResult] = useState<GitPullResult | null>(null)
+  const [gitPullError, setGitPullError] = useState<string | null>(null)
+  const isDesktopShell = desktopShellService.isAvailable()
+
+  const handleGitPullSource = async () => {
+    const confirmed = window.confirm('Pull source updates with git pull --ff-only? Uncommitted changes will block the update.')
+    if (!confirmed) return
+
+    setIsPullingSource(true)
+    setGitPullResult(null)
+    setGitPullError(null)
+    try {
+      setGitPullResult(await desktopShellService.gitPullSource())
+    } catch (error) {
+      setGitPullError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setIsPullingSource(false)
+    }
+  }
+
   const handleShutdownDevServer = async () => {
     const confirmed = window.confirm('确定关闭当前开发服务器吗？页面会断开连接。')
     if (!confirmed) return
@@ -124,6 +147,27 @@ export const MeScreen = ({
               关闭开发服务器
             </button>
           </div>
+          {isDesktopShell && (
+            <div className="mt-6 border-t border-gray-100 pt-5">
+              <div className="mb-4 flex items-center gap-3">
+                <GitPullRequest className="h-5 w-5" />
+                <h2 className="text-lg font-bold">Desktop source update</h2>
+              </div>
+              <button
+                className="inline-flex items-center gap-2 rounded-full bg-gray-950 px-5 py-2 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400"
+                onClick={handleGitPullSource}
+                disabled={isPullingSource}
+              >
+                {isPullingSource ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitPullRequest className="h-4 w-4" />}
+                Pull source updates
+              </button>
+              {(gitPullResult || gitPullError) && (
+                <pre className="mt-4 max-h-56 overflow-auto rounded-2xl bg-gray-950 p-4 text-xs leading-5 text-gray-100">
+                  {gitPullError || [gitPullResult?.stdout, gitPullResult?.stderr].filter(Boolean).join('\n') || 'Already up to date.'}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>

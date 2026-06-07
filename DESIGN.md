@@ -202,6 +202,12 @@ What makes Claude's design truly distinctive is its warm neutral palette. Every 
 - **Serif-driven rhythm**: The serif headings establish a literary cadence that demands more whitespace than sans-serif designs.
 - **Content island approach**: Sections alternate between light and dark environments, creating distinct "rooms" for each message.
 
+### Workspace Density Goal
+- **Increase information density on single-page workspaces**: Builder, canvas, and agent-assisted editing screens should target Figma-like workbench density, prioritizing visible working content over decorative framing.
+- **Reserve generous whitespace for reading pages, not tools**: Operational panes should use tighter headers, smaller labels, and compact controls so conversation history, editable fields, node lists, and canvas content remain visible together.
+- **Fixed sidebars should earn their width**: When a sidebar is expanded, it should behave as a full-height work area rather than a floating card; at least 70-75% of the sidebar body should be available for the primary task such as Agent context, chat history, or form editing.
+- **Remove inactive placeholders from dense modes**: Empty proposal lists, repeated labels, and decorative status blocks should be hidden or collapsed when they do not help the current workflow.
+
 ### Border Radius Scale
 - Sharp (4px): Minimal inline elements
 - Subtly rounded (6–7.5px): Small buttons, secondary interactive elements

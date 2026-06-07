@@ -22,15 +22,20 @@ if (!$ApiKeyMatch.Success) {
 
 $env:DEEPSEEK_API_KEY = $ApiKeyMatch.Value
 $env:DEER_FLOW_PROJECT_ROOT = $RuntimeRoot
-$env:DEER_FLOW_HOME = Join-Path $RuntimeRoot ".deer-flow"
-$env:DEER_FLOW_CONFIG_PATH = Join-Path $RuntimeRoot "config.yaml"
-$env:DEER_FLOW_EXTENSIONS_CONFIG_PATH = Join-Path $RuntimeRoot "extensions_config.json"
-$env:PROMPTCARD_LIBRARY_FILE = Join-Path $RepoRoot "data\prompt-library-presets.json"
-$env:UV_CACHE_DIR = Join-Path $env:TEMP "promptcard-agent-uv-cache"
-$env:UV_LINK_MODE = "copy"
-$env:UV_PROJECT_ENVIRONMENT = Join-Path $env:LOCALAPPDATA "PromptCardAgentRuntime\.venv"
+if (!$env:DEER_FLOW_HOME) {
+  $env:DEER_FLOW_HOME = Join-Path $RuntimeRoot ".deer-flow"
+}
+if (!$env:DEER_FLOW_CONFIG_PATH) {
+  $env:DEER_FLOW_CONFIG_PATH = Join-Path $RuntimeRoot "config.yaml"
+}
+if (!$env:DEER_FLOW_EXTENSIONS_CONFIG_PATH) {
+  $env:DEER_FLOW_EXTENSIONS_CONFIG_PATH = Join-Path $RuntimeRoot "extensions_config.json"
+}
+if (!$env:PROMPTCARD_LIBRARY_FILE) {
+  $env:PROMPTCARD_LIBRARY_FILE = Join-Path $RepoRoot "data\prompt-library-presets.json"
+}
+$RuntimeEnvironment = Join-Path $env:LOCALAPPDATA "PromptCardAgentRuntime\.venv"
 $BundledPython = "C:\Users\123\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-$env:UV_PYTHON = if (Test-Path $BundledPython) { $BundledPython } else { "C:\Program Files\Python311\python.exe" }
 $env:GATEWAY_HOST = "127.0.0.1"
 $env:GATEWAY_PORT = "8001"
 $env:GATEWAY_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
@@ -48,11 +53,21 @@ $HarnessPath = Join-Path $BackendRoot "packages\harness"
 $env:PYTHONPATH = "$BackendRoot;$HarnessPath;$env:PYTHONPATH"
 
 New-Item -ItemType Directory -Force -Path $env:DEER_FLOW_HOME | Out-Null
-New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
-New-Item -ItemType Directory -Force -Path (Split-Path $env:UV_PROJECT_ENVIRONMENT -Parent) | Out-Null
+New-Item -ItemType Directory -Force -Path (Split-Path $RuntimeEnvironment -Parent) | Out-Null
 Push-Location $BackendRoot
 try {
-  uv run uvicorn app.gateway.app:app --host 127.0.0.1 --port 8001
+  $RuntimeUvicorn = Join-Path $RuntimeEnvironment "Scripts\uvicorn.exe"
+  if (Test-Path $RuntimeUvicorn) {
+    & $RuntimeUvicorn app.gateway.app:app --host 127.0.0.1 --port 8001
+  }
+  else {
+    $env:UV_CACHE_DIR = Join-Path $env:TEMP "promptcard-agent-uv-cache"
+    $env:UV_LINK_MODE = "copy"
+    $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
+    $env:UV_PYTHON = if (Test-Path $BundledPython) { $BundledPython } else { "C:\Program Files\Python311\python.exe" }
+    New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
+    uv run uvicorn app.gateway.app:app --host 127.0.0.1 --port 8001
+  }
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {

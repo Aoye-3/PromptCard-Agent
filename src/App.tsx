@@ -21,12 +21,13 @@ import { storage } from './utils/storage'
 import { createBuilderTemplateProjectTitle, getBuilderTemplateById } from './domain/builder-templates/builder-templates'
 import type { BuilderTemplateId } from './domain/builder-templates/builder-templates'
 import { sortProjects } from './domain/projects/project-normalization'
+import { mergeStoredProjectMetadata } from './domain/projects/project-storage-merge'
 import type { IPreset, CardType } from './models/Card.model'
 import type { IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
 import type { IUserSettings } from './models/UserSettings.model'
 import type { MainTab, ProjectMode, SaveStatus } from './features/app/app-types'
-import type { TrashEntry } from './storage/storage-service-client'
+import { StorageRevisionConflict, type TrashEntry } from './storage/storage-service-client'
 
 const DEFAULT_USER_SETTINGS: IUserSettings = {
   theme: 'light',
@@ -36,6 +37,22 @@ const DEFAULT_USER_SETTINGS: IUserSettings = {
   presetSort: 'usage',
   meta: {}
 }
+
+const AppStartupScreen = () => (
+  <div className="app-startup-screen" role="status" aria-live="polite">
+    <div className="app-startup-panel">
+      <div className="app-startup-brand">PMAgent</div>
+      <div className="app-startup-row">
+        <div className="app-startup-spinner" aria-hidden="true"></div>
+        <span>正在加载本地数据...</span>
+      </div>
+      <div className="app-startup-progress" aria-hidden="true"></div>
+    </div>
+  </div>
+)
+
+const createCardWorkspaceSnapshot = (project: Pick<IPromptProject, 'pages' | 'currentPage'>) =>
+  JSON.stringify({ pages: project.pages, currentPage: project.currentPage })
 
 function App() {
   const { language, setLanguage, t, cardTypeLabel } = useI18n()
@@ -82,6 +99,7 @@ function App() {
   const [userSettings, setUserSettings] = useState<IUserSettings>(DEFAULT_USER_SETTINGS)
   const lastHistoryContentRef = useRef('')
   const projectEditSeqRef = useRef<Record<string, number>>({})
+  const lastCardWorkspaceSnapshotRef = useRef('')
 
   const currentCards = pages[currentPage]?.cards || []
   const currentPrompt = assemblePrompt(pages)
@@ -106,15 +124,9 @@ function App() {
     ]))
   }, [])
 
-  const replaceExistingProject = useCallback((project: IPromptProject, savedAt?: number) => {
+  const confirmStoredProjectMetadata = useCallback((project: IPromptProject, options: { includeTitle?: boolean; savedAt?: number } = {}) => {
     setProjects(currentProjects => {
-      const existingProject = currentProjects.find(currentProject => currentProject.id === project.id)
-      if (!existingProject) return currentProjects
-      if (typeof savedAt === 'number' && existingProject.updatedAt > savedAt) return currentProjects
-
-      return sortProjects(currentProjects.map(currentProject =>
-        currentProject.id === project.id ? project : currentProject
-      ))
+      return mergeStoredProjectMetadata(currentProjects, project, options)
     })
   }, [])
 
@@ -145,6 +157,18 @@ function App() {
     })
   }, [])
 
+  const handleProjectSaveError = useCallback((error: unknown, message: string) => {
+    if (error instanceof StorageRevisionConflict && error.current) {
+      confirmStoredProjectMetadata(error.current)
+      setSaveStatus('saving')
+      return true
+    }
+
+    console.error(message, error)
+    setSaveStatus('error')
+    return false
+  }, [confirmStoredProjectMetadata])
+
   const removeProjectsFromState = useCallback((ids: string[]) => {
     const idSet = new Set(ids)
     setProjects(currentProjects => currentProjects.filter(project => !idSet.has(project.id)))
@@ -171,6 +195,30 @@ function App() {
   useEffect(() => {
     initPresets()
   }, [initPresets])
+
+  useEffect(() => {
+    if (!isHydrated || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'card') {
+      lastCardWorkspaceSnapshotRef.current = createCardWorkspaceSnapshot({ pages, currentPage })
+      return
+    }
+
+    const nextSnapshot = createCardWorkspaceSnapshot({ pages, currentPage })
+    if (!lastCardWorkspaceSnapshotRef.current) {
+      lastCardWorkspaceSnapshotRef.current = nextSnapshot
+      return
+    }
+
+    if (lastCardWorkspaceSnapshotRef.current !== nextSnapshot) {
+      markProjectEdited(activeProjectId)
+      const updatedAt = Date.now()
+      setProjects(currentProjects => currentProjects.map(project =>
+        project.id === activeProjectId
+          ? { ...project, pages, currentPage, updatedAt }
+          : project
+      ))
+      lastCardWorkspaceSnapshotRef.current = nextSnapshot
+    }
+  }, [activeProject?.type, activeProjectId, currentPage, isHydrated, markProjectEdited, pages, projectMode])
 
   useEffect(() => {
     let cancelled = false
@@ -266,13 +314,12 @@ function App() {
           setSaveStatus('saved')
         }
       } catch (error) {
-        console.error('Auto-save failed:', error)
-        setSaveStatus('error')
+        handleProjectSaveError(error, 'Auto-save failed:')
       }
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.title, activeProject?.type, activeProjectId, allCards, confirmAutoSavedProject, currentPage, currentPrompt, getProjectEditSeq, isHydrated, pages, projectMode, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProject?.revision, activeProject?.title, activeProject?.type, activeProjectId, allCards, confirmAutoSavedProject, currentPage, currentPrompt, getProjectEditSeq, handleProjectSaveError, isHydrated, pages, projectMode, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
     if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'storyboard' || !activeProject.storyboard) return
@@ -298,13 +345,12 @@ function App() {
           setSaveStatus('saved')
         }
       } catch (error) {
-        console.error('Storyboard auto-save failed:', error)
-        setSaveStatus('error')
+        handleProjectSaveError(error, 'Storyboard auto-save failed:')
       }
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.storyboard, activeProject?.type, activeProjectId, confirmAutoSavedProject, getProjectEditSeq, isHydrated, projectMode, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProject?.revision, activeProject?.storyboard, activeProject?.type, activeProjectId, confirmAutoSavedProject, getProjectEditSeq, handleProjectSaveError, isHydrated, projectMode, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
     if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'three-stage' || !activeProject.threeStage) return
@@ -330,13 +376,12 @@ function App() {
           setSaveStatus('saved')
         }
       } catch (error) {
-        console.error('Three-stage auto-save failed:', error)
-        setSaveStatus('error')
+        handleProjectSaveError(error, 'Three-stage auto-save failed:')
       }
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.threeStage, activeProject?.type, activeProjectId, confirmAutoSavedProject, getProjectEditSeq, isHydrated, projectMode, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProject?.revision, activeProject?.threeStage, activeProject?.type, activeProjectId, confirmAutoSavedProject, getProjectEditSeq, handleProjectSaveError, isHydrated, projectMode, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   const handleCreateProject = () => {
     setShowCreateProjectModal(true)
@@ -396,6 +441,7 @@ function App() {
       : project
 
     if (project.type === 'card') {
+      lastCardWorkspaceSnapshotRef.current = createCardWorkspaceSnapshot(project)
       restoreWorkspace({
         pages: project.pages,
         currentPage: project.currentPage
@@ -414,11 +460,10 @@ function App() {
         projects
       })
       if (updatedProject) {
-        replaceExistingProject(updatedProject, openedAt)
+        confirmStoredProjectMetadata(updatedProject, { savedAt: openedAt })
       }
     } catch (error) {
-      console.error('Failed to update project last opened time:', error)
-      setSaveStatus('error')
+      handleProjectSaveError(error, 'Failed to update project last opened time:')
     }
   }
 
@@ -567,12 +612,16 @@ function App() {
       return
     }
 
-    const updatedProject = await storage.projects.update(renameProject.id, {
-      title: nextTitle,
-      updatedAt: Date.now()
-    }, { revision: renameProject.revision })
-    if (updatedProject) {
-      replaceExistingProject(updatedProject)
+    try {
+      const updatedProject = await storage.projects.update(renameProject.id, {
+        title: nextTitle,
+        updatedAt: Date.now()
+      }, { revision: renameProject.revision })
+      if (updatedProject) {
+        confirmStoredProjectMetadata(updatedProject, { includeTitle: true })
+      }
+    } catch (error) {
+      handleProjectSaveError(error, 'Failed to rename project:')
     }
     setRenameProject(null)
     setRenameProjectTitle('')
@@ -699,13 +748,13 @@ function App() {
       setLastSavedAt(savedAt)
       setSaveStatus('saved')
       if (updatedProject) {
-        replaceExistingProject(updatedProject, savedAt)
+        confirmAutoSavedProject(updatedProject, savedAt, editSeq)
       }
       alert(t('saveSuccess'))
     } catch (error) {
-      console.error('Save failed:', error)
-      setSaveStatus('error')
-      alert(t('saveFailed'))
+      if (!handleProjectSaveError(error, 'Save failed:')) {
+        alert(t('saveFailed'))
+      }
     }
   }
 
@@ -753,6 +802,10 @@ function App() {
     const data = await storage.exportData()
     await navigator.clipboard.writeText(data)
     alert('导出数据已复制到剪贴板。')
+  }
+
+  if (!isHydrated) {
+    return <AppStartupScreen />
   }
 
   const saveStatusText = !userSettings.autoSave

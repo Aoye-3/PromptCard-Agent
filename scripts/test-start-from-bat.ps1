@@ -45,7 +45,7 @@ function Assert-FrontendShell($Url) {
   if ($response.StatusCode -ne 200) {
     throw "Frontend returned HTTP $($response.StatusCode): $Url"
   }
-  if ($response.Content -notmatch 'src="/src/main\.tsx"') {
+  if ($response.Content -notmatch 'src="/src/main\.tsx(?:\?[^"]*)?"') {
     throw "Frontend HTML shell did not include the Vite React entry module."
   }
   Write-Step "frontend HTML shell includes /src/main.tsx"

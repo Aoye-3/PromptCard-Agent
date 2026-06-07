@@ -17,7 +17,7 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    open: true,
+    open: process.env.PROMPTCARD_DESKTOP_DEV === '1' ? false : true,
     proxy: {
       '/agent-health': {
         target: 'http://127.0.0.1:8001',

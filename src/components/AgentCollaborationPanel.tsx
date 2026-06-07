@@ -16,6 +16,8 @@ interface AgentCollaborationPanelProps {
   sessionKey?: string
   onApplyWorkspaceProposal: (proposal: AgentWorkspaceProposal) => Promise<void> | void
   autoApplyWorkspaceChanges?: boolean
+  compact?: boolean
+  hideProposals?: boolean
 }
 
 export function AgentCollaborationPanel({
@@ -24,7 +26,9 @@ export function AgentCollaborationPanel({
   workspaceContext,
   sessionKey: sessionKeyProp,
   onApplyWorkspaceProposal,
-  autoApplyWorkspaceChanges = false
+  autoApplyWorkspaceChanges = false,
+  compact = false,
+  hideProposals = false
 }: AgentCollaborationPanelProps) {
   const sessionKey = sessionKeyProp || `workspace:${mode.replace('-workspace', '')}:${workspaceContext.projectId}`
   const {
@@ -101,15 +105,15 @@ export function AgentCollaborationPanel({
   }
 
   return (
-    <div className="flex min-h-[560px] flex-col bg-white">
-      <div className="border-b border-gray-100 p-5">
-        <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 flex-col bg-white">
+      <div className={`shrink-0 border-b border-gray-100 ${compact ? 'p-3' : 'p-5'}`}>
+        <div className={`${compact ? 'mb-2' : 'mb-3'} flex items-center justify-between gap-3`}>
           <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-black text-white">
-              <Bot className="h-4 w-4" />
+            <div className={`flex items-center justify-center bg-black text-white ${compact ? 'h-8 w-8 rounded-xl' : 'h-9 w-9 rounded-2xl'}`}>
+              <Bot className={compact ? 'h-3.5 w-3.5' : 'h-4 w-4'} />
             </div>
             <div>
-              <h2 className="text-base font-black text-gray-950">{title}</h2>
+              <h2 className={`${compact ? 'text-sm' : 'text-base'} font-black text-gray-950`}>{title}</h2>
               <p className="text-xs font-semibold text-gray-400">
                 {runtimeStatus === 'connected' ? authStatusText(authStatus) : statusText(runtimeStatus)}
               </p>
@@ -117,7 +121,7 @@ export function AgentCollaborationPanel({
           </div>
           <button
             type="button"
-            className="rounded-full bg-gray-100 p-2 text-gray-700 transition hover:bg-gray-200"
+            className={`${compact ? 'p-1.5' : 'p-2'} rounded-full bg-gray-100 text-gray-700 transition hover:bg-gray-200`}
             onClick={() => checkRuntime()}
             title="Reconnect runtime"
           >
@@ -131,16 +135,16 @@ export function AgentCollaborationPanel({
         )}
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-5">
+      <div className={`${compact ? 'flex-[3_1_0%] space-y-2 p-3' : 'flex-1 space-y-3 p-5'} min-h-0 overflow-y-auto`}>
         {conversationMessages.length === 0 ? (
-          <div className="rounded-2xl bg-gray-50 px-4 py-3 text-sm font-semibold text-gray-400">
+          <div className={`${compact ? 'rounded-xl px-3 py-2 text-xs leading-5' : 'rounded-2xl px-4 py-3 text-sm'} bg-gray-50 font-semibold text-gray-400`}>
             还没有 Agent 对话。选中左侧卡片后，可以直接让 Agent 补全、改写或新增卡片。
           </div>
         ) : (
           conversationMessages.slice(-8).map(message => (
             <div
               key={message.id}
-              className={`rounded-2xl px-4 py-3 text-sm leading-6 ${
+              className={`${compact ? 'rounded-xl px-3 py-2 text-[13px] leading-5' : 'rounded-2xl px-4 py-3 text-sm leading-6'} ${
                 message.role === 'user'
                   ? 'bg-black text-white'
                   : message.role === 'system'
@@ -157,8 +161,8 @@ export function AgentCollaborationPanel({
         )}
       </div>
 
-      <div className="border-t border-gray-100 p-5">
-        <div className="mb-3 flex flex-wrap gap-2">
+      <div className={`${compact ? 'shrink-0 p-3' : 'p-5'} border-t border-gray-100`}>
+        <div className={`${compact ? 'mb-2 gap-1.5' : 'mb-3 gap-2'} flex flex-wrap`}>
           <QuickPrompt
             label="补全选中卡片"
             onClick={() => setDraft('请读取当前选中的卡片和页面上下文，直接补全选中卡片的内容。')}
@@ -173,14 +177,14 @@ export function AgentCollaborationPanel({
           />
         </div>
         <textarea
-          className="min-h-[112px] w-full resize-none rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:ring-2 focus:ring-gray-100"
+          className={`${compact ? 'min-h-[86px] rounded-xl text-[13px] leading-5' : 'min-h-[112px] rounded-2xl text-sm leading-relaxed'} w-full resize-none border border-gray-200 bg-gray-50 px-3 py-2 text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:ring-2 focus:ring-gray-100`}
           value={draft}
           onChange={event => setDraft(event.target.value)}
           placeholder="例如：把主体卡片改得更具体，加入年龄、服装、情绪和画面细节..."
         />
         <button
           type="button"
-          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full bg-black px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300"
+          className={`${compact ? 'mt-2 py-2 text-[13px]' : 'mt-3 py-2.5 text-sm'} inline-flex w-full items-center justify-center gap-2 rounded-full bg-black px-4 font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-300`}
           onClick={() => handleSend()}
           disabled={runtimeStatus !== 'connected' || running || !draft.trim()}
         >
@@ -189,7 +193,7 @@ export function AgentCollaborationPanel({
         </button>
       </div>
 
-      {!autoApplyWorkspaceChanges && (
+      {!autoApplyWorkspaceChanges && !hideProposals && (
         <div className="border-t border-gray-100 p-5">
           <div className="mb-3 flex items-center gap-2 text-sm font-black text-gray-950">
             <Sparkles className="h-4 w-4 text-amber-500" />

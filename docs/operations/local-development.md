@@ -18,6 +18,7 @@ Command purposes:
 
 - `dev`: start the Vite frontend on port 3000 with strict port behavior.
 - `dev:with-agent`: start or reuse the storage service, Agent Runtime, and Vite frontend.
+- `tauri:dev`: start the desktop dev shell; closing its window also stops the local PromptCard services it uses.
 - `storage:dev`: start only the local storage service on `127.0.0.1:8002`.
 - `agent:dev`: start only the Agent Runtime.
 - `agent:check`: validate Agent Runtime config loading.
@@ -52,14 +53,11 @@ These endpoints write JSON files under `data/` and are compatibility-only local 
 - Agent Runtime: `http://127.0.0.1:8001/health`
 - frontend: `http://127.0.0.1:3000/`
 
-If storage or Agent Runtime is already healthy, the script reuses it instead of starting another hidden process. If the Vite frontend is already healthy, the script exits successfully instead of trying to start a second strict-port Vite process. If a background service must be started, logs are written under `logs/`:
+If storage or Agent Runtime is already healthy, the script reuses it instead of starting another hidden process. If the Vite frontend is already healthy, the script exits successfully instead of trying to start a second strict-port Vite process.
 
-- `logs/storage-service.log`
-- `logs/storage-service.err.log`
-- `logs/agent-runtime.log`
-- `logs/agent-runtime.err.log`
+The health endpoints above are the source of truth for local startup success. Historical `logs/*.log` files may exist from older runs, but the current hidden background startup path does not require redirected stdout/stderr logs.
 
-The `*.err.log` files contain process stderr, not only fatal errors. Uvicorn and Python warnings may appear there during a healthy startup, so the health endpoints above are the source of truth for local startup success.
+When `%LOCALAPPDATA%\PromptCardAgentRuntime\.venv` already exists, the startup scripts run that environment's `python.exe` and `uvicorn.exe` directly. `uv run` remains the fallback for first-time environment creation.
 
 The frontend uses `vite --strictPort`; port 3000 conflicts still fail loudly when the existing listener is not the healthy local frontend.
 
@@ -150,7 +148,7 @@ For the PromptCard boundary API, check:
 curl.exe --http1.0 http://localhost:3000/agent-api/promptcard/runtime/status
 ```
 
-If the raw Agent process starts but this endpoint fails, inspect `logs/agent-runtime.err.log` first.
+If the raw Agent process starts but this endpoint fails, run `npm.cmd run agent:check` and inspect the terminal output first.
 
 ### Agent Check Fails Before Runtime Loads
 

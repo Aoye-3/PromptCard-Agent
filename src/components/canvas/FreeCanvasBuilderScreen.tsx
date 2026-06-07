@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMous
 import {
   applyNodeChanges,
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   MiniMap,
@@ -10,31 +11,42 @@ import {
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
+  type Connection,
   type Node,
+  type NodeChange,
+  type EdgeMouseHandler,
   type NodeMouseHandler,
   type NodeProps,
+  type OnConnect,
   type OnNodeDrag,
   useReactFlow
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Bot, Database, Home, Image, MousePointer2, Pencil, Plus, Type, Workflow } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Database, FileText, Home, Image, Layers, MousePointer2, PanelLeft, PanelRight, Pencil, Plus, Trash2, Type, Workflow } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import {
   addCharacterFormToPage,
   addStoryVideoPairToPage,
+  addThreeStagePage,
   getSelectedThreeStageFormContext,
   normalizeThreeStagePages,
+  removeThreeStagePage,
   selectThreeStageForm,
   syncThreeStageLegacyFields,
   updateThreeStageFormSection
 } from '@/domain/three-stage/three-stage-pages'
 import {
+  addFreeCanvasEdge,
   addFreeCanvasMediaNode,
   buildFreeCanvasGraph,
   createFreeCanvasMediaNode,
+  getFreeCanvasConnectedChain,
+  removeFreeCanvasFlowNodes,
+  type FreeCanvasFlowEdge,
   type FreeCanvasFlowNode,
   type FreeCanvasMediaNodeKind,
   type FreeCanvasNodeData,
+  updateFreeCanvasMediaNode,
   updateFreeCanvasNodePosition
 } from '@/domain/free-canvas/free-canvas'
 import {
@@ -84,8 +96,12 @@ const FreeCanvasBuilderInner = ({
     selectedStageDefinition.fields[0]
   const selectedOutput = selectedStageDefinition.buildOutput(selectedForm.section.fields, normalizedThreeStage)
   const graph = useMemo(() => buildFreeCanvasGraph(normalizedThreeStage), [normalizedThreeStage])
+  const pages = useMemo(() => normalizeThreeStagePages(normalizedThreeStage), [normalizedThreeStage])
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
+  const [leftDrawerOpen, setLeftDrawerOpen] = useState(true)
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
 
-  const updateFormSection = (form: IThreeStageForm, section: IThreeStageSection, fieldId?: string): void => {
+  const updateFormSection = useCallback((form: IThreeStageForm, section: IThreeStageSection, fieldId?: string): void => {
     const pageId = getFormPageId(normalizedThreeStage, form.id) || selectedContext.page.id
     const updated = updateThreeStageFormSection({
       ...normalizedThreeStage,
@@ -95,9 +111,9 @@ const FreeCanvasBuilderInner = ({
       selectedFieldId: fieldId || normalizedThreeStage.selectedFieldId
     }, form.id, section)
     onChange(selectThreeStageForm(updated, pageId, form.id, fieldId))
-  }
+  }, [normalizedThreeStage, onChange, selectedContext.page.id])
 
-  const updateField = (form: IThreeStageForm, fieldId: string, nextValue: string): void => {
+  const updateField = useCallback((form: IThreeStageForm, fieldId: string, nextValue: string): void => {
     updateFormSection(form, {
       ...form.section,
       fields: {
@@ -107,18 +123,30 @@ const FreeCanvasBuilderInner = ({
       focusedFieldId: fieldId,
       updatedAt: Date.now()
     }, fieldId)
-  }
+  }, [updateFormSection])
 
-  const selectCanvasField = (form: IThreeStageForm, fieldId: string): void => {
+  const selectCanvasField = useCallback((form: IThreeStageForm, fieldId: string): void => {
     updateFormSection(form, {
       ...form.section,
       focusedFieldId: fieldId,
       updatedAt: Date.now()
     }, fieldId)
-  }
+  }, [updateFormSection])
+
+  const updateMediaText = useCallback((nodeId: string, text: string): void => {
+    onChange(updateFreeCanvasMediaNode(normalizedThreeStage, nodeId.replace(/^media:/, ''), { text }))
+  }, [normalizedThreeStage, onChange])
 
   const canvasNodes = useMemo(() => graph.nodes.map(node => {
-    if (node.data.nodeKind !== 'threeStageForm' || !node.data.formId) return node
+    if (node.data.nodeKind !== 'threeStageForm' || !node.data.formId) {
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          onUpdateMediaText: updateMediaText
+        }
+      }
+    }
     return {
       ...node,
       data: {
@@ -129,13 +157,21 @@ const FreeCanvasBuilderInner = ({
         onUpdateField: updateField
       }
     }
-  }), [graph.nodes, normalizedThreeStage])
+  }), [graph.nodes, normalizedThreeStage, selectCanvasField, updateField, updateMediaText])
 
-  const [nodes, setNodes] = useState(canvasNodes)
+  const [nodes, setNodes] = useState<FreeCanvasFlowNode[]>(canvasNodes)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [spacePressed, setSpacePressed] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowX: number; flowY: number } | null>(null)
   const selectedNode = nodes.find(node => node.id === selectedNodeId) || null
+  const selectedChain = useMemo(() => getFreeCanvasConnectedChain({ nodes: canvasNodes, edges: graph.edges }, selectedEdgeId), [canvasNodes, graph.edges, selectedEdgeId])
+  const layerGroups = useMemo(() => buildLayerGroups(graph.nodes), [graph.nodes])
+  const agentTargetTitle = selectedEdgeId
+    ? `链条上下文 (${selectedChain.nodes.length} 个节点)`
+    : selectedNode?.data.title || selectedForm.title
+  const agentTargetDescription = selectedEdgeId
+    ? 'Agent 将读取这条连通链上的人物版、故事版、提示词、图片节点和文字标注，用于补全故事版和其他提示词字段。'
+    : `当前字段：${selectedField.label}。媒体节点只进入项目画布上下文，不获得 Prompt Library 写权限。`
   const workspaceContext = buildThreeStageWorkspaceContext({
     activeProject,
     threeStage: normalizedThreeStage,
@@ -144,12 +180,30 @@ const FreeCanvasBuilderInner = ({
       selectedNodeId,
       selectedNodeType: selectedNode?.data.nodeKind,
       selectedMediaAssetId: selectedNode?.data.mediaNode?.assetId || null,
+      selectedEdgeId,
+      selectedChainNodeIds: selectedChain.nodeIds,
       nodes: graph.nodes.map(node => ({
         id: node.id,
         kind: node.data.nodeKind,
         title: node.data.title,
         formId: node.data.formId,
         mediaAssetId: node.data.mediaNode?.assetId || null
+      })),
+      selectedChainNodes: selectedChain.nodes.map(node => ({
+        id: node.id,
+        kind: node.data.nodeKind,
+        title: node.data.title,
+        formId: node.data.formId,
+        formType: node.data.formType,
+        mediaAssetId: node.data.mediaNode?.assetId || null,
+        text: node.data.mediaNode?.text || node.data.subtitle,
+        output: node.data.form ? getStageDefinition(node.data.form.type).buildOutput(node.data.form.section.fields, normalizedThreeStage) : undefined
+      })),
+      selectedChainEdges: selectedChain.edges.map(edge => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        label: typeof edge.label === 'string' ? edge.label : null
       }))
     }
   })
@@ -215,10 +269,67 @@ const FreeCanvasBuilderInner = ({
     setContextMenu(null)
   }
 
+  const createPage = (): void => {
+    onChange(addThreeStagePage(normalizedThreeStage))
+  }
+
+  const deletePage = (pageId: string): void => {
+    if (pages.length <= 1) return
+    if (!confirm('确定删除这个 Page 吗？')) return
+    const removedFormNodeIds = graph.nodes
+      .filter(node => node.data.nodeKind === 'threeStageForm' && node.data.pageId === pageId)
+      .map(node => node.id)
+    onChange(removeFreeCanvasFlowNodes(removeThreeStagePage(normalizedThreeStage, pageId), removedFormNodeIds))
+  }
+
   const handleNodeClick: NodeMouseHandler<FreeCanvasFlowNode> = (_event, node): void => {
     setSelectedNodeId(node.id)
+    setSelectedEdgeId(null)
     if (node.data.pageId && node.data.formId) {
       onChange(selectThreeStageForm(normalizedThreeStage, node.data.pageId, node.data.formId))
+    }
+  }
+
+  const handleConnect: OnConnect = (connection: Connection): void => {
+    if (!connection.source || !connection.target) return
+    onChange(addFreeCanvasEdge(normalizedThreeStage, {
+      source: connection.source,
+      target: connection.target
+    }))
+  }
+
+  const handleEdgeClick: EdgeMouseHandler<FreeCanvasFlowEdge> = (_event, edge): void => {
+    setSelectedEdgeId(edge.id)
+    setSelectedNodeId(null)
+  }
+
+  const handleNodesChange = (changes: NodeChange<FreeCanvasFlowNode>[]): void => {
+    setNodes(current => applyNodeChanges(changes, current) as FreeCanvasFlowNode[])
+    const removedNodeIds = changes
+      .filter(change => change.type === 'remove')
+      .map(change => change.id)
+    if (removedNodeIds.length === 0) return
+
+    setSelectedNodeId(current => current && removedNodeIds.includes(current) ? null : current)
+    setSelectedEdgeId(null)
+    onChange(removeFreeCanvasFlowNodes(normalizedThreeStage, removedNodeIds))
+  }
+
+  const selectLayerNode = (node: FreeCanvasFlowNode): void => {
+    setSelectedNodeId(node.id)
+    setSelectedEdgeId(null)
+    reactFlow.setCenter(node.position.x + 160, node.position.y + 120, { zoom: reactFlow.getZoom(), duration: 260 })
+    if (node.data.pageId && node.data.formId) {
+      onChange(selectThreeStageForm(normalizedThreeStage, node.data.pageId, node.data.formId))
+    }
+  }
+
+  const selectPage = (pageId: string): void => {
+    const page = pages.find(candidate => candidate.id === pageId) || pages[0]
+    const firstItem = page.items[0]
+    const firstForm = firstItem?.kind === 'character' ? firstItem.form : firstItem?.storyboardForm
+    if (firstForm) {
+      onChange(selectThreeStageForm(normalizedThreeStage, page.id, firstForm.id))
     }
   }
 
@@ -236,9 +347,17 @@ const FreeCanvasBuilderInner = ({
     return { x: 120 + graph.nodes.length * 24, y: 120 + graph.nodes.length * 18 }
   }
 
+  const canvasEdges = graph.edges.map(edge => edge.id === selectedEdgeId
+    ? {
+        ...edge,
+        animated: true,
+        style: { ...(edge.style || {}), stroke: '#c96442', strokeWidth: 2.4 }
+      }
+    : edge)
+
   return (
-    <section className="fixed inset-x-0 bottom-[92px] top-20 z-20 overflow-hidden bg-[#f7f8fb]">
-      <div className="absolute left-6 top-6 z-20 flex max-w-[calc(100vw-460px)] items-center gap-3 rounded-[20px] border border-gray-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+    <section className="fixed inset-x-0 bottom-[56px] top-14 z-20 overflow-hidden bg-[#f7f8fb]">
+      <div className={`absolute top-6 z-20 flex max-w-[calc(100vw-520px)] items-center gap-3 rounded-[20px] border border-gray-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur transition-all ${leftDrawerOpen ? 'left-[300px]' : 'left-6'}`}>
         <button className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-950" onClick={onBack} title="项目">
           <Home className="h-4 w-4" />
         </button>
@@ -259,15 +378,34 @@ const FreeCanvasBuilderInner = ({
         </button>
       </div>
 
-      <div className="h-full pr-[420px]" data-free-canvas-screen>
+      <CanvasLayerDrawer
+        open={leftDrawerOpen}
+        pages={pages}
+        selectedPageId={normalizedThreeStage.selectedPageId || pages[0]?.id}
+        layerGroups={layerGroups}
+        selectedNodeId={selectedNodeId}
+        selectedChainNodeIds={selectedChain.nodeIds}
+        onToggle={() => setLeftDrawerOpen(value => !value)}
+        onSelectPage={selectPage}
+        onSelectNode={selectLayerNode}
+        onCreatePage={createPage}
+        onDeletePage={deletePage}
+      />
+
+      <div className={`h-full transition-[padding] ${leftDrawerOpen ? 'pl-[280px]' : 'pl-0'} ${rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'}`} data-free-canvas-screen>
         <ReactFlow
           nodes={nodes}
-          edges={graph.edges}
+          edges={canvasEdges}
           nodeTypes={nodeTypes}
-          onNodesChange={(changes) => setNodes(current => applyNodeChanges(changes, current) as FreeCanvasFlowNode[])}
+          onNodesChange={handleNodesChange}
+          onConnect={handleConnect}
+          onEdgeClick={handleEdgeClick}
           onNodeClick={handleNodeClick}
           onNodeDragStop={handleNodeDragStop}
-          onPaneClick={() => setContextMenu(null)}
+          onPaneClick={() => {
+            setContextMenu(null)
+            setSelectedEdgeId(null)
+          }}
           onPaneContextMenu={handlePaneContextMenu}
           panOnDrag={spacePressed ? [0] : false}
           selectionOnDrag={!spacePressed}
@@ -281,9 +419,9 @@ const FreeCanvasBuilderInner = ({
           minZoom={0.2}
           maxZoom={2}
         >
-          <Background gap={20} size={1.4} color="#d1d5db" />
-          <MiniMap pannable zoomable className="!bottom-20 !left-6 !right-auto" />
-          <Controls className="!bottom-6 !left-auto !right-6" />
+          <Background variant={BackgroundVariant.Lines} gap={32} size={1} color="#e2e8f0" />
+          <MiniMap pannable zoomable className="!bottom-4 !left-4 !right-auto transition-all" />
+          <Controls className="!bottom-6 !left-auto !right-6 transition-all" />
         </ReactFlow>
       </div>
 
@@ -303,14 +441,25 @@ const FreeCanvasBuilderInner = ({
         onCreateMedia={(kind) => createMedia(kind)}
       />
 
-      <aside className="absolute bottom-6 right-6 top-6 z-30 flex w-[390px] flex-col overflow-hidden rounded-[24px] border border-gray-200 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.16)]">
-        <div className="border-b border-gray-100 p-4">
-          <div className="mb-2 flex items-center gap-2 text-xs font-black uppercase text-gray-400">
-            <Bot className="h-4 w-4" />
-            固定 Agent 协作
-          </div>
-          <h2 className="text-base font-black text-gray-950">{selectedNode?.data.title || selectedForm.title}</h2>
-          <p className="mt-1 text-xs leading-5 text-gray-500">
+      {rightPanelCollapsed ? (
+        <button
+          type="button"
+          className="absolute bottom-6 right-6 top-6 z-40 flex w-12 flex-col items-center justify-center gap-3 rounded-[18px] border border-gray-200 bg-white/95 text-gray-500 shadow-[0_18px_55px_rgba(15,23,42,0.14)] transition hover:text-gray-950"
+          onClick={() => setRightPanelCollapsed(false)}
+          title="展开 Agent 面板"
+        >
+          <PanelRight className="h-5 w-5" />
+          <span className="[writing-mode:vertical-rl] text-xs font-black uppercase tracking-wide">Agent</span>
+        </button>
+      ) : (
+      <aside className="absolute bottom-0 right-0 top-0 z-30 flex w-[520px] flex-col overflow-hidden border-l border-gray-200 bg-white">
+        <div className="shrink-0 border-b border-gray-100 px-4 py-3">
+          <button type="button" className="absolute right-3 top-3 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-950" onClick={() => setRightPanelCollapsed(true)} title="收起 Agent 面板">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <h2 className="pr-8 text-sm font-black text-gray-950">{agentTargetTitle}</h2>
+          <p className="mt-1 pr-8 text-[11px] leading-4 text-gray-500">{agentTargetDescription}</p>
+          <p className="hidden">
             当前字段：{selectedField.label}。媒体节点只进入项目画布上下文，不获得 Prompt Library 写权限。
           </p>
         </div>
@@ -321,14 +470,156 @@ const FreeCanvasBuilderInner = ({
             sessionKey={`workspace:three-stage:${activeProject.id}`}
             workspaceContext={workspaceContext}
             onApplyWorkspaceProposal={handleApplyAgentProposal}
+            compact
+            hideProposals
           />
         ) : (
           <div className="p-5 text-sm font-semibold text-gray-400">预览模式禁用 Agent Runtime。</div>
         )}
       </aside>
+      )}
     </section>
   )
 }
+
+type CanvasLayerGroups = {
+  promptNodes: FreeCanvasFlowNode[]
+  imageNodes: FreeCanvasFlowNode[]
+  textNodes: FreeCanvasFlowNode[]
+}
+
+const CanvasLayerDrawer = ({
+  open,
+  pages,
+  selectedPageId,
+  layerGroups,
+  selectedNodeId,
+  selectedChainNodeIds,
+  onToggle,
+  onSelectPage,
+  onSelectNode,
+  onCreatePage,
+  onDeletePage
+}: {
+  open: boolean
+  pages: ReturnType<typeof normalizeThreeStagePages>
+  selectedPageId?: string
+  layerGroups: CanvasLayerGroups
+  selectedNodeId: string | null
+  selectedChainNodeIds: string[]
+  onToggle: () => void
+  onSelectPage: (pageId: string) => void
+  onSelectNode: (node: FreeCanvasFlowNode) => void
+  onCreatePage: () => void
+  onDeletePage: (pageId: string) => void
+}) => (
+  <>
+    <button
+      type="button"
+      className={`absolute top-3 z-40 flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:text-gray-950 ${open ? 'left-[244px]' : 'left-3'}`}
+      onClick={onToggle}
+      title={open ? '收起 Pages / Layers' : '展开 Pages / Layers'}
+    >
+      {open ? <ChevronLeft className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
+    </button>
+    {open && (
+      <aside className="absolute bottom-0 left-0 top-0 z-30 flex w-[280px] flex-col overflow-hidden border-r border-gray-200 bg-white">
+        <div className="border-b border-gray-100 px-3 py-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-black text-gray-950">
+            <div className="flex items-center gap-2">
+              <FileText className="h-3.5 w-3.5" />
+              Pages
+            </div>
+          </div>
+          <div className="space-y-0.5">
+            {pages.map((page, index) => (
+              <div key={page.id} className={`group flex items-center rounded-md transition ${page.id === selectedPageId ? 'bg-gray-950 text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'}`}>
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate px-2 py-1.5 text-left text-xs font-bold"
+                  onClick={() => onSelectPage(page.id)}
+                >
+                  {page.title || `Page ${index + 1}`}
+                </button>
+                <button
+                  type="button"
+                  className="mr-1 rounded p-1 opacity-40 transition hover:bg-white/15 hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-15"
+                  onClick={() => onDeletePage(page.id)}
+                  disabled={pages.length <= 1}
+                  title={pages.length <= 1 ? '至少保留一个 Page' : '删除 Page'}
+                >
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-200 px-2 py-1.5 text-[11px] font-bold text-gray-500 transition hover:border-gray-300 hover:bg-gray-50 hover:text-gray-950"
+            onClick={onCreatePage}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            新增 Page
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+          <div className="mb-2 flex items-center gap-2 text-xs font-black text-gray-950">
+            <Layers className="h-3.5 w-3.5" />
+            Layers
+          </div>
+          <LayerGroup title="提示词节点" nodes={layerGroups.promptNodes} selectedNodeId={selectedNodeId} selectedChainNodeIds={selectedChainNodeIds} onSelectNode={onSelectNode} />
+          <LayerGroup title="图片节点" nodes={layerGroups.imageNodes} selectedNodeId={selectedNodeId} selectedChainNodeIds={selectedChainNodeIds} onSelectNode={onSelectNode} />
+          <LayerGroup title="文字标注节点" nodes={layerGroups.textNodes} selectedNodeId={selectedNodeId} selectedChainNodeIds={selectedChainNodeIds} onSelectNode={onSelectNode} />
+        </div>
+      </aside>
+    )}
+  </>
+)
+
+const LayerGroup = ({
+  title,
+  nodes,
+  selectedNodeId,
+  selectedChainNodeIds,
+  onSelectNode
+}: {
+  title: string
+  nodes: FreeCanvasFlowNode[]
+  selectedNodeId: string | null
+  selectedChainNodeIds: string[]
+  onSelectNode: (node: FreeCanvasFlowNode) => void
+}) => (
+  <div className="mb-3">
+    <div className="mb-1.5 flex items-center justify-between text-[11px] font-black uppercase text-gray-400">
+      <span>{title}</span>
+      <span>{nodes.length}</span>
+    </div>
+    <div className="space-y-0.5">
+      {nodes.length === 0 ? (
+        <div className="rounded-xl bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-400">暂无节点</div>
+      ) : nodes.map(node => {
+        const inChain = selectedChainNodeIds.includes(node.id)
+        return (
+          <button
+            key={node.id}
+            type="button"
+            className={`block w-full rounded-md px-2 py-1.5 text-left transition ${selectedNodeId === node.id ? 'bg-gray-950 text-white' : inChain ? 'bg-orange-50 text-orange-700' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'}`}
+            onClick={() => onSelectNode(node)}
+          >
+            <div className="truncate text-xs font-bold">{node.data.title}</div>
+            <div className="truncate text-[10px] font-semibold opacity-60">{node.data.formType || node.data.nodeKind}</div>
+          </button>
+        )
+      })}
+    </div>
+  </div>
+)
+
+const buildLayerGroups = (nodes: FreeCanvasFlowNode[]): CanvasLayerGroups => ({
+  promptNodes: nodes.filter(node => node.data.nodeKind === 'threeStageForm'),
+  imageNodes: nodes.filter(node => node.data.nodeKind === 'imageAsset'),
+  textNodes: nodes.filter(node => node.data.nodeKind === 'textOverlay' || node.data.nodeKind === 'arrowAnnotation')
+})
 
 const ThreeStageFormNode = ({ data, selected }: NodeProps<Node<FreeCanvasNodeData>>) => {
   const form = data.form
@@ -507,11 +798,27 @@ const CanvasLockedBlock = ({ text, label }: { text: string; label?: string }) =>
 
 const FreeCanvasMediaNode = ({ data, selected }: NodeProps<Node<FreeCanvasNodeData>>) => {
   const media = data.mediaNode
+  if (media?.kind === 'textOverlay') {
+    return (
+      <div className={`relative min-w-[180px] max-w-[360px] rounded-md p-1 ${selected ? 'ring-2 ring-violet-500' : ''}`}>
+        <Handle type="target" position={Position.Left} className="!bg-violet-500" />
+        <textarea
+          className="nodrag nowheel block min-h-[42px] w-full resize-none bg-transparent text-base font-semibold leading-6 text-gray-950 outline-none placeholder:text-gray-400"
+          value={media.text || ''}
+          placeholder="文字标注"
+          onChange={(event) => data.onUpdateMediaText?.(media.id, event.target.value)}
+        />
+        <Handle type="source" position={Position.Right} className="!bg-violet-500" />
+      </div>
+    )
+  }
+
   return (
-    <div className={`w-[280px] rounded-[18px] border bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.08)] ${selected ? 'border-violet-500' : 'border-gray-200'}`}>
+    <div className={`relative w-[280px] rounded-[18px] border bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.08)] ${selected ? 'border-violet-500' : 'border-gray-200'}`}>
+      <Handle type="target" position={Position.Left} className="!bg-violet-500" />
       <div className="mb-3 flex items-center gap-2">
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
-          {media?.kind === 'textOverlay' ? <Type className="h-4 w-4" /> : media?.kind === 'arrowAnnotation' ? <MousePointer2 className="h-4 w-4" /> : <Image className="h-4 w-4" />}
+          {media?.kind === 'arrowAnnotation' ? <MousePointer2 className="h-4 w-4" /> : <Image className="h-4 w-4" />}
         </span>
         <div>
           <div className="text-sm font-black text-gray-950">{data.title}</div>
@@ -526,6 +833,7 @@ const FreeCanvasMediaNode = ({ data, selected }: NodeProps<Node<FreeCanvasNodeDa
         </div>
       )}
       {media?.text && <p className="mt-3 text-sm font-semibold text-gray-700">{media.text}</p>}
+      <Handle type="source" position={Position.Right} className="!bg-violet-500" />
     </div>
   )
 }

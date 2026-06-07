@@ -2,4 +2,6 @@
 
 Browser persistence uses `localforage` with the PromptCard database name.
 
-The frontend treats browser storage as the primary persistence layer. Development JSON file persistence is opportunistic and should not be required for production builds.
+Browser storage is not the primary durable store for projects or Prompt Library presets. Those records are owned by the local `promptcard-storage` service and written to JSON files under the configured data directory.
+
+`localforage` remains valid for runtime UI cache, prompt history, templates, settings, and one-time migration markers. Browser cache migration imports legacy project and preset data into the storage service once, then durable reads and writes continue through `/storage-api`.

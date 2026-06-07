@@ -139,12 +139,30 @@ export function buildThreeStageWorkspaceContext({
     selectedNodeId?: string | null
     selectedNodeType?: string | null
     selectedMediaAssetId?: string | null
+    selectedEdgeId?: string | null
+    selectedChainNodeIds?: string[]
     nodes?: Array<{
       id: string
       kind: string
       title?: string
       formId?: string
       mediaAssetId?: string | null
+    }>
+    selectedChainNodes?: Array<{
+      id: string
+      kind: string
+      title?: string
+      formId?: string
+      formType?: string
+      mediaAssetId?: string | null
+      text?: string
+      output?: string
+    }>
+    selectedChainEdges?: Array<{
+      id: string
+      source: string
+      target: string
+      label?: string | null
     }>
   }
 }): AgentWorkspaceContext {
@@ -204,12 +222,30 @@ export function buildThreeStageWorkspaceContext({
         selectedNodeId: freeCanvas.selectedNodeId || null,
         selectedNodeType: freeCanvas.selectedNodeType || null,
         selectedMediaAssetId: freeCanvas.selectedMediaAssetId || null,
+        selectedEdgeId: freeCanvas.selectedEdgeId || null,
+        selectedChainNodeIds: (freeCanvas.selectedChainNodeIds || []).slice(0, MAX_CARDS),
         nodes: (freeCanvas.nodes || []).slice(0, MAX_CARDS).map(node => ({
           id: node.id,
           kind: node.kind,
           title: compactText(node.title),
           formId: node.formId,
           mediaAssetId: node.mediaAssetId || null
+        })),
+        selectedChainNodes: (freeCanvas.selectedChainNodes || []).slice(0, MAX_CARDS).map(node => ({
+          id: node.id,
+          kind: node.kind,
+          title: compactText(node.title),
+          formId: node.formId,
+          formType: node.formType,
+          mediaAssetId: node.mediaAssetId || null,
+          text: compactText(node.text),
+          output: compactText(node.output)
+        })),
+        selectedChainEdges: (freeCanvas.selectedChainEdges || []).slice(0, MAX_CARDS).map(edge => ({
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          label: compactText(edge.label || undefined)
         }))
       } : undefined
     }

@@ -39,8 +39,17 @@ export interface FreeCanvasMediaNode {
   meta: Record<string, unknown>
 }
 
+export interface FreeCanvasUserEdge {
+  id: string
+  source: string
+  target: string
+  label?: string
+  createdAt: number
+}
+
 export interface FreeCanvasMeta {
   mediaNodes: FreeCanvasMediaNode[]
+  edges: FreeCanvasUserEdge[]
 }
 
 export interface FreeCanvasNodeData extends Record<string, unknown> {
@@ -57,6 +66,7 @@ export interface FreeCanvasNodeData extends Record<string, unknown> {
   selectedFieldId?: string
   onSelectField?: (form: IThreeStageForm, fieldId: string) => void
   onUpdateField?: (form: IThreeStageForm, fieldId: string, value: string) => void
+  onUpdateMediaText?: (nodeId: string, text: string) => void
 }
 
 export type FreeCanvasFlowNode = Node<FreeCanvasNodeData>
@@ -68,21 +78,26 @@ export const mediaNodeFlowId = (mediaNodeId: string): string => `media:${mediaNo
 export const getFreeCanvasMeta = (threeStage: IThreeStageProject): FreeCanvasMeta => {
   const candidate = threeStage.meta?.freeCanvas as Partial<FreeCanvasMeta> | undefined
   return {
-    mediaNodes: Array.isArray(candidate?.mediaNodes) ? candidate.mediaNodes.map(normalizeMediaNode) : []
+    mediaNodes: Array.isArray(candidate?.mediaNodes) ? candidate.mediaNodes.map(normalizeMediaNode) : [],
+    edges: Array.isArray(candidate?.edges) ? candidate.edges.map(normalizeUserEdge).filter(edge => edge.source && edge.target) : []
   }
 }
 
-export const setFreeCanvasMeta = (threeStage: IThreeStageProject, meta: FreeCanvasMeta): IThreeStageProject => ({
+export const setFreeCanvasMeta = (threeStage: IThreeStageProject, meta: Partial<FreeCanvasMeta>): IThreeStageProject => {
+  const currentMeta = getFreeCanvasMeta(threeStage)
+  return {
   ...threeStage,
   meta: {
     ...threeStage.meta,
     freeCanvas: {
-      ...getFreeCanvasMeta(threeStage),
+      ...currentMeta,
       ...meta,
-      mediaNodes: meta.mediaNodes.map(normalizeMediaNode)
+      mediaNodes: (meta.mediaNodes || currentMeta.mediaNodes).map(normalizeMediaNode),
+      edges: (meta.edges || currentMeta.edges).map(normalizeUserEdge).filter(edge => edge.source && edge.target)
     }
   }
-})
+}
+}
 
 export const createFreeCanvasMediaNode = (
   kind: FreeCanvasMediaNodeKind,
@@ -130,9 +145,90 @@ export const removeFreeCanvasMediaNode = (
   nodeId: string
 ): IThreeStageProject => {
   const meta = getFreeCanvasMeta(threeStage)
+  const flowNodeId = mediaNodeFlowId(nodeId)
   return setFreeCanvasMeta(threeStage, {
-    mediaNodes: meta.mediaNodes.filter(node => node.id !== nodeId)
+    mediaNodes: meta.mediaNodes.filter(node => node.id !== nodeId),
+    edges: meta.edges.filter(edge => edge.source !== flowNodeId && edge.target !== flowNodeId)
   })
+}
+
+export const removeFreeCanvasFlowNodes = (
+  threeStage: IThreeStageProject,
+  flowNodeIds: string[]
+): IThreeStageProject => {
+  if (flowNodeIds.length === 0) return threeStage
+
+  const removedFlowIds = new Set(flowNodeIds)
+  const removedMediaIds = new Set(
+    flowNodeIds
+      .filter(nodeId => nodeId.startsWith('media:'))
+      .map(nodeId => nodeId.replace(/^media:/, ''))
+  )
+  const meta = getFreeCanvasMeta(threeStage)
+
+  return setFreeCanvasMeta(threeStage, {
+    mediaNodes: meta.mediaNodes.filter(node => !removedMediaIds.has(node.id)),
+    edges: meta.edges.filter(edge => !removedFlowIds.has(edge.source) && !removedFlowIds.has(edge.target))
+  })
+}
+
+export const addFreeCanvasEdge = (
+  threeStage: IThreeStageProject,
+  edge: Pick<FreeCanvasUserEdge, 'source' | 'target'> & Partial<FreeCanvasUserEdge>,
+  timestamp = Date.now()
+): IThreeStageProject => {
+  if (!edge.source || !edge.target || edge.source === edge.target) return threeStage
+  const meta = getFreeCanvasMeta(threeStage)
+  const duplicate = meta.edges.some(candidate => candidate.source === edge.source && candidate.target === edge.target)
+  if (duplicate) return threeStage
+
+  return setFreeCanvasMeta(threeStage, {
+    ...meta,
+    edges: [
+      ...meta.edges,
+      normalizeUserEdge({
+        id: edge.id || `free-canvas-edge:${edge.source}:${edge.target}:${timestamp}`,
+        source: edge.source,
+        target: edge.target,
+        label: edge.label,
+        createdAt: edge.createdAt || timestamp
+      })
+    ]
+  })
+}
+
+export const getFreeCanvasConnectedChain = (
+  graph: { nodes: FreeCanvasFlowNode[]; edges: FreeCanvasFlowEdge[] },
+  edgeId: string | null
+): {
+  nodeIds: string[]
+  nodes: FreeCanvasFlowNode[]
+  edges: FreeCanvasFlowEdge[]
+} => {
+  if (!edgeId) return { nodeIds: [], nodes: [], edges: [] }
+  const selectedEdge = graph.edges.find(edge => edge.id === edgeId)
+  if (!selectedEdge) return { nodeIds: [], nodes: [], edges: [] }
+
+  const visited = new Set<string>()
+  const queue = [selectedEdge.source, selectedEdge.target]
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift()
+    if (!nodeId || visited.has(nodeId)) continue
+    visited.add(nodeId)
+
+    for (const edge of graph.edges) {
+      if (edge.source === nodeId && !visited.has(edge.target)) queue.push(edge.target)
+      if (edge.target === nodeId && !visited.has(edge.source)) queue.push(edge.source)
+    }
+  }
+
+  const chainEdges = graph.edges.filter(edge => visited.has(edge.source) && visited.has(edge.target))
+  return {
+    nodeIds: Array.from(visited),
+    nodes: graph.nodes.filter(node => visited.has(node.id)),
+    edges: chainEdges
+  }
 }
 
 export const buildFreeCanvasGraph = (threeStage: IThreeStageProject): {
@@ -160,7 +256,8 @@ export const buildFreeCanvasGraph = (threeStage: IThreeStageProject): {
         target: videoNode.id,
         label: `绑定组 #${item.number}`,
         type: 'smoothstep',
-        animated: false
+        animated: false,
+        style: { stroke: '#c7ccd5', strokeWidth: 1.5 }
       })
     })
   })
@@ -176,6 +273,19 @@ export const buildFreeCanvasGraph = (threeStage: IThreeStageProject): {
         subtitle: mediaSubtitle(mediaNode),
         mediaNode
       }
+    })
+  }
+
+  for (const edge of getFreeCanvasMeta(threeStage).edges) {
+    edges.push({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      label: edge.label,
+      type: 'smoothstep',
+      animated: false,
+      style: { stroke: '#111827', strokeWidth: 1.8 },
+      data: { userCreated: true, createdAt: edge.createdAt }
     })
   }
 
@@ -284,6 +394,14 @@ const normalizeMediaNode = (node: Partial<FreeCanvasMediaNode>): FreeCanvasMedia
   text: node.text || '',
   color: node.color || '#111827',
   meta: node.meta || {}
+})
+
+const normalizeUserEdge = (edge: Partial<FreeCanvasUserEdge>): FreeCanvasUserEdge => ({
+  id: edge.id || `free-canvas-edge:${edge.source || 'source'}:${edge.target || 'target'}:${Date.now()}`,
+  source: String(edge.source || ''),
+  target: String(edge.target || ''),
+  label: edge.label ? String(edge.label) : undefined,
+  createdAt: Number(edge.createdAt || Date.now())
 })
 
 const mediaTitle = (kind: FreeCanvasMediaNodeKind): string => {

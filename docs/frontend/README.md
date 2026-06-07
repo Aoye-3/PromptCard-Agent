@@ -7,3 +7,4 @@
 - [Prompt Library](./prompt-library.md)
 - [Builder Template Library](./builder-template-library.md)
 - [Three-stage Builder](./three-stage-builder.md)
+- [Free Canvas Workspace](./free-canvas.md)

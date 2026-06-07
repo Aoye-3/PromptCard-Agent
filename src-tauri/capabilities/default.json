@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "Allow the main dev shell window to use Tauri core IPC from the local Vite dev server.",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:3000", "http://localhost:3000"]
+  },
+  "permissions": ["core:default", "git-pull-source"]
+}

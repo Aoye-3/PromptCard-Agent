@@ -36,3 +36,5 @@ Project reads normalize data before returning it to the UI. Normalization includ
 ## Change Guidance
 
 Storage changes should include tests for revision conflicts, Trash behavior, migration, and project normalization. Avoid writing project or preset data directly from UI components.
+
+Delayed saves must distinguish durable content from storage metadata. UI code should not apply a late storage response as a full project replacement after the user has continued editing. Preserve the current local payload, merge only safe metadata such as `revision` and `lastOpenedAt`, and update save status only when the response still matches the edit sequence that started the save.

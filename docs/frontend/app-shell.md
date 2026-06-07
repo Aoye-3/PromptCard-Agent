@@ -33,6 +33,7 @@ PromptCard-Manager supports three project types:
 - **Card projects** use PromptCard pages and cards. They are edited through the card builder surface and assembled into a prompt with prompt parser utilities.
 - **Storyboard projects** use a sequence/row model. They store shared sequence style/constraints and per-shot fields such as subject, action, scene, camera, timing, lighting, and audio.
 - **Three-stage projects** use three parallel structured forms for character-board prompts, storyboard prompts, and final video-generation prompts. Each form has its own copyable output, while the right rail can switch between focused field editing/camera presets and the shared Agent Chatbox.
+- **Free Canvas projects** are three-stage projects with `meta.builderTemplateId: "free-canvas"`. They open a React Flow canvas that projects three-stage forms as draggable nodes, keeps the Agent Chatbox fixed on the right, and stores project-local media nodes in three-stage metadata.
 
 The project home screen creates, opens, deletes, and saves projects. Autosave updates project records after workspace changes.
 
@@ -66,6 +67,7 @@ This is intended for local app testing convenience. It is not a production API.
 
 - `CardComponent`, `PromptComposer`, and `CreativeMode` support card editing and prompt composition.
 - `ThreeStageBuilder` supports the three-stage structured input workflow, field-focused Prompt library assistance, and a right-rail Agent Chatbox while reusing definitions from `src/domain/three-stage/three-stage-definitions.ts`.
+- `FreeCanvasBuilderScreen` supports the free canvas project variant. It uses React Flow for canvas interactions and `src/domain/free-canvas/` for graph projection and media-node persistence. tldraw is reference-only and should not be added as a production dependency without a separate license decision.
 - `PromptLibrary`, `PromptLibraryForm`, and `PromptLibraryTable` support preset management.
 - `AgentDashboard` owns Agent runtime presentation, DeepSeek model configuration, ToolUse/skill visibility, diagnostics chat, and proposal review UI.
 - `AISettingsPanel` is no longer the primary model configuration entry point. `EvaluationPanel` should read the unified DeepSeek runtime configuration for any AI-backed evaluation path, or stay rule-only when no runtime call is needed.

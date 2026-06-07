@@ -65,6 +65,9 @@ beforeEach(async () => {
     if (url === '/storage-api/projects/trash') {
       return jsonResponse(init?.method === 'GET' ? { items: [] } : { ok: true, projects: [sampleProject] })
     }
+    if (url === '/storage-api/projects/trash/restore') {
+      return jsonResponse({ projects: [sampleProject] })
+    }
     if (url === '/storage-api/presets') {
       return jsonResponse(init?.method === 'POST' ? samplePreset : { presets: [samplePreset] })
     }
@@ -104,6 +107,33 @@ describe('storage service facade', () => {
     }))
   })
 
+  test('updates projects with a provided revision without loading the project first', async () => {
+    await storage.projects.update('project-1', { title: 'Renamed' }, { revision: 7 })
+
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith('/storage-api/projects/project-1', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ revision: 7, updates: { title: 'Renamed' } })
+    }))
+  })
+
+  test('sets last opened with provided project state without refetching projects', async () => {
+    await storage.projects.setLastOpened('project-1', { projects: [sampleProject], revision: 1 })
+
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(fetch).toHaveBeenCalledWith('/storage-api/projects/project-1', expect.objectContaining({
+      method: 'PUT'
+    }))
+    const [, init] = vi.mocked(fetch).mock.calls[0]
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      revision: 1,
+      updates: {
+        lastOpenedAt: expect.any(Number),
+        updatedAt: expect.any(Number)
+      }
+    })
+  })
+
   test('loads presets from storage API without browser preset fallback or seed writes', async () => {
     await expect(storage.presets.getAll()).resolves.toEqual([samplePreset])
 
@@ -112,11 +142,19 @@ describe('storage service facade', () => {
   })
 
   test('moves projects and presets to trash through storage API', async () => {
-    await storage.projects.trash(['project-1'])
+    await expect(storage.projects.trash(['project-1'])).resolves.toMatchObject([sampleProject])
     await storage.presets.trash(['preset-1'])
 
     expect(fetch).toHaveBeenCalledWith('/storage-api/projects/trash', expect.objectContaining({ method: 'POST' }))
     expect(fetch).toHaveBeenCalledWith('/storage-api/presets/trash', expect.objectContaining({ method: 'POST' }))
+  })
+
+  test('returns moved and restored projects from project trash operations', async () => {
+    await expect(storage.projects.delete('project-1')).resolves.toMatchObject([sampleProject])
+    await expect(storage.projects.restore(['project-1'])).resolves.toMatchObject([sampleProject])
+
+    expect(fetch).toHaveBeenCalledWith('/storage-api/projects/trash', expect.objectContaining({ method: 'POST' }))
+    expect(fetch).toHaveBeenCalledWith('/storage-api/projects/trash/restore', expect.objectContaining({ method: 'POST' }))
   })
 
   test('creates a single preset without rewriting existing presets', async () => {

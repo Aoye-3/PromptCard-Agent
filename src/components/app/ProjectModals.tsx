@@ -1,4 +1,4 @@
-import { ArrowRight, Film, FolderPlus, Grid2X2 } from 'lucide-react'
+import { ArrowRight, Film, FolderPlus, Grid2X2, Workflow } from 'lucide-react'
 import { getBuilderTemplates } from '@/domain/builder-templates/builder-templates'
 import type { BuilderTemplate, BuilderTemplateId } from '@/domain/builder-templates/builder-templates'
 import { getCardDefaultTitle } from '@/utils/promptParser'
@@ -244,6 +244,7 @@ const BuilderTemplateCard = ({
 )
 
 const BuilderTemplateIcon = ({ templateId }: { templateId: BuilderTemplateId }) => {
+  if (templateId === 'free-canvas') return <Workflow className="h-8 w-8" />
   if (templateId === 'storyboard') return <Film className="h-8 w-8" />
   if (templateId === 'three-stage') return <Grid2X2 className="h-8 w-8" />
   return <FolderPlus className="h-8 w-8" />

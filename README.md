@@ -35,6 +35,22 @@ Key docs:
 - [Frontend Application](./docs/frontend/app-shell.md)
 - [Agent Runtime Backend](./docs/backend/agent-runtime.md)
 
+## Free Canvas Builder Direction
+
+Free Canvas Builder is the top project-building mode for the next construction surface. The production canvas stack is React Flow (`@xyflow/react`) plus a lightweight PromptCard-owned media layer. tldraw remains a design reference for shape/store ideas only; it is not a production dependency because its production license does not match the current local-first distribution plan.
+
+Phase 1 keeps durable business data in the existing three-stage project model and stores canvas-specific view/media data in project JSON metadata:
+
+- Three-stage forms are projected into React Flow nodes for character, storyboard, and video-prompt editing.
+- Storyboard and video-prompt forms remain a bound pair and are represented by a canvas edge.
+- Node positions are stored in form `meta.canvas.position`.
+- Media nodes are stored under `threeStage.meta.freeCanvas.mediaNodes`.
+- Planned media node kinds are `imageAsset`, `textOverlay`, `arrowAnnotation`, and `mediaGroup`.
+- Image API results should become `imageAsset` canvas nodes and must not write directly to Prompt Library.
+- The fixed right-side Agent Chatbox still uses the PromptCard Runtime Boundary with `workspace-chatbot-agent` permission scope.
+
+The self-owned media layer is intentionally small in Phase 1: it persists image placement, crop metadata, text annotations, arrow annotations, grouping metadata, and future generation provenance (`assetId`, `imagePrompt`, `sourceNodeId`, `generatedFromAgent`) without implementing a full pixel editor.
+
 ## Main Commands
 
 ```powershell

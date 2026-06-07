@@ -6,7 +6,7 @@ PromptCard-Manager helps users build reusable prompt cards, manage Prompt Librar
 
 - Card project editing with PromptCard pages and reusable card types.
 - Prompt Library preset management using the `IPreset` compatibility contract.
-- Storyboard and three-stage structured prompt workflows.
+- Storyboard and page-based three-stage structured prompt workflows, including bound storyboard/video prompt pairs.
 - Optional Agent dashboard and collaboration panel backed by a DeerFlow-derived runtime.
 - Development-only file persistence for projects and Prompt Library presets.
 

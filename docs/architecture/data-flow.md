@@ -4,9 +4,13 @@
 
 Project data is represented by `IPromptProject`. Card projects mainly use `pages`; storyboard projects use the normalized `storyboard` shape; three-stage projects use the `threeStage` shape.
 
+Three-stage projects now use a page-based form model under `threeStage.pages`. Each page contains independent character forms and bound story/video pairs. The legacy top-level `threeStage.character`, `threeStage.storyboard`, `threeStage.videoPrompt`, `selectedStage`, and `selectedFieldId` fields remain compatibility mirrors and are synchronized from the selected page/form during normalization and UI updates.
+
 Loading now goes through the local `promptcard_storage` service. `data/projects.json` is the active project store and `data/project-trash.json` is the project Trash store. Browser project cache is imported once through the migration endpoint and is not used as an ongoing project source.
 
 Project normalization is pure domain logic in `src/domain/projects/project-normalization.ts`. It is responsible for defaulting legacy card projects, migrating legacy flat storyboard rows into the sequence model, creating missing three-stage payloads, repairing known display-text mojibake, and sorting by recent activity. UI components and stores should call the storage facade instead of duplicating this logic.
+
+Three-stage page normalization and mutations are pure helpers in `src/domain/three-stage/three-stage-pages.ts`. UI handlers should use those helpers for page duplication, form creation, pair creation, deletion, selected-form changes, and legacy-field synchronization.
 
 ## Prompt Library Data
 
@@ -28,3 +32,5 @@ The frontend sends a bounded workspace snapshot to the Agent Runtime. The runtim
 Card workspace proposals can be auto-applied by the collaboration panel. Prompt Library proposals require user approval before durable mutation.
 
 Storyboard workspace changes use pure row/sequence helpers from `src/domain/storyboard/storyboard-operations.ts` so UI handlers remain focused on user events and rendering.
+
+Three-stage workspace snapshots include selected page, selected item, selected form, selected pair, and paired storyboard summary. Video prompt context must be built from the selected form's `pairId`, not from whichever storyboard happens to be mirrored in the legacy top-level field.

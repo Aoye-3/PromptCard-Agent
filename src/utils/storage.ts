@@ -136,33 +136,49 @@ export const storage = {
       }
       return normalizeProject(await storageServiceClient.projects.create(newProject))
     },
-    async update(id: string, updates: Partial<Omit<IPromptProject, 'id' | 'createdAt'>>): Promise<IPromptProject | null> {
-      const current = await this.getById(id)
-      if (!current) return null
+    async update(
+      id: string,
+      updates: Partial<Omit<IPromptProject, 'id' | 'createdAt'>>,
+      options: { revision?: number } = {}
+    ): Promise<IPromptProject | null> {
       const { revision: updateRevision, ...safeUpdates } = updates as Partial<IPromptProject>
-      const revision = typeof updateRevision === 'number' ? updateRevision : current.revision
+      const revision = typeof options.revision === 'number'
+        ? options.revision
+        : typeof updateRevision === 'number'
+          ? updateRevision
+          : undefined
+
+      if (typeof revision !== 'number') {
+        const current = await this.getById(id)
+        if (!current) return null
+        return normalizeProject(await storageServiceClient.projects.update(id, current.revision, safeUpdates))
+      }
+
       return normalizeProject(await storageServiceClient.projects.update(id, revision, safeUpdates))
     },
-    async delete(id: string): Promise<void> {
-      await storageServiceClient.projects.trash([id], 'user')
+    async delete(id: string): Promise<IPromptProject[]> {
+      return (await storageServiceClient.projects.trash([id], 'user')).map(normalizeProject)
     },
-    async trash(ids: string[]): Promise<void> {
-      await storageServiceClient.projects.trash(ids, 'user')
+    async trash(ids: string[]): Promise<IPromptProject[]> {
+      return (await storageServiceClient.projects.trash(ids, 'user')).map(normalizeProject)
     },
     async getTrash() {
       return storageServiceClient.projects.getTrash()
     },
-    async restore(ids: string[]): Promise<void> {
-      await storageServiceClient.projects.restore(ids)
+    async restore(ids: string[]): Promise<IPromptProject[]> {
+      return (await storageServiceClient.projects.restore(ids)).map(normalizeProject)
     },
     async deleteForever(ids: string[]): Promise<void> {
       await storageServiceClient.projects.deleteForever(ids)
     },
-    async setLastOpened(id: string): Promise<IPromptProject | null> {
-      const projects = await this.getAll()
-      const maxLastOpenedAt = Math.max(0, ...projects.map(project => project.lastOpenedAt || 0))
+    async setLastOpened(id: string, options: { revision?: number; projects?: IPromptProject[] } = {}): Promise<IPromptProject | null> {
+      const sourceProjects = options.projects || await this.getAll()
+      const maxLastOpenedAt = Math.max(0, ...sourceProjects.map(project => project.lastOpenedAt || 0))
+      const currentProject = sourceProjects.find(project => project.id === id)
       const now = Math.max(Date.now(), maxLastOpenedAt + 1)
-      return this.update(id, { lastOpenedAt: now, updatedAt: now })
+      return this.update(id, { lastOpenedAt: now, updatedAt: now }, {
+        revision: options.revision ?? currentProject?.revision
+      })
     },
     async saveToFile(): Promise<boolean> {
       await this.getAll()

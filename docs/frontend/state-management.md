@@ -65,6 +65,19 @@ Browser storage is the primary persistence layer. Development file storage is op
 
 Project autosave is idle-based and user-configurable from `我的 -> 设置 -> 自动保存`. Builder changes wait until the user has stopped editing for the configured delay before writing to storage; the default is 10 seconds. The UI should only enter the saving state when that delayed save actually starts. If autosave is disabled, the normal manual save action remains available.
 
+### Autosave Concurrency Contract
+
+Autosave responses must never replace the current in-memory project payload. A save request can complete after the user has already deleted or edited fields, especially in storyboard, three-stage, and free-canvas builders. Applying that older response wholesale can restore deleted content.
+
+`App.tsx` tracks a per-project edit sequence for structured builders. Each local storyboard or three-stage update increments the sequence. Autosave captures the sequence when the request starts, then checks it again when the response returns:
+
+- if the sequence still matches, the response may confirm save status and merge metadata;
+- if the sequence changed, the response is stale and must not update `storyboard`, `threeStage`, canvas positions, media nodes, or card/page content;
+- stale responses may still merge `revision` and `lastOpenedAt` metadata so the next save does not fail against an already-advanced storage revision;
+- stale responses must not set the UI to `saved`, update `updatedAt`, or create prompt-history snapshots.
+
+Manual save for structured builders follows the same confirmation path. New project types or builder surfaces should reuse this split between content state and storage metadata instead of calling `replaceExistingProject()` from delayed save flows.
+
 ## Core Schemas
 
 ### `ICard`

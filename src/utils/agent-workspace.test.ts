@@ -145,10 +145,71 @@ describe('agent workspace context', () => {
       selectedOutput: 'Selected stage output'
     })
 
-    expect(context.contextId).toBe('three-stage:project-3:character:characterNotes')
+    expect(context.contextId).toContain('three-stage:project-3:')
     expect(context.mode).toBe('three-stage-workspace')
     expect(context.snapshot.selectedStage).toBe('character')
     expect(context.snapshot.selectedFieldId).toBe('characterNotes')
+    expect(context.snapshot.selectedPageId).toBeTruthy()
+    expect(context.snapshot.selectedFormId).toBeTruthy()
+    expect(context.snapshot.selectedPairId).toBe(null)
+    expect(Array.isArray(context.snapshot.pages)).toBe(true)
     expect(JSON.stringify(context.snapshot)).toContain('Selected stage output')
+  })
+
+  it('adds free-canvas selected node and media context to three-stage snapshots', () => {
+    const project: IPromptProject = {
+      id: 'project-4',
+      title: 'Free canvas project',
+      type: 'three-stage',
+      revision: 1,
+      pages: [],
+      currentPage: 0,
+      threeStage: {
+        selectedStage: 'character',
+        selectedFieldId: 'characterNotes',
+        character: {
+          fields: { characterNotes: 'Canvas character' },
+          focusedFieldId: 'characterNotes',
+          updatedAt: 1,
+          meta: {}
+        },
+        storyboard: {
+          fields: {},
+          focusedFieldId: null,
+          updatedAt: 1,
+          meta: {}
+        },
+        videoPrompt: {
+          fields: {},
+          focusedFieldId: null,
+          updatedAt: 1,
+          meta: {}
+        },
+        meta: {}
+      },
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: 1,
+      meta: { builderTemplateId: 'free-canvas' }
+    }
+
+    const context = buildThreeStageWorkspaceContext({
+      activeProject: project,
+      threeStage: project.threeStage!,
+      selectedOutput: 'Canvas output',
+      freeCanvas: {
+        selectedNodeId: 'media:image-1',
+        selectedNodeType: 'imageAsset',
+        selectedMediaAssetId: 'asset-1',
+        nodes: [{ id: 'media:image-1', kind: 'imageAsset', title: 'Image node', mediaAssetId: 'asset-1' }]
+      }
+    })
+
+    expect(context.snapshot.freeCanvas).toMatchObject({
+      selectedNodeId: 'media:image-1',
+      selectedNodeType: 'imageAsset',
+      selectedMediaAssetId: 'asset-1'
+    })
+    expect(JSON.stringify(context.snapshot.freeCanvas)).toContain('Image node')
   })
 })

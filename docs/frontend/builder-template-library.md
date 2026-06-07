@@ -50,6 +50,18 @@ This keeps “which modes exist” separate from “how a mode edits state.” F
 
 ## Current Templates
 
+- `free-canvas`: top-level free canvas builder backed by a three-stage project. It uses React Flow for the production canvas and stores PromptCard-owned media nodes in project metadata. tldraw is only a reference for shape/store design and must not be added as a production dependency without a separate licensing decision.
 - `card`: card-page workspace with card fields, prompt injection adapter, and Agent collaboration adapter.
 - `storyboard`: storyboard sequence workspace with shot fields and Agent detail workspace.
 - `three-stage`: three-section workspace with field editor and field-level prompt injection adapter.
+
+## Free Canvas Template Contract
+
+`free-canvas` intentionally keeps `projectType: "three-stage"` and writes `meta.builderTemplateId: "free-canvas"` during project creation. This avoids a storage migration while allowing the app router to open the free canvas screen instead of the standard three-stage screen.
+
+The free canvas screen treats `threeStage.pages/items/forms` as the source of truth. React Flow nodes and edges are a view projection:
+
+- form node positions are stored in each form's `meta.canvas.position`;
+- media nodes are stored under `threeStage.meta.freeCanvas.mediaNodes`;
+- media nodes are project-local and do not grant Prompt Library write permissions;
+- future image API outputs should be inserted as `imageAsset` media nodes with provenance metadata.

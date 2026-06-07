@@ -1,22 +1,40 @@
-import { useMemo, useState } from 'react'
-import { Bot, ChevronDown, Copy, Database, Eraser, Home, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, Copy, Database, Eraser, Home, Link2, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { buildThreeStageWorkspaceContext } from '@/utils/agent-workspace'
 import type { IPreset } from '@/models/Card.model'
-import type { IPromptProject, IThreeStageProject, IThreeStageSection, ThreeStageKey } from '@/models/PromptHistory.model'
+import type {
+  IPromptProject,
+  IThreeStageForm,
+  IThreeStageItem,
+  IThreeStageProject,
+  IThreeStageSection
+} from '@/models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import {
   buildStoryboardInjectionForVideo,
   createStoryboardShotRange,
   getStageDefinition,
   parseStoryboardShotRanges,
-  stageDefinitions,
   stringifyStoryboardShotRanges,
   valueOf
 } from '@/domain/three-stage/three-stage-definitions'
 import type { FieldDefinition, StoryboardShotRange } from '@/domain/three-stage/three-stage-definitions'
-
-const getSection = (threeStage: IThreeStageProject, stage: ThreeStageKey): IThreeStageSection => threeStage[stage]
+import {
+  addCharacterFormToPage,
+  addStoryVideoPairToPage,
+  duplicateThreeStagePage,
+  getCharacterCopySources,
+  getPairCopySources,
+  getSelectedThreeStageFormContext,
+  getSelectedThreeStagePage,
+  normalizeThreeStagePages,
+  removeThreeStageItem,
+  removeThreeStagePage,
+  selectThreeStageForm,
+  syncThreeStageLegacyFields,
+  updateThreeStageFormSection
+} from '@/domain/three-stage/three-stage-pages'
 
 interface ThreeStageBuilderScreenProps {
   activeProject: IPromptProject
@@ -41,23 +59,39 @@ const ThreeStageBuilderScreen = ({
   onIncrementPresetUsage,
   previewMode = false
 }: ThreeStageBuilderScreenProps) => {
+  const normalizedThreeStage = useMemo(() => syncThreeStageLegacyFields(threeStage), [threeStage])
+  const pages = useMemo(() => normalizeThreeStagePages(normalizedThreeStage), [normalizedThreeStage])
+  const currentPage = getSelectedThreeStagePage(normalizedThreeStage)
+  const selectedContext = getSelectedThreeStageFormContext(normalizedThreeStage)
+  const selectedForm = selectedContext.form
+  const pairedStoryboardForm = selectedContext.pairedStoryboardForm
+  const selectedStage = getStageDefinition(selectedForm.type).key
+  const selectedStageDefinition = getStageDefinition(selectedStage)
   const [presetSearch, setPresetSearch] = useState('')
   const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set())
   const [activeShotRangeByField, setActiveShotRangeByField] = useState<Record<string, string>>({})
   const [rightPanelMode, setRightPanelMode] = useState<'field' | 'agent'>('field')
-  const selectedStage = getStageDefinition(threeStage.selectedStage).key
-  const selectedStageDefinition = getStageDefinition(selectedStage)
-  const selectedField = selectedStageDefinition.fields.find(field => field.id === threeStage.selectedFieldId && !field.fixedValue) ||
+  const [showNewMenu, setShowNewMenu] = useState(false)
+  const [characterSourceId, setCharacterSourceId] = useState('')
+  const [pairSourceId, setPairSourceId] = useState('')
+  const stageRailRef = useRef<HTMLDivElement>(null)
+  const [stageRailScroll, setStageRailScroll] = useState({ left: 0, max: 0 })
+  const selectedField = selectedStageDefinition.fields.find(field => field.id === normalizedThreeStage.selectedFieldId && !field.fixedValue) ||
     selectedStageDefinition.fields.find(field => !field.fixedValue) ||
     selectedStageDefinition.fields[0]
-  const selectedValue = valueOf(getSection(threeStage, selectedStage).fields, selectedField.id)
+  const selectedValue = valueOf(selectedForm.section.fields, selectedField.id)
   const selectedFieldIsFixed = Boolean(selectedField.fixedValue)
-  const selectedOutput = selectedStageDefinition.buildOutput(getSection(threeStage, selectedStage).fields, threeStage)
+  const outputProject = selectedStage === 'videoPrompt' && pairedStoryboardForm
+    ? { ...normalizedThreeStage, storyboard: pairedStoryboardForm.section }
+    : normalizedThreeStage
+  const selectedOutput = selectedStageDefinition.buildOutput(selectedForm.section.fields, outputProject)
   const workspaceContext = buildThreeStageWorkspaceContext({
     activeProject,
-    threeStage,
+    threeStage: normalizedThreeStage,
     selectedOutput
   })
+  const characterSources = getCharacterCopySources(normalizedThreeStage)
+  const pairSources = getPairCopySources(normalizedThreeStage)
 
   const filteredCameraPresets = useMemo(() => {
     const keyword = presetSearch.trim().toLowerCase()
@@ -68,38 +102,68 @@ const ThreeStageBuilderScreen = ({
     )
   }, [cameraPresets, presetSearch])
 
-  const updateSection = (stage: ThreeStageKey, section: IThreeStageSection): void => {
-    onChange({
-      ...threeStage,
-      [stage]: section
+  const updateStageRailScroll = useCallback(() => {
+    const rail = stageRailRef.current
+    if (!rail) return
+    setStageRailScroll({
+      left: rail.scrollLeft,
+      max: Math.max(0, rail.scrollWidth - rail.clientWidth)
     })
+  }, [])
+
+  useEffect(() => {
+    updateStageRailScroll()
+  }, [currentPage.id, currentPage.items.length, updateStageRailScroll])
+
+  const scrollStageRailBy = (direction: -1 | 1): void => {
+    const rail = stageRailRef.current
+    if (!rail) return
+    rail.scrollBy({ left: direction * Math.max(360, rail.clientWidth * 0.72), behavior: 'smooth' })
+    window.setTimeout(updateStageRailScroll, 260)
   }
 
-  const selectField = (stage: ThreeStageKey, fieldId: string): void => {
-    const section = getSection(threeStage, stage)
-    onChange({
-      ...threeStage,
-      [stage]: {
-        ...section,
-        focusedFieldId: fieldId,
-        updatedAt: Date.now()
-      },
-      selectedStage: stage,
-      selectedFieldId: fieldId
-    })
+  const setStageRailScrollLeft = (value: number): void => {
+    const rail = stageRailRef.current
+    if (!rail) return
+    rail.scrollLeft = value
+    updateStageRailScroll()
   }
 
-  const updateField = (stage: ThreeStageKey, fieldId: string, value: string): void => {
-    const section = getSection(threeStage, stage)
-    updateSection(stage, {
-      ...section,
+  const fieldKey = (formId: string, fieldId: string): string => `${formId}:${fieldId}`
+
+  const selectFormField = (form: IThreeStageForm, fieldId?: string): void => {
+    onChange(selectThreeStageForm(normalizedThreeStage, currentPage.id, form.id, fieldId))
+  }
+
+  const updateFormSection = (form: IThreeStageForm, section: IThreeStageSection, fieldId?: string): void => {
+    const updated = updateThreeStageFormSection({
+      ...normalizedThreeStage,
+      selectedPageId: currentPage.id,
+      selectedFormId: form.id,
+      selectedStage: form.type,
+      selectedFieldId: fieldId || normalizedThreeStage.selectedFieldId
+    }, form.id, section)
+    onChange(selectThreeStageForm(updated, currentPage.id, form.id, fieldId))
+  }
+
+  const selectField = (form: IThreeStageForm, fieldId: string): void => {
+    updateFormSection(form, {
+      ...form.section,
+      focusedFieldId: fieldId,
+      updatedAt: Date.now()
+    }, fieldId)
+  }
+
+  const updateField = (form: IThreeStageForm, fieldId: string, value: string): void => {
+    updateFormSection(form, {
+      ...form.section,
       fields: {
-        ...section.fields,
+        ...form.section.fields,
         [fieldId]: value
       },
       focusedFieldId: fieldId,
       updatedAt: Date.now()
-    })
+    }, fieldId)
   }
 
   const copyText = async (text: string, emptyMessage = '暂无可复制内容。') => {
@@ -113,21 +177,20 @@ const ThreeStageBuilderScreen = ({
 
   const handleApplyAgentProposal = (proposal: AgentWorkspaceProposal): void => {
     if (proposal.kind !== 'three_stage_field_update') return
-    const stage = stageDefinitions.find(definition => definition.key === proposal.stageKey)?.key
-    if (!stage) return
-    const field = getStageDefinition(stage).fields.find(candidate => candidate.id === proposal.fieldId && !candidate.fixedValue)
+    if (proposal.stageKey !== selectedForm.type) return
+    const field = getStageDefinition(selectedForm.type).fields.find(candidate => candidate.id === proposal.fieldId && !candidate.fixedValue)
     if (!field) return
-    const currentValue = valueOf(getSection(threeStage, stage).fields, field.id)
+    const currentValue = valueOf(selectedForm.section.fields, field.id)
     const nextValue = proposal.mode === 'append' && currentValue.trim()
       ? `${currentValue}\n${proposal.content}`
       : proposal.content
-    updateField(stage, field.id, nextValue)
+    updateField(selectedForm, field.id, nextValue)
   }
 
   const applyPreset = async (preset: IPreset, mode: 'append' | 'replace') => {
     if (selectedField.kind === 'shotRanges') {
-      const fieldSelectionKey = fieldKey(selectedStage, selectedField.id)
-      const ranges = parseStoryboardShotRanges(getSection(threeStage, selectedStage).fields, selectedField.id)
+      const fieldSelectionKey = fieldKey(selectedForm.id, selectedField.id)
+      const ranges = parseStoryboardShotRanges(selectedForm.section.fields, selectedField.id)
       const activeRangeId = activeShotRangeByField[fieldSelectionKey] || ranges[0]?.id
       const nextRanges = ranges.map(range => {
         if (range.id !== activeRangeId) return range
@@ -138,7 +201,7 @@ const ThreeStageBuilderScreen = ({
             : preset.content
         return { ...range, content: nextContent }
       })
-      updateField(selectedStage, selectedField.id, stringifyStoryboardShotRanges(nextRanges))
+      updateField(selectedForm, selectedField.id, stringifyStoryboardShotRanges(nextRanges))
       await onIncrementPresetUsage(preset.id)
       return
     }
@@ -148,26 +211,24 @@ const ThreeStageBuilderScreen = ({
       : selectedValue
         ? `${selectedValue}\n${preset.content}`
         : preset.content
-    updateField(selectedStage, selectedField.id, nextValue)
+    updateField(selectedForm, selectedField.id, nextValue)
     await onIncrementPresetUsage(preset.id)
   }
 
-  const updateStoryboardShotRanges = (stage: ThreeStageKey, fieldId: string, ranges: StoryboardShotRange[]): void => {
-    updateField(stage, fieldId, stringifyStoryboardShotRanges(ranges))
+  const updateShotRanges = (form: IThreeStageForm, fieldId: string, ranges: StoryboardShotRange[]): void => {
+    updateField(form, fieldId, stringifyStoryboardShotRanges(ranges))
   }
 
-  const selectShotRange = (stage: ThreeStageKey, fieldId: string, rangeId: string): void => {
+  const selectShotRange = (form: IThreeStageForm, fieldId: string, rangeId: string): void => {
     setActiveShotRangeByField(current => ({
       ...current,
-      [fieldKey(stage, fieldId)]: rangeId
+      [fieldKey(form.id, fieldId)]: rangeId
     }))
-    selectField(stage, fieldId)
+    selectField(form, fieldId)
   }
 
-  const fieldKey = (stage: ThreeStageKey, fieldId: string): string => `${stage}:${fieldId}`
-
-  const toggleFieldDrawer = (stage: ThreeStageKey, fieldId: string): void => {
-    const key = fieldKey(stage, fieldId)
+  const toggleFieldDrawer = (form: IThreeStageForm, fieldId: string): void => {
+    const key = fieldKey(form.id, fieldId)
     setExpandedFields(current => {
       const next = new Set(current)
       if (next.has(key)) {
@@ -177,11 +238,43 @@ const ThreeStageBuilderScreen = ({
       }
       return next
     })
-    selectField(stage, fieldId)
+    selectField(form, fieldId)
+  }
+
+  const duplicateCurrentPage = (): void => {
+    onChange(duplicateThreeStagePage(normalizedThreeStage, currentPage.id))
+  }
+
+  const createCharacter = (): void => {
+    onChange(addCharacterFormToPage(normalizedThreeStage, currentPage.id, characterSourceId || undefined))
+    setShowNewMenu(false)
+  }
+
+  const createPair = (): void => {
+    onChange(addStoryVideoPairToPage(normalizedThreeStage, currentPage.id, pairSourceId || undefined))
+    setShowNewMenu(false)
+  }
+
+  const removeItem = (item: IThreeStageItem): void => {
+    if (currentPage.items.length <= 1) {
+      window.alert('每页至少保留一个表单。')
+      return
+    }
+    onChange(removeThreeStageItem(normalizedThreeStage, currentPage.id, item.id))
+  }
+
+  const removePage = (): void => {
+    if (pages.length <= 1) {
+      window.alert('至少保留一页。')
+      return
+    }
+    if (window.confirm('删除当前三段式页面吗？')) {
+      onChange(removeThreeStagePage(normalizedThreeStage, currentPage.id))
+    }
   }
 
   return (
-    <section className="min-h-[calc(100vh-168px)] bg-[#f7f8fb] px-6 pb-10 pt-7">
+    <section className="min-h-[calc(100vh-168px)] bg-[#f7f8fb] px-6 pb-28 pt-7">
       <div className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <button className="mb-3 text-sm font-semibold text-gray-500 transition hover:text-gray-950" onClick={onBack}>
@@ -202,15 +295,15 @@ const ThreeStageBuilderScreen = ({
               </button>
             )}
           </div>
-          <p className="mt-1 text-sm text-gray-500">三段式构建：人物版、故事版、视频生成提示词分别输出。</p>
+          <p className="mt-1 text-sm text-gray-500">三段式分页：人物版独立管理，故事版与提示词版固定绑定。</p>
         </div>
         <div className="flex flex-wrap gap-3">
           <button
             className="rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200"
-            onClick={() => copyText(selectedOutput, '当前阶段还没有填写任何结构化内容。')}
+            onClick={() => copyText(selectedOutput, '当前表单还没有可复制内容。')}
           >
             <Copy className="h-4 w-4" />
-            复制当前阶段
+            复制当前表单
           </button>
           <button className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800" onClick={onSave}>
             <Database className="h-4 w-4" />
@@ -219,62 +312,127 @@ const ThreeStageBuilderScreen = ({
         </div>
       </div>
 
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {pages.map((page, index) => (
+          <button
+            key={page.id}
+            type="button"
+            className={`rounded-full px-4 py-2 text-sm font-bold transition ${
+              page.id === currentPage.id ? 'bg-gray-950 text-white' : 'bg-white text-gray-600 hover:bg-gray-100'
+            }`}
+            onClick={() => {
+              const firstForm = page.items[0]?.kind === 'character' ? page.items[0].form : page.items[0]?.storyboardForm
+              if (firstForm) onChange(selectThreeStageForm(normalizedThreeStage, page.id, firstForm.id))
+            }}
+          >
+            Page {index + 1}
+          </button>
+        ))}
+      </div>
+
       <div className="grid gap-5 2xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="grid min-w-0 gap-4 xl:grid-cols-3">
-          {stageDefinitions.map(stage => {
-            const section = getSection(threeStage, stage.key)
-            const output = stage.buildOutput(section.fields, threeStage)
-            const injectedStoryboardText = stage.key === 'videoPrompt'
-              ? buildStoryboardInjectionForVideo(threeStage.storyboard.fields)
-              : ''
-            return (
-              <section key={stage.key} className="flex min-h-[760px] flex-col rounded-[24px] border border-gray-200 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)]">
-                <div className="border-b border-gray-100 p-5">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">Three-stage</div>
-                  <h2 className="text-xl font-bold text-gray-950">{stage.title}</h2>
-                  <p className="mt-2 text-sm leading-6 text-gray-500">{stage.description}</p>
+        <div className="relative min-w-0">
+          <div
+            ref={stageRailRef}
+            className="flex min-w-0 items-start gap-4 overflow-x-auto pb-24 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            onScroll={updateStageRailScroll}
+          >
+          {currentPage.items.map(item => item.kind === 'character' ? (
+            <div key={item.id} className="contents">
+              <StageFormCard
+                form={item.form}
+                selectedFormId={selectedForm.id}
+                selectedFieldId={selectedField.id}
+                pairedStoryboardForm={null}
+                expandedFields={expandedFields}
+                onSelectForm={selectFormField}
+                onToggleField={toggleFieldDrawer}
+                onSelectField={selectField}
+                onUpdateField={updateField}
+                onUpdateShotRanges={updateShotRanges}
+                onSelectShotRange={selectShotRange}
+                onCopy={copyText}
+                onRemove={() => removeItem(item)}
+              />
+            </div>
+          ) : (
+            <section key={item.id} className="contents">
+              <div className="hidden">
+                <div className="inline-flex items-center gap-2 rounded-full bg-gray-950 px-3 py-1.5 text-xs font-bold text-white">
+                  <Link2 className="h-3.5 w-3.5" />
+                  故事/提示词组 #{item.number}
                 </div>
-                <div className="flex-1 space-y-3 overflow-y-auto p-4">
-                  {stage.key === 'videoPrompt' && (
-                    <LockedTextBlock
-                      text={`阶段2注入内容：\n${injectedStoryboardText || '等待阶段2填写主题与故事节奏。'}`}
-                    />
-                  )}
-                  {(stage.layout || stage.fields.map(field => ({ type: 'field' as const, fieldId: field.id }))).map(item => {
-                    if (item.type === 'locked') {
-                      return <LockedTextBlock key={item.id} text={item.text} />
-                    }
-                    const field = stage.fields.find(candidate => candidate.id === item.fieldId)
-                    if (!field) return null
-                    return (
-                      <StageFieldEditor
-                        key={field.id}
-                        stage={stage.key}
-                        field={field}
-                        fields={section.fields}
-                        active={selectedStage === stage.key && selectedField.id === field.id}
-                        expanded={expandedFields.has(fieldKey(stage.key, field.id))}
-                        onToggle={() => toggleFieldDrawer(stage.key, field.id)}
-                        onFocus={() => selectField(stage.key, field.id)}
-                        onUpdateField={updateField}
-                        onUpdateShotRanges={updateStoryboardShotRanges}
-                        onSelectShotRange={selectShotRange}
-                      />
-                    )
-                  })}
-                </div>
-                <div className="border-t border-gray-100 p-4">
-                  <button
-                    className="w-full rounded-full bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
-                    onClick={() => copyText(output, `${stage.title}还没有填写任何结构化内容。`)}
-                  >
-                    <Copy className="h-4 w-4" />
-                    复制{stage.title}
-                  </button>
-                </div>
-              </section>
-            )
-          })}
+                <button
+                  type="button"
+                  className="rounded-full p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-500"
+                  onClick={() => removeItem(item)}
+                  title="删除绑定组"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="contents">
+                <StageFormCard
+                  form={item.storyboardForm}
+                  selectedFormId={selectedForm.id}
+                  selectedFieldId={selectedField.id}
+                  pairedStoryboardForm={item.storyboardForm}
+                  expandedFields={expandedFields}
+                  onSelectForm={selectFormField}
+                  onToggleField={toggleFieldDrawer}
+                  onSelectField={selectField}
+                  onUpdateField={updateField}
+                  onUpdateShotRanges={updateShotRanges}
+                  onSelectShotRange={selectShotRange}
+                  onCopy={copyText}
+                  onRemove={() => removeItem(item)}
+                />
+                <StageFormCard
+                  form={item.videoPromptForm}
+                  selectedFormId={selectedForm.id}
+                  selectedFieldId={selectedField.id}
+                  pairedStoryboardForm={item.storyboardForm}
+                  expandedFields={expandedFields}
+                  onSelectForm={selectFormField}
+                  onToggleField={toggleFieldDrawer}
+                  onSelectField={selectField}
+                  onUpdateField={updateField}
+                  onUpdateShotRanges={updateShotRanges}
+                  onSelectShotRange={selectShotRange}
+                  onCopy={copyText}
+                  onRemove={() => removeItem(item)}
+                />
+              </div>
+            </section>
+          ))}
+          {true && (
+            <InlineCreateCard
+              title="新建人物版"
+              description="创建独立编号的人物版，可从已有人物版复制。"
+              onClick={createCharacter}
+            />
+          )}
+          {true && (
+            <InlineCreateCard
+              title="新建故事+提示词组"
+              description="故事版和提示词版会成对创建，并保持固定注入绑定。"
+              onClick={createPair}
+            />
+          )}
+          {false && (
+            <InlineCreateCard
+              title="新建人物版"
+              description="创建独立编号的人物版，可从已有人物版复制。"
+              onClick={createCharacter}
+            />
+          )}
+          </div>
+          <FloatingHorizontalScroll
+            left={stageRailScroll.left}
+            max={stageRailScroll.max}
+            onScrollLeft={setStageRailScrollLeft}
+            onStep={scrollStageRailBy}
+          />
         </div>
 
         <aside className="sticky top-24 flex h-[calc(100vh-136px)] min-h-[680px] flex-col rounded-[24px] border border-gray-200 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.05)]">
@@ -300,101 +458,353 @@ const ThreeStageBuilderScreen = ({
             </div>
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-400">字段编辑器</div>
             <h2 className="text-lg font-bold text-gray-950">{selectedField.label}</h2>
-            <p className="mt-1 text-sm text-gray-500">{selectedStageDefinition.title}</p>
+            <p className="mt-1 text-sm text-gray-500">{selectedForm.title}</p>
           </div>
 
           {!previewMode && rightPanelMode === 'agent' ? (
             <AIChatbotBox
               title="Three-stage Agent"
               mode="three-stage-workspace"
-              sessionKey={`workspace:three-stage:${activeProject.id}`}
+              sessionKey={`workspace:three-stage:${activeProject.id}:${selectedForm.id}`}
               workspaceContext={workspaceContext}
               onApplyWorkspaceProposal={handleApplyAgentProposal}
             />
           ) : (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
-            <label className="block">
-              <span className="mb-2 block text-sm font-bold text-gray-900">当前阶段完整 Prompt</span>
-              <textarea
-                className={`w-full resize-y rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100 ${
-                  selectedField.presetType === 'camera' ? 'min-h-[180px]' : 'min-h-[320px]'
-                }`}
-                value={selectedOutput}
-                placeholder={`${selectedStageDefinition.title} 完整 Prompt 会显示在这里。`}
-                readOnly
-              />
-            </label>
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
+              <label className="block">
+                <span className="mb-2 block text-sm font-bold text-gray-900">当前表单完整 Prompt</span>
+                <textarea
+                  className={`w-full resize-y rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100 ${
+                    selectedField.presetType === 'camera' ? 'min-h-[180px]' : 'min-h-[320px]'
+                  }`}
+                  value={selectedOutput}
+                  placeholder={`${selectedForm.title} 完整 Prompt 会显示在这里。`}
+                  readOnly
+                />
+              </label>
 
-            <div className="mt-3 flex gap-2">
-              <button
-                className="flex-1 rounded-full bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200"
-                onClick={() => copyText(selectedOutput, `${selectedStageDefinition.title}还没有填写任何结构化内容。`)}
-              >
-                <Copy className="h-4 w-4" />
-                复制完整 Prompt
-              </button>
-              <button
-                className="rounded-full bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
-                onClick={() => updateField(selectedStage, selectedField.id, '')}
-                disabled={selectedFieldIsFixed}
-              >
-                <Eraser className="h-4 w-4" />
-                清空
-              </button>
-            </div>
-
-            {selectedField.presetType === 'camera' && !selectedFieldIsFixed && (
-              <div className="mt-6 flex min-h-[260px] flex-1 flex-col">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h3 className="text-sm font-bold text-gray-900">Prompt 库镜头选项</h3>
-                  <span className="text-xs text-gray-400">{filteredCameraPresets.length} 条</span>
-                </div>
-                <label className="relative block">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                  <input
-                    className="w-full rounded-2xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100"
-                    value={presetSearch}
-                    onChange={(event) => setPresetSearch(event.target.value)}
-                    placeholder="搜索镜头、运镜、构图..."
-                  />
-                </label>
-                <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
-                  {filteredCameraPresets.length > 0 ? filteredCameraPresets.map(preset => (
-                    <div key={preset.id} className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
-                      <div className="text-sm font-bold text-gray-950">{preset.label}</div>
-                      <p className="mt-1 line-clamp-3 text-xs leading-5 text-gray-500">{preset.content}</p>
-                      <div className="mt-3 flex gap-2">
-                        <button
-                          className="flex-1 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100"
-                          onClick={() => applyPreset(preset, 'append')}
-                        >
-                          追加
-                        </button>
-                        <button
-                          className="flex-1 rounded-full bg-gray-950 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800"
-                          onClick={() => applyPreset(preset, 'replace')}
-                        >
-                          替换
-                        </button>
-                      </div>
-                    </div>
-                  )) : (
-                    <div className="rounded-2xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">
-                      没有匹配的镜头选项
-                    </div>
-                  )}
-                </div>
+              <div className="mt-3 flex gap-2">
+                <button
+                  className="flex-1 rounded-full bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200"
+                  onClick={() => copyText(selectedOutput, `${selectedForm.title}还没有可复制内容。`)}
+                >
+                  <Copy className="h-4 w-4" />
+                  复制完整 Prompt
+                </button>
+                <button
+                  className="rounded-full bg-red-50 px-3 py-2 text-sm font-semibold text-red-600 hover:bg-red-100"
+                  onClick={() => updateField(selectedForm, selectedField.id, '')}
+                  disabled={selectedFieldIsFixed}
+                >
+                  <Eraser className="h-4 w-4" />
+                  清空
+                </button>
               </div>
-            )}
-          </div>
+
+              {selectedField.presetType === 'camera' && !selectedFieldIsFixed && (
+                <PresetPicker
+                  presets={filteredCameraPresets}
+                  search={presetSearch}
+                  onSearch={setPresetSearch}
+                  onApply={applyPreset}
+                />
+              )}
+            </div>
           )}
         </aside>
+      </div>
+
+      <div className="fixed bottom-20 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-gray-200 bg-white/95 px-3 py-2 shadow-[0_18px_60px_rgba(15,23,42,0.18)] backdrop-blur">
+        {pages.map((page, index) => (
+          <button
+            key={page.id}
+            className={`h-9 min-w-9 rounded-full px-3 text-sm font-bold transition ${
+              page.id === currentPage.id ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+            onClick={() => {
+              const firstForm = page.items[0]?.kind === 'character' ? page.items[0].form : page.items[0]?.storyboardForm
+              if (firstForm) onChange(selectThreeStageForm(normalizedThreeStage, page.id, firstForm.id))
+            }}
+          >
+            {index + 1}
+          </button>
+        ))}
+        <button className="h-9 w-9 rounded-full bg-amber-100 text-amber-700 transition hover:bg-amber-200" onClick={duplicateCurrentPage} title="复制当前页">
+          <Plus className="h-4 w-4" />
+        </button>
+        <button className="h-9 w-9 rounded-full bg-gray-100 text-gray-700 transition hover:bg-gray-200" onClick={() => setShowNewMenu(value => !value)} title="当前页菜单">
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+        {showNewMenu && (
+          <div className="absolute bottom-14 right-0 w-80 rounded-2xl border border-gray-200 bg-white p-4 text-left shadow-2xl">
+            <div className="mb-3 text-sm font-bold text-gray-950">当前页新建</div>
+            <label className="mb-3 block text-xs font-bold text-gray-500">
+              人物版复制来源
+              <select className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900" value={characterSourceId} onChange={(event) => setCharacterSourceId(event.target.value)}>
+                <option value="">最近的人物版</option>
+                {characterSources.map(form => <option key={form.id} value={form.id}>{form.title}</option>)}
+              </select>
+            </label>
+            <button className="mb-3 w-full rounded-full bg-gray-950 px-4 py-2 text-sm font-bold text-white" onClick={createCharacter}>新建人物版</button>
+            <label className="mb-3 block text-xs font-bold text-gray-500">
+              故事+提示词组复制来源
+              <select className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900" value={pairSourceId} onChange={(event) => setPairSourceId(event.target.value)}>
+                <option value="">最近的故事+提示词组</option>
+                {pairSources.map(pair => <option key={pair.pairId} value={pair.pairId}>故事/提示词组 #{pair.number}</option>)}
+              </select>
+            </label>
+            <button className="mb-3 w-full rounded-full bg-gray-950 px-4 py-2 text-sm font-bold text-white" onClick={createPair}>新建故事+提示词组</button>
+            <button className="w-full rounded-full bg-red-50 px-4 py-2 text-sm font-bold text-red-600" onClick={removePage}>删除当前页</button>
+          </div>
+        )}
       </div>
     </section>
   )
 }
 
 export default ThreeStageBuilderScreen
+
+const InlineCreateCard = ({
+  title,
+  description,
+  onClick
+}: {
+  title: string
+  description: string
+  onClick: () => void
+}) => (
+  <button
+    type="button"
+    className="flex min-h-[260px] w-[360px] max-w-[calc(100vw-48px)] flex-none flex-col items-start justify-center rounded-[24px] border border-dashed border-gray-300 bg-white/65 p-6 text-left transition hover:border-gray-950 hover:bg-white hover:shadow-[0_18px_45px_rgba(15,23,42,0.06)]"
+    onClick={onClick}
+  >
+    <span className="mb-4 inline-flex h-11 w-11 items-center justify-center rounded-full bg-gray-950 text-white">
+      <Plus className="h-5 w-5" />
+    </span>
+    <span className="text-lg font-black text-gray-950">{title}</span>
+    <span className="mt-2 text-sm leading-6 text-gray-500">{description}</span>
+  </button>
+)
+
+const FloatingHorizontalScroll = ({
+  left,
+  max,
+  onScrollLeft,
+  onStep
+}: {
+  left: number
+  max: number
+  onScrollLeft: (value: number) => void
+  onStep: (direction: -1 | 1) => void
+}) => {
+  if (max <= 4) return null
+  const value = Math.min(max, Math.max(0, left))
+
+  return (
+    <div className="pointer-events-none sticky bottom-28 z-30 -mt-16 flex justify-center px-4">
+      <div className="pointer-events-auto flex w-full max-w-2xl items-center gap-3 rounded-full border border-gray-200 bg-white/95 px-3 py-2 shadow-[0_18px_60px_rgba(15,23,42,0.18)] backdrop-blur">
+        <button
+          type="button"
+          className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-gray-100 text-gray-700 transition hover:bg-gray-950 hover:text-white disabled:opacity-40"
+          disabled={value <= 0}
+          onClick={() => onStep(-1)}
+          title="向左滚动"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={max}
+          value={value}
+          className="h-2 min-w-0 flex-1 cursor-pointer accent-gray-950"
+          onChange={(event) => onScrollLeft(Number(event.target.value))}
+          aria-label="三段式横向滚动"
+        />
+        <button
+          type="button"
+          className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-gray-100 text-gray-700 transition hover:bg-gray-950 hover:text-white disabled:opacity-40"
+          disabled={value >= max}
+          onClick={() => onStep(1)}
+          title="向右滚动"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const StageFormCard = ({
+  form,
+  selectedFormId,
+  selectedFieldId,
+  pairedStoryboardForm,
+  expandedFields,
+  onSelectForm,
+  onToggleField,
+  onSelectField,
+  onUpdateField,
+  onUpdateShotRanges,
+  onSelectShotRange,
+  onCopy,
+  onRemove
+}: {
+  form: IThreeStageForm
+  selectedFormId: string
+  selectedFieldId: string
+  pairedStoryboardForm: IThreeStageForm | null
+  expandedFields: Set<string>
+  onSelectForm: (form: IThreeStageForm, fieldId?: string) => void
+  onToggleField: (form: IThreeStageForm, fieldId: string) => void
+  onSelectField: (form: IThreeStageForm, fieldId: string) => void
+  onUpdateField: (form: IThreeStageForm, fieldId: string, value: string) => void
+  onUpdateShotRanges: (form: IThreeStageForm, fieldId: string, ranges: StoryboardShotRange[]) => void
+  onSelectShotRange: (form: IThreeStageForm, fieldId: string, rangeId: string) => void
+  onCopy: (text: string, emptyMessage?: string) => void
+  onRemove: () => void
+}) => {
+  const stage = getStageDefinition(form.type)
+  const outputProject = form.type === 'videoPrompt' && pairedStoryboardForm
+    ? ({
+        character: pairedStoryboardForm.section,
+        storyboard: pairedStoryboardForm.section,
+        videoPrompt: form.section,
+        selectedStage: form.type,
+        selectedFieldId: form.section.focusedFieldId || '',
+        meta: {}
+      } as IThreeStageProject)
+    : undefined
+  const output = stage.buildOutput(form.section.fields, outputProject)
+  const injectedStoryboardText = form.type === 'videoPrompt' && pairedStoryboardForm
+    ? buildStoryboardInjectionForVideo(pairedStoryboardForm.section.fields)
+    : ''
+
+  return (
+    <section
+      className={`flex min-h-[680px] w-[520px] max-w-[calc(100vw-48px)] flex-none flex-col rounded-[24px] border bg-white shadow-[0_18px_45px_rgba(15,23,42,0.04)] ${
+        selectedFormId === form.id ? 'border-gray-950' : 'border-gray-200'
+      }`}
+      onClick={() => onSelectForm(form)}
+    >
+      <div className="border-b border-gray-100 p-5">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Three-stage</span>
+            {form.type !== 'character' && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-950 px-2 py-0.5 text-[11px] font-bold text-white">
+                <Link2 className="h-3 w-3" />
+                绑定组 #{form.number}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="rounded-full p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-500"
+            onClick={(event) => {
+              event.stopPropagation()
+              onRemove()
+            }}
+            title={form.type === 'character' ? '删除人物版' : '删除绑定组'}
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+        <h2 className="text-xl font-bold text-gray-950">{form.title}</h2>
+        <p className="mt-2 text-sm leading-6 text-gray-500">{stage.description}</p>
+      </div>
+      <div className="flex-1 space-y-3 overflow-y-auto p-4">
+        {form.type === 'videoPrompt' && (
+          <LockedTextBlock
+            text={`阶段2注入内容：\n${injectedStoryboardText || '等待同组故事版填写主题与故事节奏。'}`}
+          />
+        )}
+        {(stage.layout || stage.fields.map(field => ({ type: 'field' as const, fieldId: field.id }))).map(item => {
+          if (item.type === 'locked') {
+            return <LockedTextBlock key={item.id} text={item.text} />
+          }
+          const field = stage.fields.find(candidate => candidate.id === item.fieldId)
+          if (!field) return null
+          return (
+            <StageFieldEditor
+              key={field.id}
+              form={form}
+              field={field}
+              fields={form.section.fields}
+              active={selectedFormId === form.id && selectedFieldId === field.id}
+              expanded={expandedFields.has(`${form.id}:${field.id}`)}
+              onToggle={() => onToggleField(form, field.id)}
+              onFocus={() => onSelectField(form, field.id)}
+              onUpdateField={onUpdateField}
+              onUpdateShotRanges={onUpdateShotRanges}
+              onSelectShotRange={onSelectShotRange}
+            />
+          )
+        })}
+      </div>
+      <div className="border-t border-gray-100 p-4">
+        <button
+          className="w-full rounded-full bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
+          onClick={(event) => {
+            event.stopPropagation()
+            onCopy(output, `${form.title}还没有可复制内容。`)
+          }}
+        >
+          <Copy className="h-4 w-4" />
+          复制{form.title}
+        </button>
+      </div>
+    </section>
+  )
+}
+
+const PresetPicker = ({
+  presets,
+  search,
+  onSearch,
+  onApply
+}: {
+  presets: IPreset[]
+  search: string
+  onSearch: (value: string) => void
+  onApply: (preset: IPreset, mode: 'append' | 'replace') => void
+}) => (
+  <div className="mt-6 flex min-h-[260px] flex-1 flex-col">
+    <div className="mb-3 flex items-center justify-between gap-3">
+      <h3 className="text-sm font-bold text-gray-900">Prompt 库镜头选项</h3>
+      <span className="text-xs text-gray-400">{presets.length} 条</span>
+    </div>
+    <label className="relative block">
+      <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+      <input
+        className="w-full rounded-2xl border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 focus:border-gray-300 focus:bg-white focus:outline-none focus:ring-2 focus:ring-gray-100"
+        value={search}
+        onChange={(event) => onSearch(event.target.value)}
+        placeholder="搜索镜头、运镜、构图..."
+      />
+    </label>
+    <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
+      {presets.length > 0 ? presets.map(preset => (
+        <div key={preset.id} className="rounded-2xl border border-gray-100 bg-gray-50 p-3">
+          <div className="text-sm font-bold text-gray-950">{preset.label}</div>
+          <p className="mt-1 line-clamp-3 text-xs leading-5 text-gray-500">{preset.content}</p>
+          <div className="mt-3 flex gap-2">
+            <button className="flex-1 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-100" onClick={() => onApply(preset, 'append')}>
+              追加
+            </button>
+            <button className="flex-1 rounded-full bg-gray-950 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gray-800" onClick={() => onApply(preset, 'replace')}>
+              替换
+            </button>
+          </div>
+        </div>
+      )) : (
+        <div className="rounded-2xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">
+          没有匹配的镜头选项
+        </div>
+      )}
+    </div>
+  </div>
+)
 
 const shotNumberOptions = Array.from({ length: 12 }, (_, index) => index + 1)
 
@@ -411,7 +821,7 @@ const LockedTextBlock = ({ text }: { text: string }) => (
 )
 
 const StageFieldEditor = ({
-  stage,
+  form,
   field,
   fields,
   active,
@@ -422,16 +832,16 @@ const StageFieldEditor = ({
   onUpdateShotRanges,
   onSelectShotRange
 }: {
-  stage: ThreeStageKey
+  form: IThreeStageForm
   field: FieldDefinition
   fields: Record<string, string>
   active: boolean
   expanded: boolean
   onToggle: () => void
   onFocus: () => void
-  onUpdateField: (stage: ThreeStageKey, fieldId: string, value: string) => void
-  onUpdateShotRanges: (stage: ThreeStageKey, fieldId: string, ranges: StoryboardShotRange[]) => void
-  onSelectShotRange: (stage: ThreeStageKey, fieldId: string, rangeId: string) => void
+  onUpdateField: (form: IThreeStageForm, fieldId: string, value: string) => void
+  onUpdateShotRanges: (form: IThreeStageForm, fieldId: string, ranges: StoryboardShotRange[]) => void
+  onSelectShotRange: (form: IThreeStageForm, fieldId: string, rangeId: string) => void
 }) => {
   if (field.fixedValue) {
     return <FixedStageFieldBlock field={field} />
@@ -445,8 +855,8 @@ const StageFieldEditor = ({
         placeholder={field.placeholder}
         libraryEnabled={field.presetType === 'camera'}
         onFocus={onFocus}
-        onRangeFocus={(rangeId) => onSelectShotRange(stage, field.id, rangeId)}
-        onChange={(ranges) => onUpdateShotRanges(stage, field.id, ranges)}
+        onRangeFocus={(rangeId) => onSelectShotRange(form, field.id, rangeId)}
+        onChange={(ranges) => onUpdateShotRanges(form, field.id, ranges)}
       />
     )
   }
@@ -458,7 +868,7 @@ const StageFieldEditor = ({
         value={fields[field.id]}
         active={active}
         onFocus={onFocus}
-        onChange={(value) => onUpdateField(stage, field.id, value)}
+        onChange={(value) => onUpdateField(form, field.id, value)}
       />
     )
   }
@@ -471,11 +881,7 @@ const StageFieldEditor = ({
         active ? 'border-gray-950 bg-gray-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200'
       }`}
     >
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
-        onClick={onToggle}
-      >
+      <button type="button" className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left" onClick={onToggle}>
         <span className="min-w-0">
           <span className="flex items-center gap-2">
             <span className="text-sm font-bold text-gray-900">【{field.label}】</span>
@@ -500,7 +906,7 @@ const StageFieldEditor = ({
             placeholder={field.placeholder}
             disabled={Boolean(field.fixedValue)}
             onFocus={onFocus}
-            onChange={(event) => onUpdateField(stage, field.id, event.target.value)}
+            onChange={(event) => onUpdateField(form, field.id, event.target.value)}
           />
         </div>
       )}
@@ -508,11 +914,7 @@ const StageFieldEditor = ({
   )
 }
 
-const FixedStageFieldBlock = ({
-  field
-}: {
-  field: FieldDefinition
-}) => (
+const FixedStageFieldBlock = ({ field }: { field: FieldDefinition }) => (
   <div
     className="rounded-xl border border-transparent bg-[#fbfaf6] px-3 py-2 text-sm font-semibold leading-7 text-gray-800"
     style={{
@@ -520,7 +922,7 @@ const FixedStageFieldBlock = ({
       backgroundSize: '14px 14px'
     }}
   >
-    <pre className="whitespace-pre-wrap font-sans">【{field.label}】 {field.fixedValue}</pre>
+    <pre className="whitespace-pre-wrap font-sans">【{field.label}】{field.fixedValue}</pre>
   </div>
 )
 
@@ -542,18 +944,12 @@ const ToggleFieldEditor = ({
   const offLabel = field.toggleLabels?.off || '不需要'
 
   return (
-    <div
-      className={`rounded-xl border px-3 py-3 transition ${
-        active ? 'border-gray-950 bg-gray-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200'
-      }`}
-    >
+    <div className={`rounded-xl border px-3 py-3 transition ${active ? 'border-gray-950 bg-gray-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200'}`}>
       <div className="mb-3 text-sm font-bold text-gray-900">【{field.label}】</div>
       <div className="grid grid-cols-2 gap-2">
         <button
           type="button"
-          className={`rounded-full px-3 py-2 text-sm font-semibold transition ${
-            enabled ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
+          className={`rounded-full px-3 py-2 text-sm font-semibold transition ${enabled ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
           onClick={(event) => {
             event.stopPropagation()
             onFocus()
@@ -564,9 +960,7 @@ const ToggleFieldEditor = ({
         </button>
         <button
           type="button"
-          className={`rounded-full px-3 py-2 text-sm font-semibold transition ${
-            !enabled ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-          }`}
+          className={`rounded-full px-3 py-2 text-sm font-semibold transition ${!enabled ? 'bg-gray-950 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
           onClick={(event) => {
             event.stopPropagation()
             onFocus()
@@ -611,13 +1005,7 @@ const ShotRangeEditor = ({
   }
 
   return (
-    <div
-      className={`rounded-2xl border p-3 transition ${
-        active ? 'border-gray-950 bg-gray-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200'
-      }`}
-      onFocus={onFocus}
-      onClick={onFocus}
-    >
+    <div className={`rounded-2xl border p-3 transition ${active ? 'border-gray-950 bg-gray-50 shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200'}`} onFocus={onFocus} onClick={onFocus}>
       <div className="mb-3 flex items-center justify-between gap-3">
         <span className="text-sm font-bold text-gray-900">镜头格</span>
         <button
@@ -641,24 +1029,12 @@ const ShotRangeEditor = ({
                 {libraryEnabled && (
                   <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-bold text-red-600">镜头库</span>
                 )}
-                <select
-                  className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-sm font-semibold text-gray-900"
-                  value={range.start}
-                  onChange={(event) => updateRange(range.id, { start: Number(event.target.value) })}
-                >
-                  {shotNumberOptions.map(option => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
+                <select className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-sm font-semibold text-gray-900" value={range.start} onChange={(event) => updateRange(range.id, { start: Number(event.target.value) })}>
+                  {shotNumberOptions.map(option => <option key={option} value={option}>{option}</option>)}
                 </select>
                 <span className="text-sm font-bold text-gray-500">-</span>
-                <select
-                  className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-sm font-semibold text-gray-900"
-                  value={range.end}
-                  onChange={(event) => updateRange(range.id, { end: Number(event.target.value) })}
-                >
-                  {shotNumberOptions.map(option => (
-                    <option key={option} value={option}>{option}</option>
-                  ))}
+                <select className="rounded-full border border-gray-200 bg-gray-50 px-2 py-1 text-sm font-semibold text-gray-900" value={range.end} onChange={(event) => updateRange(range.id, { end: Number(event.target.value) })}>
+                  {shotNumberOptions.map(option => <option key={option} value={option}>{option}</option>)}
                 </select>
               </div>
               <button

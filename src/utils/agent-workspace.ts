@@ -2,6 +2,11 @@ import type { ICard } from '@/models/Card.model'
 import type { AgentWorkspaceContext } from '@/models/Agent.model'
 import type { IPromptProject, IStoryboardProject, IThreeStageProject } from '@/models/PromptHistory.model'
 import type { IPage } from '@/stores/card-initial-state'
+import {
+  getSelectedThreeStageFormContext,
+  normalizeThreeStagePages,
+  syncThreeStageLegacyFields
+} from '@/domain/three-stage/three-stage-pages'
 
 const MAX_TEXT_LENGTH = 1200
 const MAX_CARDS = 60
@@ -124,17 +129,36 @@ export function buildStoryboardWorkspaceContext({
 export function buildThreeStageWorkspaceContext({
   activeProject,
   threeStage,
-  selectedOutput
+  selectedOutput,
+  freeCanvas
 }: {
   activeProject: IPromptProject
   threeStage: IThreeStageProject
   selectedOutput: string
+  freeCanvas?: {
+    selectedNodeId?: string | null
+    selectedNodeType?: string | null
+    selectedMediaAssetId?: string | null
+    nodes?: Array<{
+      id: string
+      kind: string
+      title?: string
+      formId?: string
+      mediaAssetId?: string | null
+    }>
+  }
 }): AgentWorkspaceContext {
-  const selectedStage = threeStage.selectedStage
-  const selectedFieldId = threeStage.selectedFieldId
+  const syncedThreeStage = syncThreeStageLegacyFields(threeStage)
+  const selectedStage = syncedThreeStage.selectedStage
+  const selectedFieldId = syncedThreeStage.selectedFieldId
+  const pages = normalizeThreeStagePages(syncedThreeStage)
+  const selectedContext = getSelectedThreeStageFormContext(syncedThreeStage)
+  const pairedStoryboardSummary = selectedContext.form.type === 'videoPrompt' && selectedContext.pairedStoryboardForm
+    ? compactThreeStageSection(selectedContext.pairedStoryboardForm.section)
+    : null
 
   return {
-    contextId: `three-stage:${activeProject.id}:${selectedStage}:${selectedFieldId}`,
+    contextId: `three-stage:${activeProject.id}:${selectedContext.page.id}:${selectedContext.form.id}:${selectedFieldId}`,
     mode: 'three-stage-workspace',
     projectId: activeProject.id,
     projectTitle: activeProject.title,
@@ -142,12 +166,52 @@ export function buildThreeStageWorkspaceContext({
       projectType: activeProject.type,
       selectedStage,
       selectedFieldId,
+      selectedPageId: selectedContext.page.id,
+      selectedItemId: selectedContext.item.id,
+      selectedFormId: selectedContext.form.id,
+      selectedPairId: selectedContext.item.kind === 'storyVideoPair' ? selectedContext.item.pairId : null,
+      selectedFormType: selectedContext.form.type,
+      selectedFormTitle: selectedContext.form.title,
+      pairedStoryboardSummary,
       selectedOutput: compactText(selectedOutput),
       sections: {
-        character: compactThreeStageSection(threeStage.character),
-        storyboard: compactThreeStageSection(threeStage.storyboard),
-        videoPrompt: compactThreeStageSection(threeStage.videoPrompt)
-      }
+        character: compactThreeStageSection(syncedThreeStage.character),
+        storyboard: compactThreeStageSection(syncedThreeStage.storyboard),
+        videoPrompt: compactThreeStageSection(syncedThreeStage.videoPrompt)
+      },
+      pages: pages.map(page => ({
+        id: page.id,
+        title: compactText(page.title),
+        selectedItemId: page.selectedItemId,
+        items: page.items.map(item => item.kind === 'character'
+          ? {
+              id: item.id,
+              kind: item.kind,
+              formId: item.form.id,
+              title: item.form.title,
+              number: item.form.number
+            }
+          : {
+              id: item.id,
+              kind: item.kind,
+              pairId: item.pairId,
+              storyboardFormId: item.storyboardForm.id,
+              videoPromptFormId: item.videoPromptForm.id,
+              number: item.storyboardForm.number
+            })
+      })),
+      freeCanvas: freeCanvas ? {
+        selectedNodeId: freeCanvas.selectedNodeId || null,
+        selectedNodeType: freeCanvas.selectedNodeType || null,
+        selectedMediaAssetId: freeCanvas.selectedMediaAssetId || null,
+        nodes: (freeCanvas.nodes || []).slice(0, MAX_CARDS).map(node => ({
+          id: node.id,
+          kind: node.kind,
+          title: compactText(node.title),
+          formId: node.formId,
+          mediaAssetId: node.mediaAssetId || null
+        }))
+      } : undefined
     }
   }
 }

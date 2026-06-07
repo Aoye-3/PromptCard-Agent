@@ -36,14 +36,65 @@ export interface IThreeStageProject {
   videoPrompt: IThreeStageSection
   selectedStage: ThreeStageKey
   selectedFieldId: string
-  meta: Record<string, any>
+  pages?: IThreeStagePage[]
+  selectedPageId?: string | null
+  selectedFormId?: string | null
+  selectedPairId?: string | null
+  meta: Record<string, unknown>
 }
 
 export interface IThreeStageSection {
   fields: Record<string, string>
   focusedFieldId?: string | null
   updatedAt: number
-  meta: Record<string, any>
+  meta: Record<string, unknown>
+}
+
+export type ThreeStageItemKind = 'character' | 'storyVideoPair'
+
+export interface IThreeStageForm {
+  id: string
+  type: ThreeStageKey
+  number: number
+  title: string
+  section: IThreeStageSection
+  sourceFormId?: string | null
+  createdAt: number
+  updatedAt: number
+  meta: Record<string, unknown>
+}
+
+export interface IThreeStageCharacterItem {
+  id: string
+  kind: 'character'
+  form: IThreeStageForm
+  createdAt: number
+  updatedAt: number
+  meta: Record<string, unknown>
+}
+
+export interface IThreeStageStoryVideoPairItem {
+  id: string
+  kind: 'storyVideoPair'
+  pairId: string
+  number: number
+  storyboardForm: IThreeStageForm
+  videoPromptForm: IThreeStageForm
+  createdAt: number
+  updatedAt: number
+  meta: Record<string, unknown>
+}
+
+export type IThreeStageItem = IThreeStageCharacterItem | IThreeStageStoryVideoPairItem
+
+export interface IThreeStagePage {
+  id: string
+  title: string
+  items: IThreeStageItem[]
+  selectedItemId?: string | null
+  createdAt: number
+  updatedAt: number
+  meta: Record<string, unknown>
 }
 
 export interface IStoryboardProject {

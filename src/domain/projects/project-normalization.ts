@@ -9,6 +9,11 @@ import type {
   ThreeStageKey
 } from '@/models/PromptHistory.model'
 import type { IPage } from '@/stores/card-initial-state'
+import {
+  createDefaultThreeStagePage,
+  normalizeThreeStagePages,
+  syncThreeStageLegacyFields
+} from '@/domain/three-stage/three-stage-pages'
 
 const DEFAULT_SEQUENCE_NAME = '单个镜头序列'
 const DEFAULT_SEQUENCE_DESCRIPTION = '先确定整段共用的视觉风格和生成约束，再编辑序列内每个镜头。'
@@ -118,14 +123,21 @@ const createThreeStageSection = (timestamp = Date.now()): IThreeStageSection => 
   meta: {}
 })
 
-export const createThreeStageProject = (timestamp = Date.now()): IThreeStageProject => ({
-  character: createThreeStageSection(timestamp),
-  storyboard: createThreeStageSection(timestamp),
-  videoPrompt: createThreeStageSection(timestamp),
-  selectedStage: 'character',
-  selectedFieldId: 'characterIdentityBoard',
-  meta: {}
-})
+export const createThreeStageProject = (timestamp = Date.now()): IThreeStageProject => {
+  const page = createDefaultThreeStagePage(timestamp)
+  return syncThreeStageLegacyFields({
+    character: createThreeStageSection(timestamp),
+    storyboard: createThreeStageSection(timestamp),
+    videoPrompt: createThreeStageSection(timestamp),
+    selectedStage: 'character',
+    selectedFieldId: 'characterNotes',
+    pages: [page],
+    selectedPageId: page.id,
+    selectedFormId: null,
+    selectedPairId: null,
+    meta: {}
+  })
+}
 
 const normalizeStoryboardSequence = (sequence: Partial<IStoryboardSequence>, index = 0, timestamp = Date.now()): IStoryboardSequence => {
   const rows = Array.isArray(sequence.rows) && sequence.rows.length > 0
@@ -193,14 +205,20 @@ const normalizeThreeStage = (threeStage: IThreeStageProject | undefined): IThree
     ? threeStage.selectedStage
     : 'character'
 
-  return {
+  const base = {
     character: normalizeThreeStageSection(threeStage.character, timestamp),
     storyboard: normalizeThreeStageSection(threeStage.storyboard, timestamp),
     videoPrompt: normalizeThreeStageSection(threeStage.videoPrompt, timestamp),
     selectedStage,
-    selectedFieldId: threeStage.selectedFieldId || 'characterIdentityBoard',
+    selectedFieldId: threeStage.selectedFieldId || 'characterNotes',
+    pages: normalizeThreeStagePages(threeStage, timestamp),
+    selectedPageId: threeStage.selectedPageId || null,
+    selectedFormId: threeStage.selectedFormId || null,
+    selectedPairId: threeStage.selectedPairId || null,
     meta: threeStage.meta || {}
   }
+
+  return syncThreeStageLegacyFields(base)
 }
 
 export const normalizeProject = (project: IPromptProject): IPromptProject => ({

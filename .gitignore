@@ -65,6 +65,11 @@ Thumbs.db
 .DS_Store
 
 # Large files and directories
+data/assets/
+data/*.sqlite3
+data/*.sqlite3-shm
+data/*.sqlite3-wal
+backups/
 Prompt Guide/
 NewVison/Prompt Guide/
 *.arrow

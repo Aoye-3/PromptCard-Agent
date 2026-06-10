@@ -2,7 +2,7 @@
 
 ## Overview
 
-PromptCard-Manager is a local-first prompt building application with an optional Agent Runtime. The frontend is a Vite, React, TypeScript, Tailwind, and Zustand app. Project and Prompt Library durable data is owned by the local `promptcard-storage` service, which writes JSON files under `data/` and exposes revision-aware HTTP APIs.
+PromptCard-Manager is a local-first prompt building application with an optional Agent Runtime. The frontend is a Vite, React, TypeScript, Tailwind, and Zustand app. Project and Prompt Library durable data is owned by the local `promptcard-storage` service, which writes SQLite records under `data/` and exposes revision-aware HTTP APIs.
 
 The optional Agent Runtime is a Python service mounted under `agent-runtime/`. The frontend does not call it directly. Instead, Vite proxies runtime traffic through stable frontend routes so the browser can keep one origin during development.
 
@@ -20,7 +20,8 @@ flowchart TD
   BrowserDB["localforage<br/>UI state + one-time migration marker"]
   StorageService["promptcard-storage<br/>127.0.0.1:8002"]
   Vite["Vite Dev Server<br/>vite.config.ts<br/>vite/plugins"]
-  Files["Storage JSON Files<br/>data/projects.json<br/>data/project-trash.json<br/>data/prompt-library-presets.json<br/>data/prompt-library-trash.json"]
+  Database["SQLite<br/>data/promptcard.sqlite3"]
+  Assets["Image Assets<br/>data/assets/"]
   RuntimeBoundary["PromptCard Runtime API<br/>/api/promptcard/runtime/*"]
   Runtime["DeerFlow Runtime Internals<br/>agent-runtime/backend<br/>127.0.0.1:8001"]
   DeepSeekConfig["DeepSeek Model Config<br/>agent-runtime/.deer-flow/promptcard-model-config.json"]
@@ -36,7 +37,8 @@ flowchart TD
   Storage --> BrowserDB
   StorageClient --> Vite
   Vite --> StorageService
-  StorageService --> Files
+  StorageService --> Database
+  StorageService --> Assets
   Components --> Stores
   Stores --> RuntimeService["agent-runtime-service.ts"]
   RuntimeService --> Vite
@@ -53,7 +55,7 @@ flowchart TD
 - **Frontend domain helpers**: `src/domain/` owns pure project normalization, storyboard row/sequence operations, and three-stage field definitions/output builders.
 - **State stores**: `src/stores/` owns card workspace state, Prompt library presets, Agent runtime state, and related ordering/persistence helpers.
 - **Storage facade and adapters**: `src/utils/storage.ts` preserves the app-facing storage API; `src/storage/storage-service-client.ts` calls the local storage service for project and Prompt Library durable writes; project normalization is delegated to `src/domain/projects/`.
-- **Local storage service**: `promptcard_storage/` owns revision-aware project and Prompt Library persistence, Trash files, migration, and atomic JSON writes.
+- **Local storage service**: `promptcard_storage/` owns revision-aware project and Prompt Library persistence, transactional Trash state, one-time JSON migration, SQLite backups, and image asset metadata.
 - **Agent service layer**: `src/services/agent-runtime-service.ts` is a thin client for the PromptCard Runtime Boundary under `/agent-api/promptcard/runtime/*`, including message routing, catalog/status reads, and DeepSeek model configuration.
 - **Development middleware**: `vite/plugins/promptcard-dev-storage.ts` exposes local-only endpoints for Prompt library data, project data, and dev server shutdown; `vite.config.ts` wires those plugins into Vite.
 - **Agent Runtime**: `agent-runtime/` contains the PromptCard boundary router/adapter plus DeerFlow-derived internals, DeepSeek model configuration, public skills, ToolUse catalog, and scripts for local runtime testing.
@@ -62,11 +64,11 @@ flowchart TD
 
 ### Project Flow
 
-Projects are represented by `IPromptProject`. Card projects persist `pages` and `currentPage`; storyboard projects persist a normalized `storyboard` structure; three-stage projects persist `threeStage`. The frontend loads and saves projects through `storage.projects`, which delegates to `/storage-api/api/projects` and no longer merges durable project data from browser storage after migration.
+Projects are represented by `IPromptProject`. Card projects persist `pages` and `currentPage`; storyboard projects persist a normalized `storyboard` structure; three-stage projects persist `threeStage`. The frontend loads and saves projects through `storage.projects`, which delegates to `/storage-api/projects` and no longer merges durable project data from browser storage after migration.
 
 ### Prompt Library Flow
 
-Prompt presets use the `IPreset` compatibility contract. The `preset.store` remains the UI state layer, but durable create/update/reorder/delete/usage-count operations go through `/storage-api/api/presets`. Empty-library seeding is handled by the storage service.
+Prompt presets use the `IPreset` compatibility contract. The `preset.store` remains the UI state layer, but durable create/update/reorder/delete/usage-count operations go through `/storage-api/presets`. Empty-library seeding is handled by the storage service.
 
 ### Agent Proposal Flow
 
@@ -93,12 +95,13 @@ The backend persists the DeepSeek-only configuration to `agent-runtime/.deer-flo
 
 In development, Vite proxies storage traffic to `promptcard-storage`:
 
-- `/storage-api/api/projects/*`
-- `/storage-api/api/presets/*`
-- `/storage-api/api/migrate/browser-cache`
+- `/storage-api/projects/*`
+- `/storage-api/presets/*`
+- `/storage-api/migrations/browser-cache`
+- `/storage-api/assets/*`
 - `/storage-api/health`
 
-The old `GET/PUT /__promptcard/presets`, `GET/PUT /__promptcard/projects`, and dev shutdown endpoints remain as compatibility middleware, but they are no longer the durable frontend storage path.
+The old `GET /__promptcard/presets` and `GET /__promptcard/projects` routes remain as read-only compatibility middleware. Their `PUT` forms return `410`; the dev shutdown endpoint remains local-only.
 
 ## Roadmap / Not Yet Implemented
 

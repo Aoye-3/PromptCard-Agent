@@ -4,11 +4,13 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .store import JsonCollectionStore, MissingItem, RevisionConflict
+from .store import AssetValidationError, DuplicateItem, JsonCollectionStore, MissingItem, RevisionConflict
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -51,14 +53,50 @@ class IdsPayload(BaseModel):
 
 
 class MigrationPayload(BaseModel):
+    migrationId: str = "browser-cache-v1"
     projects: list[dict[str, Any]] = Field(default_factory=list)
     workspace: dict[str, Any] | None = None
+    presets: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PresetBatchPayload(BaseModel):
     presets: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @app.get("/health")
 def health() -> dict[str, Any]:
     return store.health()
+
+
+@app.post("/api/assets")
+async def create_asset(request: Request) -> dict[str, Any]:
+    try:
+        chunks = bytearray()
+        async for chunk in request.stream():
+            chunks.extend(chunk)
+            if len(chunks) > 20 * 1024 * 1024:
+                raise AssetValidationError("Image must be between 1 byte and 20 MB")
+        return store.save_asset(
+            unquote(request.headers.get("x-file-name", "image")),
+            request.headers.get("content-type", ""),
+            bytes(chunks),
+        )
+    except AssetValidationError as exc:
+        raise _http_error(400, "invalid_asset", str(exc)) from exc
+
+
+@app.get("/api/assets/diagnostics")
+def diagnose_assets() -> dict[str, Any]:
+    return store.diagnose_assets()
+
+
+@app.get("/api/assets/{asset_id}")
+def get_asset(asset_id: str):
+    try:
+        path, content_type = store.get_asset(asset_id)
+        return FileResponse(path, media_type=content_type)
+    except MissingItem as exc:
+        raise _http_error(404, "not_found", "Asset not found") from exc
 
 
 @app.get("/api/projects")
@@ -78,7 +116,7 @@ def get_project(item_id: str) -> dict[str, Any]:
 
 @app.post("/api/projects")
 def create_project(item: dict[str, Any]) -> dict[str, Any]:
-    return store.create_project(item)
+    return _handle(lambda: store.create_project(item))
 
 
 @app.put("/api/projects/{item_id}")
@@ -119,7 +157,12 @@ def get_preset(item_id: str) -> dict[str, Any]:
 
 @app.post("/api/presets")
 def create_preset(item: dict[str, Any]) -> dict[str, Any]:
-    return store.create_preset(item)
+    return _handle(lambda: store.create_preset(item))
+
+
+@app.put("/api/presets/batch")
+def replace_presets(payload: PresetBatchPayload) -> dict[str, Any]:
+    return _handle(lambda: {"presets": store.replace_presets(payload.presets)})
 
 
 @app.put("/api/presets/{item_id}")
@@ -162,6 +205,17 @@ def _handle(callback):
     try:
         return callback()
     except MissingItem as exc:
-        raise HTTPException(status_code=404, detail="not found") from exc
+        raise _http_error(404, "not_found", "Storage item not found") from exc
+    except DuplicateItem as exc:
+        raise _http_error(409, "duplicate_item", "Storage item already exists", {"id": str(exc)}) from exc
     except RevisionConflict as exc:
-        raise HTTPException(status_code=409, detail={"message": "revision conflict", "current": exc.current}) from exc
+        raise _http_error(409, "revision_conflict", "Storage revision conflict", current=exc.current) from exc
+
+
+def _http_error(status: int, code: str, message: str, detail: Any = None, current: Any = None) -> HTTPException:
+    payload: dict[str, Any] = {"code": code, "message": message}
+    if detail is not None:
+        payload["detail"] = detail
+    if current is not None:
+        payload["current"] = current
+    return HTTPException(status_code=status, detail=payload)

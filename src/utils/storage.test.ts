@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 import localforage from 'localforage'
 import { storage } from './storage'
+import { storageServiceClient } from '@/storage/storage-service-client'
 import type { IPreset } from '@/models/Card.model'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 
@@ -78,6 +79,9 @@ beforeEach(async () => {
       return jsonResponse({ ...samplePreset, usageCount: 1, revision: 2 })
     }
     if (url === '/storage-api/presets/reorder') {
+      return jsonResponse({ presets: [samplePreset] })
+    }
+    if (url === '/storage-api/presets/batch') {
       return jsonResponse({ presets: [samplePreset] })
     }
     if (url === '/storage-api/presets/trash') {
@@ -173,6 +177,27 @@ describe('storage service facade', () => {
       })
     }))
     expect(fetch).not.toHaveBeenCalledWith('/storage-api/presets/preset-1', expect.objectContaining({ method: 'PUT' }))
+  })
+
+  test('uses one atomic request when replacing the prompt library', async () => {
+    await storage.presets.saveAll([samplePreset])
+
+    expect(fetch).toHaveBeenCalledWith('/storage-api/presets/batch', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ presets: [samplePreset] })
+    }))
+  })
+
+  test('exposes structured storage errors without matching message text', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({
+      detail: { code: 'service_version_incompatible', message: 'Upgrade required' }
+    }, 503))
+
+    await expect(storageServiceClient.projects.getAll()).rejects.toMatchObject({
+      status: 503,
+      code: 'service_version_incompatible',
+      message: 'Upgrade required'
+    })
   })
 
   test('keeps prompt history snapshots unique in browser UI cache', async () => {

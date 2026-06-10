@@ -19,152 +19,201 @@ export class StorageRevisionConflict<T> extends Error {
   }
 }
 
+export class StorageHttpError extends Error {
+  status: number
+  code: string
+  detail?: unknown
+
+  constructor(status: number, code: string, message: string, detail?: unknown) {
+    super(message)
+    this.name = 'StorageHttpError'
+    this.status = status
+    this.code = code
+    this.detail = detail
+  }
+}
+
 const JSON_HEADERS = {
   Accept: 'application/json',
   'Content-Type': 'application/json'
 }
 
+type ErrorEnvelope = {
+  detail?: {
+    code?: string
+    message?: string
+    detail?: unknown
+    current?: unknown
+  }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      ...JSON_HEADERS,
-      ...(init?.headers || {})
-    }
-  })
-
-  if (response.status === 409) {
-    const payload = await response.json()
-    throw new StorageRevisionConflict(payload.detail?.current)
+  const controller = new AbortController()
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 10_000)
+  let response: Response
+  try {
+    response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        ...JSON_HEADERS,
+        ...(init?.headers || {})
+      }
+    })
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === 'AbortError'
+    throw new StorageHttpError(
+      0,
+      timedOut ? 'timeout' : 'service_unavailable',
+      timedOut ? 'Storage request timed out.' : 'Storage service is unavailable.',
+      error
+    )
+  } finally {
+    globalThis.clearTimeout(timeoutId)
   }
 
+  const payload = await response.json().catch(() => null) as (T & ErrorEnvelope) | ErrorEnvelope | null
+  const storageError = (payload as ErrorEnvelope | null)?.detail
+
+  if (response.status === 409 && storageError?.code === 'revision_conflict') {
+    throw new StorageRevisionConflict(storageError.current)
+  }
   if (!response.ok) {
-    throw new Error(`Storage request failed: ${response.status}`)
+    throw new StorageHttpError(
+      response.status,
+      storageError?.code || 'storage_request_failed',
+      storageError?.message || `Storage request failed: ${response.status}`,
+      storageError?.detail
+    )
   }
-
-  return response.json() as Promise<T>
+  return payload as T
 }
 
 export const storageServiceClient = {
+  assets: {
+    async upload(file: File): Promise<{ id: string; filename: string; contentType: string; size: number }> {
+      const contentType = inferImageContentType(file)
+      if (!contentType) throw new StorageHttpError(400, 'invalid_asset', '仅支持 PNG、JPEG 和 WebP 图片。')
+      return request('/storage-api/assets', {
+        method: 'POST',
+        headers: {
+          'Content-Type': contentType,
+          'X-File-Name': encodeURIComponent(file.name)
+        },
+        body: file
+      })
+    },
+    url(assetId: string): string {
+      return `/storage-api/assets/${encodeURIComponent(assetId)}`
+    },
+    diagnostics(): Promise<{ unregisteredFiles: string[]; missingFiles: string[]; unreferencedAssets: string[]; missingReferences: string[] }> {
+      return request('/storage-api/assets/diagnostics')
+    }
+  },
   projects: {
     async getAll(): Promise<IPromptProject[]> {
-      const payload = await request<{ projects: IPromptProject[] }>('/storage-api/projects')
-      return payload.projects
+      return (await request<{ projects: IPromptProject[] }>('/storage-api/projects')).projects
     },
     async getById(id: string): Promise<IPromptProject | null> {
       try {
         return await request<IPromptProject>(`/storage-api/projects/${encodeURIComponent(id)}`)
       } catch (error) {
-        if (error instanceof Error && error.message.includes('404')) return null
+        if (error instanceof StorageHttpError && error.status === 404) return null
         throw error
       }
     },
-    async create(project: Partial<IPromptProject>): Promise<IPromptProject> {
-      return request<IPromptProject>('/storage-api/projects', {
-        method: 'POST',
-        body: JSON.stringify(project)
-      })
+    create(project: Partial<IPromptProject>): Promise<IPromptProject> {
+      return request('/storage-api/projects', { method: 'POST', body: JSON.stringify(project) })
     },
-    async update(id: string, revision: number, updates: Partial<IPromptProject>): Promise<IPromptProject> {
-      return request<IPromptProject>(`/storage-api/projects/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ revision, updates })
+    update(id: string, revision: number, updates: Partial<IPromptProject>): Promise<IPromptProject> {
+      return request(`/storage-api/projects/${encodeURIComponent(id)}`, {
+        method: 'PUT', body: JSON.stringify({ revision, updates })
       })
     },
     async trash(ids: string[], deletedBy: 'user' | 'agent' = 'user', deleteReason?: string): Promise<IPromptProject[]> {
-      const payload = await request<{ projects: IPromptProject[] }>('/storage-api/projects/trash', {
-        method: 'POST',
-        body: JSON.stringify({ ids, deletedBy, deleteReason })
-      })
-      return payload.projects
+      return (await request<{ projects: IPromptProject[] }>('/storage-api/projects/trash', {
+        method: 'POST', body: JSON.stringify({ ids, deletedBy, deleteReason })
+      })).projects
     },
     async getTrash(): Promise<TrashEntry<IPromptProject>[]> {
-      const payload = await request<{ items: TrashEntry<IPromptProject>[] }>('/storage-api/projects/trash')
-      return payload.items
+      return (await request<{ items: TrashEntry<IPromptProject>[] }>('/storage-api/projects/trash')).items
     },
     async restore(ids: string[]): Promise<IPromptProject[]> {
-      const payload = await request<{ projects: IPromptProject[] }>('/storage-api/projects/trash/restore', {
-        method: 'POST',
-        body: JSON.stringify({ ids })
-      })
-      return payload.projects
+      return (await request<{ projects: IPromptProject[] }>('/storage-api/projects/trash/restore', {
+        method: 'POST', body: JSON.stringify({ ids })
+      })).projects
     },
     async deleteForever(ids: string[]): Promise<void> {
-      await request<{ ok: boolean }>('/storage-api/projects/trash', {
-        method: 'DELETE',
-        body: JSON.stringify({ ids })
-      })
+      await request('/storage-api/projects/trash', { method: 'DELETE', body: JSON.stringify({ ids }) })
     }
   },
-
   presets: {
     async getAll(): Promise<IPreset[]> {
-      const payload = await request<{ presets: IPreset[] }>('/storage-api/presets')
-      return payload.presets
+      return (await request<{ presets: IPreset[] }>('/storage-api/presets')).presets
     },
     async getById(id: string): Promise<IPreset | undefined> {
       try {
         return await request<IPreset>(`/storage-api/presets/${encodeURIComponent(id)}`)
       } catch (error) {
-        if (error instanceof Error && error.message.includes('404')) return undefined
+        if (error instanceof StorageHttpError && error.status === 404) return undefined
         throw error
       }
     },
-    async create(preset: Partial<IPreset>): Promise<IPreset> {
-      return request<IPreset>('/storage-api/presets', {
-        method: 'POST',
-        body: JSON.stringify(preset)
+    create(preset: Partial<IPreset>): Promise<IPreset> {
+      return request('/storage-api/presets', { method: 'POST', body: JSON.stringify(preset) })
+    },
+    update(id: string, revision: number, updates: Partial<IPreset>): Promise<IPreset> {
+      return request(`/storage-api/presets/${encodeURIComponent(id)}`, {
+        method: 'PUT', body: JSON.stringify({ revision, updates })
       })
     },
-    async update(id: string, revision: number, updates: Partial<IPreset>): Promise<IPreset> {
-      return request<IPreset>(`/storage-api/presets/${encodeURIComponent(id)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ revision, updates })
-      })
+    async replaceAll(presets: IPreset[]): Promise<IPreset[]> {
+      return (await request<{ presets: IPreset[] }>('/storage-api/presets/batch', {
+        method: 'PUT', body: JSON.stringify({ presets })
+      })).presets
     },
     async reorder(orderedIds: string[], revisions: Record<string, number>): Promise<IPreset[]> {
-      const payload = await request<{ presets: IPreset[] }>('/storage-api/presets/reorder', {
-        method: 'POST',
-        body: JSON.stringify({ orderedIds, revisions })
-      })
-      return payload.presets
+      return (await request<{ presets: IPreset[] }>('/storage-api/presets/reorder', {
+        method: 'POST', body: JSON.stringify({ orderedIds, revisions })
+      })).presets
     },
-    async incrementUsage(id: string, revision: number): Promise<IPreset> {
-      return request<IPreset>(`/storage-api/presets/${encodeURIComponent(id)}/increment-usage`, {
-        method: 'POST',
-        body: JSON.stringify({ revision })
+    incrementUsage(id: string, revision: number): Promise<IPreset> {
+      return request(`/storage-api/presets/${encodeURIComponent(id)}/increment-usage`, {
+        method: 'POST', body: JSON.stringify({ revision })
       })
     },
     async trash(ids: string[], deletedBy: 'user' | 'agent' = 'user', deleteReason?: string): Promise<IPreset[]> {
-      const payload = await request<{ presets: IPreset[] }>('/storage-api/presets/trash', {
-        method: 'POST',
-        body: JSON.stringify({ ids, deletedBy, deleteReason })
-      })
-      return payload.presets
+      return (await request<{ presets: IPreset[] }>('/storage-api/presets/trash', {
+        method: 'POST', body: JSON.stringify({ ids, deletedBy, deleteReason })
+      })).presets
     },
     async getTrash(): Promise<TrashEntry<IPreset>[]> {
-      const payload = await request<{ items: TrashEntry<IPreset>[] }>('/storage-api/presets/trash')
-      return payload.items
+      return (await request<{ items: TrashEntry<IPreset>[] }>('/storage-api/presets/trash')).items
     },
     async restore(ids: string[]): Promise<IPreset[]> {
-      const payload = await request<{ presets: IPreset[] }>('/storage-api/presets/trash/restore', {
-        method: 'POST',
-        body: JSON.stringify({ ids })
-      })
-      return payload.presets
+      return (await request<{ presets: IPreset[] }>('/storage-api/presets/trash/restore', {
+        method: 'POST', body: JSON.stringify({ ids })
+      })).presets
     },
     async deleteForever(ids: string[]): Promise<void> {
-      await request<{ ok: boolean }>('/storage-api/presets/trash', {
-        method: 'DELETE',
-        body: JSON.stringify({ ids })
-      })
+      await request('/storage-api/presets/trash', { method: 'DELETE', body: JSON.stringify({ ids }) })
     }
   },
-
-  async migrateBrowserCache(payload: { projects?: IPromptProject[]; workspace?: unknown; presets?: IPreset[] }): Promise<{ projects: number; presets: number }> {
-    return request<{ projects: number; presets: number }>('/storage-api/migrations/browser-cache', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    })
+  migrateBrowserCache(payload: {
+    migrationId: string
+    projects?: IPromptProject[]
+    workspace?: unknown
+    presets?: IPreset[]
+  }): Promise<{ projects: number; presets: number; alreadyApplied: boolean }> {
+    return request('/storage-api/migrations/browser-cache', { method: 'POST', body: JSON.stringify(payload) })
   }
+}
+
+const inferImageContentType = (file: File): string | null => {
+  if (['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return file.type
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  if (extension === 'png') return 'image/png'
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
+  if (extension === 'webp') return 'image/webp'
+  return null
 }

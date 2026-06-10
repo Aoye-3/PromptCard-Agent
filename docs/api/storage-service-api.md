@@ -4,9 +4,30 @@ The local storage service is the durable source of truth for projects and Prompt
 
 ## Health
 
+`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, and `backup`.
+
 - `GET /health`
 
 Returns service status and the active data directory.
+
+## Image Assets
+
+- `POST /api/assets`
+- `GET /api/assets/{asset_id}`
+- `GET /api/assets/diagnostics`
+
+Asset uploads send the image bytes as the request body, the MIME type in `Content-Type`, and the original filename in `X-File-Name`. The service accepts static PNG, JPEG, and WebP files up to 20 MB and returns:
+
+```json
+{
+  "id": "generated-id.png",
+  "filename": "storyboard.png",
+  "contentType": "image/png",
+  "size": 12345
+}
+```
+
+The generated ID is safe to persist in project metadata. The read endpoint serves the original bytes with their stored image content type. Invalid types, empty or oversized bodies return `400`; unknown or malformed IDs return `404`.
 
 ## Projects
 
@@ -40,6 +61,7 @@ Network failures and exhausted retries leave the newest local snapshot pending. 
 - `GET /api/presets/{id}`
 - `POST /api/presets`
 - `PUT /api/presets/{id}`
+- `PUT /api/presets/batch`
 - `POST /api/presets/reorder`
 - `POST /api/presets/{id}/increment-usage`
 - `POST /api/presets/trash`
@@ -47,11 +69,11 @@ Network failures and exhausted retries leave the newest local snapshot pending. 
 - `POST /api/presets/trash/restore`
 - `DELETE /api/presets/trash`
 
-Preset updates and usage increments also require the current `revision`. Empty preset storage is seeded by the service from `public/prompt-library-presets.json`; the frontend no longer creates durable default presets.
+Preset updates and usage increments require the current revision. The batch endpoint atomically replaces the active Prompt Library: every supplied existing item must have its current revision, new IDs are inserted, and omitted active items move to Trash.
 
 ## Trash Payloads
 
-Project and preset Trash entries are stored separately from active collections:
+Project and preset Trash entries are API projections over records whose SQLite status is `trash`:
 
 ```json
 {
@@ -69,4 +91,8 @@ Active list endpoints never return Trash entries.
 
 - `POST /api/migrations/browser-cache`
 
-The frontend calls this once for legacy browser `projects`, `workspace`, and `presets`, then writes a browser migration marker. After that marker exists, project and preset reads use only the storage service.
+The request includes `migrationId`. Repeating a completed ID returns `alreadyApplied: true` without importing again. The complete import is transactional.
+
+## Errors
+
+Errors use FastAPI's `detail` envelope with `code`, `message`, optional `detail`, and optional `current`. Defined codes include `not_found`, `duplicate_item`, `revision_conflict`, and `invalid_asset`.

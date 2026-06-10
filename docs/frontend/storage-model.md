@@ -14,14 +14,20 @@ The primary durable endpoint is:
 
 - `/storage-api/*` -> `http://127.0.0.1:8002/api/*`
 
-When the Vite dev server is available, legacy helpers still expose:
+When the Vite dev server is available, legacy helpers expose read-only migration views:
 
 - `/__promptcard/presets`
 - `/__promptcard/projects`
 
-Project and preset writes do not fall back to browser storage. If the storage service is unavailable, those durable operations fail visibly.
+`PUT` to either legacy endpoint returns `410`. Project and preset writes never fall back to JSON or browser storage.
+
+The storage client uses structured `StorageHttpError`, a ten-second timeout, and status-based `404` handling. Revision conflicts remain a separate typed error used by the project save coordinator.
 
 The Vite middleware implementation for these endpoints lives in `vite/plugins/promptcard-dev-storage.ts`. `vite.config.ts` only wires the plugins into the dev server.
+
+## Image Assets
+
+Free-canvas images are uploaded through `/storage-api/assets`. Project JSON stores the returned `assetId`, never Base64 image data. Original and cropped nodes can therefore share one durable file without increasing project write size; cropped nodes add only normalized crop coordinates and their source node reference.
 
 ## Project Normalization
 

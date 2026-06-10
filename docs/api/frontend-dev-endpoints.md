@@ -11,9 +11,7 @@ GET /__promptcard/presets
 PUT /__promptcard/presets
 ```
 
-Backed by `data/prompt-library-presets.json`.
-
-`PUT` validates that every preset has string `id`, `type`, `category`, `label`, `content`, numeric `usageCount`, and object `meta`.
+`GET` reads the legacy JSON migration source. `PUT` returns `410 Gone`; durable Prompt Library writes use `/storage-api/presets` and SQLite.
 
 ## Projects
 
@@ -22,9 +20,7 @@ GET /__promptcard/projects
 PUT /__promptcard/projects
 ```
 
-Backed by `data/projects.json`.
-
-`PUT` validates that every project has string `id` and `title`, one of `card`, `storyboard`, or `three-stage` as `type`, array `pages`, numeric timestamps, numeric `currentPage`, and object `meta`.
+`GET` reads the legacy JSON migration source. `PUT` returns `410 Gone`; durable project writes use `/storage-api/projects` and SQLite.
 
 ## Dev Server Control
 

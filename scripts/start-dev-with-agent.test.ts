@@ -26,7 +26,7 @@ afterEach(async () => {
 function startHealthyServer() {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'application/json' })
-    response.end('{"ok":true}')
+    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":1,"capabilities":{"assets":true,"sqlite":true}}')
   })
 
   return new Promise<string>((resolve) => {
@@ -37,6 +37,27 @@ function startHealthyServer() {
         throw new Error('Expected a TCP server address')
       }
       resolve(`http://127.0.0.1:${address.port}/health`)
+    })
+  })
+}
+
+function startHealthyFrontendServer() {
+  const server = createServer((request, response) => {
+    if (request.url === '/src/main.tsx') {
+      response.writeHead(200, { 'content-type': 'application/javascript' })
+      response.end('import React from "/node_modules/.vite/deps/react.js?v=test"')
+      return
+    }
+    response.writeHead(200, { 'content-type': 'text/html' })
+    response.end('<script type="module" src="/src/main.tsx"></script>')
+  })
+
+  return new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      servers.push(server)
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('Expected a TCP server address')
+      resolve(`http://127.0.0.1:${address.port}/`)
     })
   })
 }
@@ -79,6 +100,11 @@ async function expectScriptSupportsTestParameters() {
   expect(script).toContain('$AgentHealthUrl')
   expect(script).toContain('$FrontendUrl')
   expect(script).toContain('$FrontendCommand')
+  expect(script).toContain('$payload.capabilities.sqlite')
+  expect(script).toContain('Stop-StaleStorageListener')
+  expect(script).toContain('Stop-StaleFrontendListener')
+  expect(script).toContain('unoptimized CommonJS React modules')
+  expect(script).toContain('refusing to stop it')
 }
 
 describe('start-dev-with-agent.ps1', () => {
@@ -100,7 +126,7 @@ describe('start-dev-with-agent.ps1', () => {
     const [storageUrl, agentUrl, frontendUrl] = await Promise.all([
       startHealthyServer(),
       startHealthyServer(),
-      startHealthyServer()
+      startHealthyFrontendServer()
     ])
     const marker = await makeMarkerCommand('frontend-started.txt')
 

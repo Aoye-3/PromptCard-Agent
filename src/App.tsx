@@ -22,12 +22,13 @@ import { createBuilderTemplateProjectTitle, getBuilderTemplateById } from './dom
 import type { BuilderTemplateId } from './domain/builder-templates/builder-templates'
 import { sortProjects } from './domain/projects/project-normalization'
 import { mergeStoredProjectMetadata } from './domain/projects/project-storage-merge'
+import { createProjectSaveCoordinator, type ProjectSaveResult } from './domain/projects/project-save-coordinator'
 import type { IPreset, CardType } from './models/Card.model'
 import type { IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
 import type { IUserSettings } from './models/UserSettings.model'
 import type { MainTab, ProjectMode, SaveStatus } from './features/app/app-types'
-import { StorageRevisionConflict, type TrashEntry } from './storage/storage-service-client'
+import type { TrashEntry } from './storage/storage-service-client'
 
 const DEFAULT_USER_SETTINGS: IUserSettings = {
   theme: 'light',
@@ -84,8 +85,8 @@ function App() {
   const [showProjectTrash, setShowProjectTrash] = useState(false)
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
   const [isHydrated, setIsHydrated] = useState(false)
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('loading')
-  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
+  const [appSaveStatus, setAppSaveStatus] = useState<SaveStatus>('loading')
+  const [projectSaveStates, setProjectSaveStates] = useState<Record<string, { status: SaveStatus; lastSavedAt: number | null }>>({})
   const [promptHistory, setPromptHistory] = useState<IPromptHistory[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [showAddCardModal, setShowAddCardModal] = useState(false)
@@ -100,12 +101,28 @@ function App() {
   const lastHistoryContentRef = useRef('')
   const projectEditSeqRef = useRef<Record<string, number>>({})
   const lastCardWorkspaceSnapshotRef = useRef('')
+  const activeProjectRef = useRef<IPromptProject | null>(null)
+  const projectSaveCoordinatorRef = useRef<ReturnType<typeof createProjectSaveCoordinator> | null>(null)
+  if (!projectSaveCoordinatorRef.current) {
+    projectSaveCoordinatorRef.current = createProjectSaveCoordinator({
+      create: project => storage.projects.persistCreated(project),
+      update: async (id, revision, updates) => {
+        const updatedProject = await storage.projects.update(id, updates, { revision })
+        if (!updatedProject) throw new Error(`Project ${id} was not found while saving.`)
+        return updatedProject
+      }
+    })
+  }
+  const projectSaveCoordinator = projectSaveCoordinatorRef.current
 
   const currentCards = pages[currentPage]?.cards || []
   const currentPrompt = assemblePrompt(pages)
   const allCards = useMemo(() => pages.flatMap(page => page.cards), [pages])
   const duplicateResult = useMemo(() => findDuplicatePhrases(allCards), [allCards])
   const activeProject = projects.find(project => project.id === activeProjectId) || null
+  const activeProjectSaveState = activeProjectId ? projectSaveStates[activeProjectId] : undefined
+  const saveStatus = activeProjectSaveState?.status || appSaveStatus
+  const lastSavedAt = activeProjectSaveState?.lastSavedAt || null
   const storyboardSnapshot = useMemo(
     () => activeProject?.type === 'storyboard' ? JSON.stringify(activeProject.storyboard || null) : '',
     [activeProject]
@@ -116,6 +133,10 @@ function App() {
   )
   const activePresetCard = activePresetCardId ? currentCards.find(card => card.id === activePresetCardId) : null
   const presetsForActiveCard = activePresetCard ? getPresetsByType(activePresetCard.type) : []
+
+  useEffect(() => {
+    activeProjectRef.current = activeProject
+  }, [activeProject])
 
   const upsertProject = useCallback((project: IPromptProject) => {
     setProjects(currentProjects => sortProjects([
@@ -135,6 +156,20 @@ function App() {
   }, [])
 
   const getProjectEditSeq = useCallback((projectId: string) => projectEditSeqRef.current[projectId] || 0, [])
+
+  const setProjectSaveStatus = useCallback((projectId: string, status: SaveStatus, savedAt?: number) => {
+    setProjectSaveStates(current => ({
+      ...current,
+      [projectId]: {
+        status,
+        lastSavedAt: savedAt ?? current[projectId]?.lastSavedAt ?? null
+      }
+    }))
+  }, [])
+
+  const canConfirmProjectSaved = useCallback((projectId: string, editSeq: number) => (
+    getProjectEditSeq(projectId) === editSeq && !projectSaveCoordinator.hasPending(projectId)
+  ), [getProjectEditSeq, projectSaveCoordinator])
 
   const confirmAutoSavedProject = useCallback((project: IPromptProject, savedAt: number, editSeq: number) => {
     setProjects(currentProjects => {
@@ -157,17 +192,27 @@ function App() {
     })
   }, [])
 
-  const handleProjectSaveError = useCallback((error: unknown, message: string) => {
-    if (error instanceof StorageRevisionConflict && error.current) {
-      confirmStoredProjectMetadata(error.current)
-      setSaveStatus('saving')
-      return true
-    }
-
+  const handleProjectSaveError = useCallback((projectId: string, error: unknown, message: string) => {
     console.error(message, error)
-    setSaveStatus('error')
-    return false
-  }, [confirmStoredProjectMetadata])
+    setProjectSaveStatus(projectId, 'error')
+  }, [setProjectSaveStatus])
+
+  const persistProjectChanges = useCallback(async (
+    project: IPromptProject,
+    updates: Partial<IPromptProject>,
+    editSeq: number,
+    savedAt: number,
+    errorMessage: string
+  ): Promise<ProjectSaveResult> => {
+    const snapshot = { ...project, ...updates }
+    const result = await projectSaveCoordinator.enqueue({ project: snapshot, editSeq })
+    if (result.status === 'saved' && result.project) {
+      confirmAutoSavedProject(result.project, savedAt, editSeq)
+    } else if (result.status === 'failed') {
+      handleProjectSaveError(project.id, result.error, errorMessage)
+    }
+    return result
+  }, [confirmAutoSavedProject, handleProjectSaveError, projectSaveCoordinator])
 
   const removeProjectsFromState = useCallback((ids: string[]) => {
     const idSet = new Set(ids)
@@ -254,10 +299,10 @@ function App() {
         setPromptHistory(history)
         setUserSettings(settings)
         lastHistoryContentRef.current = history[0]?.content || ''
-        setSaveStatus('saved')
+        setAppSaveStatus('saved')
       } catch (error) {
         console.error('Failed to load app data:', error)
-        setSaveStatus('error')
+        setAppSaveStatus('error')
       } finally {
         if (!cancelled) {
           setIsHydrated(true)
@@ -273,25 +318,25 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'card') return
+    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProjectRef.current?.type !== 'card') return
 
     const timeoutId = window.setTimeout(async () => {
       try {
-        setSaveStatus('saving')
+        const project = activeProjectRef.current
+        if (!project || project.id !== activeProjectId || project.type !== 'card') return
+        setProjectSaveStatus(activeProjectId, 'saving')
         const savedAt = Date.now()
         const editSeq = getProjectEditSeq(activeProjectId)
-        const updatedProject = await storage.projects.update(activeProjectId, {
+        const result = await persistProjectChanges(project, {
           pages,
           currentPage,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        }, { revision: activeProject.revision })
+        }, editSeq, savedAt, 'Auto-save failed:')
+        if (result.status === 'failed') return
         await storage.workspace.save({ pages, currentPage, savedAt })
 
-        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
-        if (updatedProject) {
-          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
-        }
+        const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
 
         const trimmedPrompt = currentPrompt.trim()
         if (saveIsCurrent && trimmedPrompt && trimmedPrompt !== lastHistoryContentRef.current) {
@@ -299,7 +344,7 @@ function App() {
             content: trimmedPrompt,
             cards: allCards,
             pages,
-            title: `${activeProject?.title || 'Project'}  Auto ${new Date(savedAt).toLocaleString()}`,
+            title: `${project.title || 'Project'}  Auto ${new Date(savedAt).toLocaleString()}`,
             meta: { source: 'auto-save', projectId: activeProjectId }
           })
 
@@ -309,108 +354,100 @@ function App() {
           }
         }
 
-        if (saveIsCurrent) {
-          setLastSavedAt(savedAt)
-          setSaveStatus('saved')
+        if (result.status === 'saved' && saveIsCurrent) {
+          setProjectSaveStatus(activeProjectId, 'saved', savedAt)
         }
       } catch (error) {
-        handleProjectSaveError(error, 'Auto-save failed:')
+        handleProjectSaveError(activeProjectId, error, 'Auto-save failed:')
       }
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.title, activeProject?.type, activeProjectId, allCards, confirmAutoSavedProject, currentPage, currentPrompt, getProjectEditSeq, handleProjectSaveError, isHydrated, pages, projectMode, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProjectId, allCards, canConfirmProjectSaved, currentPage, currentPrompt, getProjectEditSeq, handleProjectSaveError, isHydrated, pages, persistProjectChanges, projectMode, setProjectSaveStatus, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
-    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'storyboard' || !activeProject.storyboard) return
+    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || !storyboardSnapshot) return
 
     const timeoutId = window.setTimeout(async () => {
       try {
-        setSaveStatus('saving')
+        const project = activeProjectRef.current
+        if (!project || project.id !== activeProjectId || project.type !== 'storyboard' || !project.storyboard) return
+        setProjectSaveStatus(activeProjectId, 'saving')
         const savedAt = Date.now()
         const editSeq = getProjectEditSeq(activeProjectId)
-        const updatedProject = await storage.projects.update(activeProjectId, {
-          storyboard: activeProject.storyboard,
+        const result = await persistProjectChanges(project, {
+          storyboard: project.storyboard,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        }, { revision: activeProject.revision })
+        }, editSeq, savedAt, 'Storyboard auto-save failed:')
+        if (result.status === 'failed') return
 
-        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
-        if (updatedProject) {
-          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
-        }
-
-        if (saveIsCurrent) {
-          setLastSavedAt(savedAt)
-          setSaveStatus('saved')
+        const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
+        if (result.status === 'saved' && saveIsCurrent) {
+          setProjectSaveStatus(activeProjectId, 'saved', savedAt)
         }
       } catch (error) {
-        handleProjectSaveError(error, 'Storyboard auto-save failed:')
+        handleProjectSaveError(activeProjectId, error, 'Storyboard auto-save failed:')
       }
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.storyboard, activeProject?.type, activeProjectId, confirmAutoSavedProject, getProjectEditSeq, handleProjectSaveError, isHydrated, projectMode, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProjectId, canConfirmProjectSaved, getProjectEditSeq, handleProjectSaveError, isHydrated, persistProjectChanges, projectMode, setProjectSaveStatus, storyboardSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   useEffect(() => {
-    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'three-stage' || !activeProject.threeStage) return
+    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || !threeStageSnapshot) return
 
     const timeoutId = window.setTimeout(async () => {
       try {
-        setSaveStatus('saving')
+        const project = activeProjectRef.current
+        if (!project || project.id !== activeProjectId || project.type !== 'three-stage' || !project.threeStage) return
+        setProjectSaveStatus(activeProjectId, 'saving')
         const savedAt = Date.now()
         const editSeq = getProjectEditSeq(activeProjectId)
-        const updatedProject = await storage.projects.update(activeProjectId, {
-          threeStage: activeProject.threeStage,
+        const result = await persistProjectChanges(project, {
+          threeStage: project.threeStage,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        }, { revision: activeProject.revision })
+        }, editSeq, savedAt, 'Three-stage auto-save failed:')
+        if (result.status === 'failed') return
 
-        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
-        if (updatedProject) {
-          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
-        }
-
-        if (saveIsCurrent) {
-          setLastSavedAt(savedAt)
-          setSaveStatus('saved')
+        const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
+        if (result.status === 'saved' && saveIsCurrent) {
+          setProjectSaveStatus(activeProjectId, 'saved', savedAt)
         }
       } catch (error) {
-        handleProjectSaveError(error, 'Three-stage auto-save failed:')
+        handleProjectSaveError(activeProjectId, error, 'Three-stage auto-save failed:')
       }
     }, userSettings.autoSaveIdleSeconds * 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [activeProject?.revision, activeProject?.threeStage, activeProject?.type, activeProjectId, confirmAutoSavedProject, getProjectEditSeq, handleProjectSaveError, isHydrated, projectMode, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+  }, [activeProjectId, canConfirmProjectSaved, getProjectEditSeq, handleProjectSaveError, isHydrated, persistProjectChanges, projectMode, setProjectSaveStatus, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
   const handleCreateProject = () => {
     setShowCreateProjectModal(true)
   }
 
   const handleCreateCardProject = async () => {
-    const newProject = await storage.projects.create({
+    const newProject = storage.projects.createDraft({
       title: `未命名项目 ${projects.length + 1}`,
       pages: [createInitialPage()],
       currentPage: 0
     })
-    setShowCreateProjectModal(false)
-    openProject(newProject, { touchLastOpened: false })
+    await createProjectOptimistically(newProject)
   }
 
   const handleCreateStoryboardProject = async () => {
-    const newProject = await storage.projects.createStoryboard({
+    const newProject = storage.projects.createStoryboardDraft({
       title: `分镜项目 ${projects.filter(project => project.type === 'storyboard').length + 1}`
     })
-    setShowCreateProjectModal(false)
-    openProject(newProject, { touchLastOpened: false })
+    await createProjectOptimistically(newProject)
   }
 
   const handleCreateThreeStageProject = async () => {
-    const newProject = await storage.projects.createThreeStage({
+    const newProject = storage.projects.createThreeStageDraft({
       title: `三段式项目 ${projects.filter(project => project.type === 'three-stage').length + 1}`
     })
-    setShowCreateProjectModal(false)
-    openProject(newProject, { touchLastOpened: false })
+    await createProjectOptimistically(newProject)
   }
 
   const handleCreateProjectFromTemplate = async (templateId: BuilderTemplateId, snapshot?: BuilderModePreviewSnapshot) => {
@@ -418,19 +455,18 @@ function App() {
     const title = createBuilderTemplateProjectTitle(template, projects)
     const meta = { builderTemplateId: template.id }
     const newProject = template.projectType === 'storyboard'
-      ? await storage.projects.createStoryboard({ title, storyboard: snapshot?.storyboard, meta })
+      ? storage.projects.createStoryboardDraft({ title, storyboard: snapshot?.storyboard, meta })
       : template.projectType === 'three-stage'
-        ? await storage.projects.createThreeStage({ title, threeStage: snapshot?.threeStage, meta })
-        : await storage.projects.create({
+        ? storage.projects.createThreeStageDraft({ title, threeStage: snapshot?.threeStage, meta })
+        : storage.projects.createDraft({
             title,
             pages: snapshot?.pages?.length ? snapshot.pages : [createInitialPage()],
             currentPage: snapshot?.currentPage || 0,
             meta
           })
 
-    setShowCreateProjectModal(false)
     setShowTemplateLibrary(false)
-    openProject(newProject, { touchLastOpened: false })
+    await createProjectOptimistically(newProject)
   }
 
   const openProject = async (project: IPromptProject, options: { touchLastOpened?: boolean } = {}) => {
@@ -454,16 +490,14 @@ function App() {
 
     if (!touchLastOpened) return
 
-    try {
-      const updatedProject = await storage.projects.setLastOpened(project.id, {
-        revision: project.revision,
-        projects
-      })
-      if (updatedProject) {
-        confirmStoredProjectMetadata(updatedProject, { savedAt: openedAt })
-      }
-    } catch (error) {
-      handleProjectSaveError(error, 'Failed to update project last opened time:')
+    const result = await projectSaveCoordinator.enqueue({
+      project: optimisticProject,
+      editSeq: getProjectEditSeq(project.id)
+    })
+    if (result.status === 'saved' && result.project) {
+      confirmStoredProjectMetadata(result.project, { savedAt: openedAt })
+    } else if (result.status === 'failed') {
+      handleProjectSaveError(project.id, result.error, 'Failed to update project last opened time:')
     }
   }
 
@@ -499,7 +533,7 @@ function App() {
       setActiveProjectId(previousActiveProjectId)
       setProjectMode(previousProjectMode)
       restoreWorkspace(previousWorkspace)
-      setSaveStatus('error')
+      setAppSaveStatus('error')
       alert('Failed to delete project.')
     }
   }
@@ -544,7 +578,7 @@ function App() {
       setProjectMode(previousProjectMode)
       restoreWorkspace(previousWorkspace)
       setSelectedProjectIds(idsToTrash)
-      setSaveStatus('error')
+      setAppSaveStatus('error')
       alert('Failed to move projects to trash.')
     }
   }
@@ -574,7 +608,7 @@ function App() {
       setProjects(previousProjects)
       setProjectTrash(previousProjectTrash)
       setSelectedProjectTrashIds(idsToRestore)
-      setSaveStatus('error')
+      setAppSaveStatus('error')
       alert('Failed to restore projects.')
     }
   }
@@ -594,7 +628,7 @@ function App() {
       console.error('Failed to permanently delete projects:', error)
       setProjectTrash(previousProjectTrash)
       setSelectedProjectTrashIds(idsToDelete)
-      setSaveStatus('error')
+      setAppSaveStatus('error')
       alert('Failed to permanently delete projects.')
     }
   }
@@ -612,16 +646,22 @@ function App() {
       return
     }
 
-    try {
-      const updatedProject = await storage.projects.update(renameProject.id, {
-        title: nextTitle,
-        updatedAt: Date.now()
-      }, { revision: renameProject.revision })
-      if (updatedProject) {
-        confirmStoredProjectMetadata(updatedProject, { includeTitle: true })
+    const optimisticProject = { ...renameProject, title: nextTitle, updatedAt: Date.now() }
+    markProjectEdited(renameProject.id)
+    const editSeq = getProjectEditSeq(renameProject.id)
+    upsertProject(optimisticProject)
+    setProjectSaveStatus(renameProject.id, 'saving')
+    const result = await projectSaveCoordinator.enqueue({
+      project: optimisticProject,
+      editSeq
+    })
+    if (result.status === 'saved' && result.project) {
+      confirmStoredProjectMetadata(result.project, { includeTitle: true })
+      if (canConfirmProjectSaved(renameProject.id, editSeq)) {
+        setProjectSaveStatus(renameProject.id, 'saved', optimisticProject.updatedAt)
       }
-    } catch (error) {
-      handleProjectSaveError(error, 'Failed to rename project:')
+    } else if (result.status === 'failed') {
+      handleProjectSaveError(renameProject.id, result.error, 'Failed to rename project:')
     }
     setRenameProject(null)
     setRenameProjectTitle('')
@@ -682,52 +722,57 @@ function App() {
   }
 
   const handleSave = async () => {
-    if (!activeProjectId) return
+    if (!activeProjectId || !activeProject) return
     try {
+      setProjectSaveStatus(activeProjectId, 'saving')
       const savedAt = Date.now()
       const editSeq = getProjectEditSeq(activeProjectId)
       if (activeProject?.type === 'storyboard') {
-        const updatedProject = await storage.projects.update(activeProjectId, {
+        const result = await persistProjectChanges(activeProject, {
           storyboard: activeProject.storyboard,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        }, { revision: activeProject.revision })
-        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
-        if (updatedProject) {
-          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
+        }, editSeq, savedAt, 'Save failed:')
+        if (result.status === 'failed') {
+          alert(t('saveFailed'))
+          return
         }
-        if (saveIsCurrent) {
-          setLastSavedAt(savedAt)
-          setSaveStatus('saved')
+        const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
+        if (result.status === 'saved' && saveIsCurrent) {
+          setProjectSaveStatus(activeProjectId, 'saved', savedAt)
+          alert(t('saveSuccess'))
         }
-        alert(t('saveSuccess'))
         return
       }
 
       if (activeProject?.type === 'three-stage') {
-        const updatedProject = await storage.projects.update(activeProjectId, {
+        const result = await persistProjectChanges(activeProject, {
           threeStage: activeProject.threeStage,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
-        }, { revision: activeProject.revision })
-        const saveIsCurrent = getProjectEditSeq(activeProjectId) === editSeq
-        if (updatedProject) {
-          confirmAutoSavedProject(updatedProject, savedAt, editSeq)
+        }, editSeq, savedAt, 'Save failed:')
+        if (result.status === 'failed') {
+          alert(t('saveFailed'))
+          return
         }
-        if (saveIsCurrent) {
-          setLastSavedAt(savedAt)
-          setSaveStatus('saved')
+        const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
+        if (result.status === 'saved' && saveIsCurrent) {
+          setProjectSaveStatus(activeProjectId, 'saved', savedAt)
+          alert(t('saveSuccess'))
         }
-        alert(t('saveSuccess'))
         return
       }
 
-      const updatedProject = await storage.projects.update(activeProjectId, {
+      const result = await persistProjectChanges(activeProject, {
         pages,
         currentPage,
         updatedAt: savedAt,
         lastOpenedAt: savedAt
-      }, { revision: activeProject?.revision })
+      }, editSeq, savedAt, 'Save failed:')
+      if (result.status === 'failed') {
+        alert(t('saveFailed'))
+        return
+      }
       await storage.workspace.save({ pages, currentPage, savedAt })
 
       if (currentPrompt.trim()) {
@@ -745,16 +790,34 @@ function App() {
         }
       }
 
-      setLastSavedAt(savedAt)
-      setSaveStatus('saved')
-      if (updatedProject) {
-        confirmAutoSavedProject(updatedProject, savedAt, editSeq)
+      if (result.status === 'saved' && canConfirmProjectSaved(activeProjectId, editSeq)) {
+        setProjectSaveStatus(activeProjectId, 'saved', savedAt)
+        alert(t('saveSuccess'))
       }
-      alert(t('saveSuccess'))
     } catch (error) {
-      if (!handleProjectSaveError(error, 'Save failed:')) {
-        alert(t('saveFailed'))
-      }
+      handleProjectSaveError(activeProjectId, error, 'Save failed:')
+      alert(t('saveFailed'))
+    }
+  }
+
+  const createProjectOptimistically = async (project: IPromptProject): Promise<void> => {
+    setShowCreateProjectModal(false)
+    projectSaveCoordinator.markPendingCreate(project)
+    void openProject(project, { touchLastOpened: false })
+    setProjectSaveStatus(project.id, 'saving')
+    const result = await projectSaveCoordinator.enqueue({
+      project,
+      editSeq: getProjectEditSeq(project.id)
+    })
+    if (result.status === 'saved' && result.project) {
+      confirmStoredProjectMetadata(result.project, { savedAt: Date.now() })
+      setProjectSaveStatus(
+        project.id,
+        canConfirmProjectSaved(project.id, result.editSeq) ? 'saved' : 'saving',
+        Date.now()
+      )
+    } else if (result.status === 'failed') {
+      handleProjectSaveError(project.id, result.error, 'Failed to create project:')
     }
   }
 

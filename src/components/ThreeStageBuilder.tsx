@@ -691,7 +691,7 @@ const StageFormCard = ({
         <div className="mb-2 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">Three-stage</span>
-            {form.type !== 'character' && (
+            {form.type !== 'character' && form.type !== 'object' && (
               <span className="inline-flex items-center gap-1 rounded-full bg-gray-950 px-2 py-0.5 text-[11px] font-bold text-white">
                 <Link2 className="h-3 w-3" />
                 绑定组 #{form.number}
@@ -705,7 +705,7 @@ const StageFormCard = ({
               event.stopPropagation()
               onRemove()
             }}
-            title={form.type === 'character' ? '删除人物版' : '删除绑定组'}
+            title={form.type === 'character' ? '删除人物版' : form.type === 'object' ? '删除物品版' : '删除绑定组'}
           >
             <Trash2 className="h-4 w-4" />
           </button>

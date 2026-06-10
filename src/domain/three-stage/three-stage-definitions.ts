@@ -28,19 +28,20 @@ export type StageDefinition = {
   description: string
   fields: FieldDefinition[]
   layout?: StageLayoutItem[]
-  buildOutput: (fields: Record<string, string>, project?: IThreeStageProject) => string
+  buildOutput: (
+    fields: Record<string, string>,
+    project?: IThreeStageProject,
+    fixedContent?: Record<string, string>
+  ) => string
 }
 
 export type StageLayoutItem =
   | { type: 'locked'; id: string; text: string }
   | { type: 'field'; fieldId: string }
 
-export const valueOf = (fields: Record<string, string>, key: string) => fields[key]?.trim() || ''
+export type FixedContentOverrides = Record<string, { value: string; unlocked?: boolean }>
 
-export const fixedValueOf = (fieldId: string) => {
-  const field = getStageDefinition('videoPrompt').fields.find(candidate => candidate.id === fieldId)
-  return field?.fixedValue?.trim() || ''
-}
+export const valueOf = (fields: Record<string, string>, key: string) => fields[key]?.trim() || ''
 
 export const toggleAllows = (fields: Record<string, string>, key: string) => fields[key] !== 'false'
 export const toggleEnabled = (fields: Record<string, string>, key: string, defaultValue = true) =>
@@ -109,6 +110,74 @@ export const buildStoryboardInjectionForVideo = (fields: Record<string, string>)
     valueOf(fields, 'storyMotion') && `故事节奏：${bracketValue(fields, 'storyMotion')}`
   ])
 }
+
+const objectBoardReference = `创建一张艺术性的 16:9 物品设定身份板。
+
+[主体]：使用参考图像中的物品。`
+
+const objectBoardFixedBody = `纯白色 / 柔和米白色背景。
+无环境、无道具、无标志、无水印。
+画面中不要出现任何文字、标题、标签、编号、箭头说明或可读批注。
+
+固定批注：
+只做多角度参考，不要直接整体作为画面主体物。
+
+设计方向：
+不要创建标准的产品目录图。
+创建一张电影级的物品设定板，
+感觉像高端动画工作室的道具研究与艺术书布局的结合。
+
+布局应不对称、优雅且视觉上令人难忘。
+使用大片留白、多样化图像比例和有意的不平衡。
+避免网格、蓝图设计、商品展示页、说明书布局和重复的机械转场展示。
+
+重要布局规则：
+不要将任何物品视角垂直堆叠成列表。
+每个视角必须有清晰的分离和呼吸空间。
+保持整体、轮廓、结构、材质和细节研究的视觉区分。
+无严重裁切、无遮挡关键结构、无堆叠物品、无合并角度。
+不要让整张设定板看起来像一个单一场景中的主体物。
+
+主要构图：
+放置一个大型英雄视角的物品展示；
+略微偏离中心作为视觉锚点。
+该视角应完整、清晰、优雅，但不要像商业主视觉海报一样占据全部注意力。
+
+围绕它，以干净的间距排列较小的辅助研究：
+正面视角、背面视角、侧面视角、俯视角、仰视角、
+三分之四视角、倾斜角度、局部结构角度、比例感研究、
+使用状态参考、打开 / 闭合状态参考、静置状态参考。
+
+每个视角应感觉像独立的干净物品研究，
+而不是来自同一个场景的连续帧。
+
+身份锁定：
+在所有视角中保持严格的物品一致性：
+相同造型语言、相同比例、相同结构、相同材质、
+相同颜色关系、相同磨损程度、相同设计细节、相同视觉个性。
+
+有用参考细节：
+清晰的整体轮廓、清晰的结构分层、清晰的材质边界、
+清晰的连接处、边缘、把手、开口、装饰件、功能部件。
+强调物品的形状语言、比例节奏、材质对比和关键识别特征。
+
+艺术性部分：
+包含一个小轮廓研究区域，带有 2-3 个简化的黑色物品轮廓。
+包含一个小结构变化研究区域，展示轻微角度或状态变化。
+包含几个微小细节特写，展示表面材质、边缘、纹理、接口、装饰和关键视觉特征。
+
+文本设计：
+不要添加任何文字。
+不要添加名称、说明、编号、标签、标题或手写风格标注。
+不要出现任何可读字符、符号化注释或图形化说明文字。
+允许极少量非文字性的细微编辑线条或构图引导，但必须抽象、简约、不可读，并且不影响物品参考清晰度。
+
+整体感觉：
+简约、电影感、高端、艺术书式、干净、富有设计感、适用于制作。
+
+最终图像应像一张艺术性的物品设定身份板，
+旨在帮助 AI 模型理解物品的轮廓、比例、结构、材质、角度、状态和关键细节，
+而不是把整张图直接当作最终画面主体物。`
 
 export const stageDefinitions: StageDefinition[] = [
   {
@@ -192,53 +261,33 @@ export const stageDefinitions: StageDefinition[] = [
 旨在帮助 AI 模型理解角色的面部、轮廓、服装、姿势和情感范围。`
       }
     ],
-    buildOutput: (fields) => joinBlocks([
-      '创建一张艺术性的 16:9 角色身份板。',
-      '[主体]：使用参考图像。',
+    buildOutput: (fields, _project, fixedContent) => joinBlocks([
+      fixedContentValue('character', 'character-reference', fixedContent),
       valueOf(fields, 'characterNotes') && `角色设定注释：\n${bracketValue(fields, 'characterNotes')}`,
-      `纯白色 / 柔和米白色背景。
-无环境、无道具、无标志、无水印。`,
-      `设计方向：
-不要创建标准的角色参考表。
-创建一张电影级的身份板，
-感觉像高端动画工作室的角色研究与艺术布布局的结合。`,
-      `布局应不对称、优雅且视觉上令人难忘。
-使用大片留白、多样化图像比例和有意的不平衡。
-避免网格、蓝图设计、目录布局和重复的转场展示。`,
-      `重要布局规则：
-不要垂直任何角色图像。
-每个视角必须有清晰的分离和呼吸空间。
-保持所有身体、肖像、轮廓和细节研究的视觉区分。
-无裁剪面部、无隐藏肢体、无堆叠人物、无合并姿势。`,
-      `主要构图：
-放置一个大型英雄全身视角；
-略微偏离中心作为视觉锚点。`,
-      `围绕它，以干净的间距排列较小的辅助研究：
-中性全身视角、背面视角、侧面视角、坐姿、倾斜姿势、
-蹲姿、俯视身体角度、仰视身体角度、富有表现力的肖像研究。`,
-      `每个视角应感觉像独立的干净角色研究，
-而不是来自同一个场景的帧。`,
-      `身份锁定：
-在所有视角中保持严格的身份一致性：
-相同面部、相同面部比例、相同发型、相同服装、
-相同身体比例、相同姿势语言、相同视觉个性。`,
-      `有用参考细节：
-清晰的面部形状、清晰的发型轮廓、清晰的服装轮廓、
-清晰的身体形状、清晰的手部、清晰的姿势、清晰的表情范围。`,
-      `艺术性部分：
-包含一个小轮廓研究区域，带有 2-3 个简化的黑色角色轮廓。
-包含一个小表情研究区域，带有细微的情感变化。
-包含几个微小细节特写，展示面部、头发和服装的关键视觉特征。`,
-      `文本设计：
-添加一个时尚的角色 ID 块。保持简约、大胆且艺术导向。
-仅使用：
-名称角色核心情绪视觉标志。
-仅在有帮助的地方使用小型手写风格标签。
-允许使用细微的编辑箭头和标注，但保持简约和优雅。`,
-      `整体感觉：
-简约、电影感、高端、艺术书式、干净、富有表现力、适用于制作。`,
-      `最终图像应像一张艺术性的角色身份板，
-旨在帮助 AI 模型理解角色的面部、轮廓、服装、姿势和情感范围。`
+      fixedContentValue('character', 'character-fixed-body', fixedContent)
+    ])
+  },
+  {
+    key: 'object',
+    title: '物品版制作',
+    description: '物品设定身份板、结构研究和艺术书式布局。',
+    fields: [
+      {
+        id: 'objectNotes',
+        label: '物品设定批注',
+        placeholder: '例如：用途、状态变化、材质、磨损程度、关键结构等',
+        rows: 4
+      }
+    ],
+    layout: [
+      { type: 'locked', id: 'object-reference', text: objectBoardReference },
+      { type: 'field', fieldId: 'objectNotes' },
+      { type: 'locked', id: 'object-fixed-body', text: objectBoardFixedBody }
+    ],
+    buildOutput: (fields, _project, fixedContent) => joinBlocks([
+      fixedContentValue('object', 'object-reference', fixedContent),
+      valueOf(fields, 'objectNotes') && `物品设定批注：\n${bracketValue(fields, 'objectNotes')}`,
+      fixedContentValue('object', 'object-fixed-body', fixedContent)
     ])
   },
   {
@@ -335,30 +384,18 @@ export const stageDefinitions: StageDefinition[] = [
 无时间戳。`
       }
     ],
-    buildOutput: (fields) => joinBlocks([
-      `为故事板创建一个 ${bracketValue(fields, 'theme')}
-专注于 ${bracketValue(fields, 'storyMotion')}`,
-      '使用参考图像作为角色。',
-      '创建一张 16:9 故事板表格，包含 12 个电影风格面板。',
-      `实际故事板绘图必须仅为黑白：
-粗糙铅笔线条、最小细节、快速手绘能量、简单解剖结构、强烈轮廓可读性。`,
-      '保持艺术作品轻量、动态、未完成，像早期剪辑预览。',
-      `请按照镜头叙事和摄影方式设计镜头格。
-每个面板必须包含 ${bracketValue(fields, 'panelMustContain')}，避免 ${bracketValue(fields, 'avoid')}。表演者应该是 ${bracketValue(fields, 'performerFeeling')} 感觉。`,
+    buildOutput: (fields, _project, fixedContent) => joinBlocks([
+      `${fixedContentValue('storyboard', 'storyboard-open', fixedContent)} ${bracketValue(fields, 'theme')}
+${fixedContentValue('storyboard', 'storyboard-focus', fixedContent)} ${bracketValue(fields, 'storyMotion')}`,
+      fixedContentValue('storyboard', 'storyboard-fixed-setup', fixedContent),
+      `每个面板必须包含 ${bracketValue(fields, 'panelMustContain')}，避免 ${bracketValue(fields, 'avoid')}。表演者应该是 ${bracketValue(fields, 'performerFeeling')} 感觉。`,
       `摄影方式：
 ${bracketValue(fields, 'cameraStyle', '接入Prompt库，在其中挑选镜头')}`,
       `环境保持：
 ${bracketValue(fields, 'environmentKeep')}`,
       `镜头叙事：
 ${buildStoryboardShotRangeOutput(fields)}`,
-      `使用颜色标注系统：
-红色箭头 = 身体运动
-蓝色箭头 = 摄影机运动
-绿色标记 = 取景 / 构图笔记
-橙色标记 = 灯光方向
-紫色标记 = 声音 / 情感强调
-黑色文本 = 简短镜头笔记和面板标签`,
-      '无时间戳。'
+      fixedContentValue('storyboard', 'storyboard-annotation', fixedContent)
     ])
   },
   {
@@ -456,13 +493,13 @@ ${buildStoryboardShotRangeOutput(fields)}`,
         }
       }
     ],
-    buildOutput: (fields, project) => joinBlocks([
-      fixedValueOf('storyboardRef'),
-      fixedValueOf('shotOrder'),
-      fixedValueOf('duration'),
+    buildOutput: (fields, project, fixedContent) => joinBlocks([
+      fixedContentValue('videoPrompt', 'storyboardRef', fixedContent),
+      fixedContentValue('videoPrompt', 'shotOrder', fixedContent),
+      fixedContentValue('videoPrompt', 'duration', fixedContent),
       project?.storyboard && buildStoryboardInjectionForVideo(project.storyboard.fields) && `故事版内容注入：\n${buildStoryboardInjectionForVideo(project.storyboard.fields)}`,
       valueOf(fields, 'actionSnapshot'),
-      fixedValueOf('identityLock'),
+      fixedContentValue('videoPrompt', 'identityLock', fixedContent),
       valueOf(fields, 'actionKeywords'),
       valueOf(fields, 'emotionKeywords'),
       buildStoryboardShotRangeOutput(fields, 'shotKeywords', '镜头提示词', '这里填写每段镜头提示词'),
@@ -482,5 +519,52 @@ export const stageByKey = Object.fromEntries(stageDefinitions.map(stage => [stag
 
 export const getStageDefinition = (stage: ThreeStageKey): StageDefinition => stageByKey[stage] || stageByKey.character
 
-export const buildThreeStageOutput = (stage: ThreeStageKey, fields: Record<string, string>, project?: IThreeStageProject): string =>
-  getStageDefinition(stage).buildOutput(fields, project)
+export const getStageFixedContent = (stage: ThreeStageKey): Record<string, string> => {
+  const definition = getStageDefinition(stage)
+  return Object.fromEntries([
+    ...(definition.layout || [])
+      .filter((item): item is Extract<StageLayoutItem, { type: 'locked' }> => item.type === 'locked')
+      .map(item => [item.id, item.text]),
+    ...definition.fields
+      .filter(field => Boolean(field.fixedValue))
+      .map(field => [field.id, field.fixedValue || ''])
+  ])
+}
+
+export const normalizeFixedContentOverrides = (
+  stage: ThreeStageKey,
+  candidate: unknown
+): FixedContentOverrides => {
+  if (!candidate || typeof candidate !== 'object') return {}
+  const validIds = new Set(Object.keys(getStageFixedContent(stage)))
+  return Object.fromEntries(Object.entries(candidate as Record<string, unknown>).flatMap(([contentId, value]) => {
+    if (!validIds.has(contentId) || !value || typeof value !== 'object') return []
+    const override = value as Record<string, unknown>
+    if (typeof override.value !== 'string') return []
+    if (override.unlocked !== undefined && typeof override.unlocked !== 'boolean') return []
+    return [[contentId, {
+      value: override.value,
+      ...(typeof override.unlocked === 'boolean' ? { unlocked: override.unlocked } : {})
+    }]]
+  }))
+}
+
+const fixedContentValue = (
+  stage: ThreeStageKey,
+  contentId: string,
+  fixedContent?: Record<string, string>
+): string => fixedContent?.[contentId] ?? getStageFixedContent(stage)[contentId] ?? ''
+
+export const buildThreeStageOutput = (
+  stage: ThreeStageKey,
+  fields: Record<string, string>,
+  project?: IThreeStageProject,
+  fixedContent?: FixedContentOverrides
+): string => {
+  const overrides = normalizeFixedContentOverrides(stage, fixedContent)
+  const resolvedFixedContent = Object.fromEntries(Object.entries(getStageFixedContent(stage)).map(([contentId, defaultValue]) => [
+    contentId,
+    overrides[contentId]?.value ?? defaultValue
+  ]))
+  return getStageDefinition(stage).buildOutput(fields, project, resolvedFixedContent)
+}

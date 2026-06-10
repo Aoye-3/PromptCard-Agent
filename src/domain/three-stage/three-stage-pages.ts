@@ -10,6 +10,7 @@ import type {
 
 const stageTitle = (type: ThreeStageKey, number: number): string => {
   if (type === 'character') return `人物版 #${number}`
+  if (type === 'object') return `物品版 #${number}`
   if (type === 'storyboard') return `故事版 #${number}`
   return `提示词版 #${number}`
 }
@@ -168,38 +169,9 @@ const normalizeItem = (item: Partial<IThreeStageItem>, timestamp: number): IThre
 export const normalizeThreeStagePages = (threeStage: Partial<IThreeStageProject> | undefined, timestamp = Date.now()): IThreeStagePage[] => {
   const rawPages = Array.isArray(threeStage?.pages) ? threeStage.pages : []
   const normalizedPages = rawPages.map((page, index) => {
-    let items = Array.isArray(page.items)
+    const items = Array.isArray(page.items)
       ? page.items.map(item => normalizeItem(item, timestamp)).filter((item): item is IThreeStageItem => Boolean(item))
       : []
-    if (index === 0) {
-      const hasCharacter = items.some(item => item.kind === 'character')
-      const hasPair = items.some(item => item.kind === 'storyVideoPair')
-      if (!hasCharacter) {
-        const characterForm = createThreeStageForm({
-          type: 'character',
-          number: maxFormNumber([{ ...page, items }], 'character') + 1,
-          section: threeStage?.character,
-          timestamp
-        })
-        items = [createCharacterItem(characterForm, timestamp), ...items]
-      }
-      if (!hasPair) {
-        const number = maxPairNumber([{ ...page, items }]) + 1
-        const storyboardForm = createThreeStageForm({
-          type: 'storyboard',
-          number,
-          section: threeStage?.storyboard,
-          timestamp
-        })
-        const videoPromptForm = createThreeStageForm({
-          type: 'videoPrompt',
-          number,
-          section: threeStage?.videoPrompt,
-          timestamp
-        })
-        items = [...items, createStoryVideoPairItem({ number, storyboardForm, videoPromptForm, timestamp })]
-      }
-    }
     return {
       id: page.id || `${timestamp}-three-stage-page-${index + 1}`,
       title: page.title || `Page ${index + 1}`,
@@ -321,14 +293,18 @@ export const duplicateThreeStagePage = (threeStage: IThreeStageProject, pageId: 
   const pages = normalizeThreeStagePages(threeStage)
   const sourcePage = pages.find(page => page.id === pageId) || pages[pages.length - 1]
   const timestamp = Date.now()
-  let nextCharacterNumber = maxFormNumber(pages, 'character') + 1
+  const nextStandaloneNumbers: Record<'character' | 'object', number> = {
+    character: maxFormNumber(pages, 'character') + 1,
+    object: maxFormNumber(pages, 'object') + 1
+  }
   let nextPairNumber = maxPairNumber(pages) + 1
 
   const nextItems = sourcePage.items.map(item => {
     if (item.kind === 'character') {
+      const type = item.form.type === 'object' ? 'object' : 'character'
       const form = createThreeStageForm({
-        type: 'character',
-        number: nextCharacterNumber++,
+        type,
+        number: nextStandaloneNumbers[type]++,
         section: cloneSection(item.form.section, timestamp),
         sourceFormId: item.form.id,
         timestamp
@@ -417,6 +393,19 @@ export const addCharacterFormToPage = (threeStage: IThreeStageProject, pageId: s
   return selectThreeStageForm({ ...threeStage, pages: nextPages }, pageId, form.id)
 }
 
+export const addObjectFormToPage = (threeStage: IThreeStageProject, pageId: string): IThreeStageProject => {
+  const pages = normalizeThreeStagePages(threeStage)
+  const timestamp = Date.now()
+  const form = createThreeStageForm({
+    type: 'object',
+    number: maxFormNumber(pages, 'object') + 1,
+    timestamp
+  })
+  const item = createCharacterItem(form, timestamp)
+  const nextPages = pages.map(page => page.id === pageId ? { ...page, items: [...page.items, item], updatedAt: timestamp } : page)
+  return selectThreeStageForm({ ...threeStage, pages: nextPages }, pageId, form.id)
+}
+
 export const addStoryVideoPairToPage = (threeStage: IThreeStageProject, pageId: string, sourcePairId?: string): IThreeStageProject => {
   const pages = normalizeThreeStagePages(threeStage)
   const pairs = pages.flatMap(page => page.items).filter((item): item is IThreeStageStoryVideoPairItem => item.kind === 'storyVideoPair')
@@ -450,8 +439,22 @@ export const removeThreeStageItem = (threeStage: IThreeStageProject, pageId: str
   const nextItems = page.items.filter(item => item.id !== itemId)
   const nextPage = { ...page, items: nextItems, selectedItemId: nextItems[0]?.id || null, updatedAt: Date.now() }
   const nextPages = pages.map(candidate => candidate.id === page.id ? nextPage : candidate)
-  const firstForm = allForms([nextPage])[0]
-  return selectThreeStageForm({ ...threeStage, pages: nextPages }, nextPage.id, firstForm.id)
+  return selectThreeStageFormAfterRemoval(threeStage, nextPages, page.id)
+}
+
+export const selectThreeStageFormAfterRemoval = (
+  threeStage: IThreeStageProject,
+  pages: IThreeStagePage[],
+  preferredPageId?: string
+): IThreeStageProject => {
+  const preferredForm = allForms(pages).find(form => form.id === threeStage.selectedFormId)
+  if (preferredForm) {
+    const page = pages.find(candidate => allForms([candidate]).some(form => form.id === preferredForm.id)) || pages[0]
+    return selectThreeStageForm({ ...threeStage, pages }, page.id, preferredForm.id)
+  }
+  const page = pages.find(candidate => candidate.id === preferredPageId) || pages[0]
+  const fallbackForm = allForms([page])[0]
+  return selectThreeStageForm({ ...threeStage, pages }, page.id, fallbackForm.id)
 }
 
 export const removeThreeStagePage = (threeStage: IThreeStageProject, pageId: string): IThreeStageProject => {
@@ -473,6 +476,7 @@ export const getPairCopySources = (threeStage: IThreeStageProject): IThreeStageS
 
 const defaultFieldId = (stage: ThreeStageKey): string => {
   if (stage === 'character') return 'characterNotes'
+  if (stage === 'object') return 'objectNotes'
   if (stage === 'storyboard') return 'theme'
   return 'actionSnapshot'
 }

@@ -6,7 +6,12 @@ import type {
   IThreeStageProject,
   ThreeStageKey
 } from '@/models/PromptHistory.model'
-import { normalizeThreeStagePages, syncThreeStageLegacyFields } from '@/domain/three-stage/three-stage-pages'
+import { normalizeThreeStagePages, selectThreeStageFormAfterRemoval, syncThreeStageLegacyFields } from '@/domain/three-stage/three-stage-pages'
+import {
+  buildThreeStageOutput,
+  normalizeFixedContentOverrides,
+  type FixedContentOverrides
+} from '@/domain/three-stage/three-stage-definitions'
 
 export type FreeCanvasMediaNodeKind = 'imageAsset' | 'textOverlay' | 'arrowAnnotation' | 'mediaGroup'
 export type FreeCanvasNodeKind = 'threeStageForm' | FreeCanvasMediaNodeKind
@@ -52,6 +57,12 @@ export interface FreeCanvasMeta {
   edges: FreeCanvasUserEdge[]
 }
 
+export interface RemoveFreeCanvasNodesResult {
+  threeStage: IThreeStageProject
+  removedNodeIds: string[]
+  blockedReason: string | null
+}
+
 export interface FreeCanvasNodeData extends Record<string, unknown> {
   nodeKind: FreeCanvasNodeKind
   title: string
@@ -66,6 +77,10 @@ export interface FreeCanvasNodeData extends Record<string, unknown> {
   selectedFieldId?: string
   onSelectField?: (form: IThreeStageForm, fieldId: string) => void
   onUpdateField?: (form: IThreeStageForm, fieldId: string, value: string) => void
+  onUpdateFixedContent?: (form: IThreeStageForm, contentId: string, value: string) => void
+  onToggleFixedContent?: (form: IThreeStageForm, contentId: string, unlocked: boolean) => void
+  onResetFixedContent?: (form: IThreeStageForm, contentId: string) => void
+  onCopyOutput?: (form: IThreeStageForm) => void
   onUpdateMediaText?: (nodeId: string, text: string) => void
 }
 
@@ -170,6 +185,74 @@ export const removeFreeCanvasFlowNodes = (
     mediaNodes: meta.mediaNodes.filter(node => !removedMediaIds.has(node.id)),
     edges: meta.edges.filter(edge => !removedFlowIds.has(edge.source) && !removedFlowIds.has(edge.target))
   })
+}
+
+export const removeFreeCanvasNodes = (
+  threeStage: IThreeStageProject,
+  flowNodeIds: string[]
+): RemoveFreeCanvasNodesResult => {
+  const requestedIds = new Set(flowNodeIds)
+  if (requestedIds.size === 0) {
+    return { threeStage, removedNodeIds: [], blockedReason: null }
+  }
+
+  const graph = buildFreeCanvasGraph(threeStage)
+  const itemIdsByPage = new Map<string, Set<string>>()
+  const removedFlowIds = new Set<string>()
+
+  for (const node of graph.nodes) {
+    if (!requestedIds.has(node.id)) continue
+    if (node.data.nodeKind !== 'threeStageForm') {
+      removedFlowIds.add(node.id)
+      continue
+    }
+    if (!node.data.pageId || !node.data.itemId) continue
+    const pageItemIds = itemIdsByPage.get(node.data.pageId) || new Set<string>()
+    pageItemIds.add(node.data.itemId)
+    itemIdsByPage.set(node.data.pageId, pageItemIds)
+
+    for (const pairedNode of graph.nodes) {
+      if (pairedNode.data.itemId === node.data.itemId) removedFlowIds.add(pairedNode.id)
+    }
+  }
+
+  const pages = normalizeThreeStagePages(threeStage)
+  const emptiesPage = pages.some(page => {
+    const removedItemIds = itemIdsByPage.get(page.id)
+    return removedItemIds && page.items.every(item => removedItemIds.has(item.id))
+  })
+  if (emptiesPage) {
+    return { threeStage, removedNodeIds: [], blockedReason: '每页至少保留一个表单。' }
+  }
+
+  const nextPages = pages.map(page => {
+    const removedItemIds = itemIdsByPage.get(page.id)
+    if (!removedItemIds?.size) return page
+    const items = page.items.filter(item => !removedItemIds.has(item.id))
+    return {
+      ...page,
+      items,
+      selectedItemId: items[0]?.id || null,
+      updatedAt: Date.now()
+    }
+  })
+  const removedMediaIds = new Set(
+    Array.from(removedFlowIds)
+      .filter(nodeId => nodeId.startsWith('media:'))
+      .map(nodeId => nodeId.replace(/^media:/, ''))
+  )
+  const meta = getFreeCanvasMeta(threeStage)
+  const selected = selectThreeStageFormAfterRemoval(threeStage, nextPages, threeStage.selectedPageId || undefined)
+  const updated = setFreeCanvasMeta(syncThreeStageLegacyFields(selected), {
+    mediaNodes: meta.mediaNodes.filter(node => !removedMediaIds.has(node.id)),
+    edges: meta.edges.filter(edge => !removedFlowIds.has(edge.source) && !removedFlowIds.has(edge.target))
+  })
+
+  return {
+    threeStage: updated,
+    removedNodeIds: Array.from(removedFlowIds),
+    blockedReason: null
+  }
 }
 
 export const addFreeCanvasEdge = (
@@ -310,6 +393,29 @@ export const updateFreeCanvasNodePosition = (
   return syncThreeStageLegacyFields({ ...threeStage, pages })
 }
 
+export const getFormFixedContentOverrides = (form: IThreeStageForm): FixedContentOverrides => {
+  const canvas = form.meta.canvas as { fixedContent?: unknown } | undefined
+  return normalizeFixedContentOverrides(form.type, canvas?.fixedContent)
+}
+
+export const updateFreeCanvasFormFixedContent = (
+  threeStage: IThreeStageProject,
+  formId: string,
+  contentId: string,
+  update: { value?: string; unlocked?: boolean } | null
+): IThreeStageProject => {
+  const pages = normalizeThreeStagePages(threeStage).map(page => ({
+    ...page,
+    items: page.items.map(item => updateItemFormFixedContent(item, formId, contentId, update))
+  }))
+  return syncThreeStageLegacyFields({ ...threeStage, pages })
+}
+
+export const buildFreeCanvasFormOutput = (
+  form: IThreeStageForm,
+  project?: IThreeStageProject
+): string => buildThreeStageOutput(form.type, form.section.fields, project, getFormFixedContentOverrides(form))
+
 const updateItemFormPosition = (
   item: IThreeStageItem,
   formId: string,
@@ -340,6 +446,41 @@ const updateFormCanvasPosition = (form: IThreeStageForm, position: FreeCanvasPos
   },
   updatedAt: Date.now()
 })
+
+const updateItemFormFixedContent = (
+  item: IThreeStageItem,
+  formId: string,
+  contentId: string,
+  update: { value?: string; unlocked?: boolean } | null
+): IThreeStageItem => {
+  const updateForm = (form: IThreeStageForm): IThreeStageForm => {
+    if (form.id !== formId) return form
+    const canvas = typeof form.meta.canvas === 'object' && form.meta.canvas
+      ? form.meta.canvas as Record<string, unknown>
+      : {}
+    const fixedContent = { ...getFormFixedContentOverrides(form) }
+    if (update === null) {
+      delete fixedContent[contentId]
+    } else {
+      fixedContent[contentId] = { ...fixedContent[contentId], ...update }
+    }
+    return {
+      ...form,
+      meta: { ...form.meta, canvas: { ...canvas, fixedContent } },
+      updatedAt: Date.now()
+    }
+  }
+
+  if (item.kind === 'character') {
+    const form = updateForm(item.form)
+    return form === item.form ? item : { ...item, form, updatedAt: form.updatedAt }
+  }
+  const storyboardForm = updateForm(item.storyboardForm)
+  const videoPromptForm = updateForm(item.videoPromptForm)
+  return storyboardForm === item.storyboardForm && videoPromptForm === item.videoPromptForm
+    ? item
+    : { ...item, storyboardForm, videoPromptForm, updatedAt: Date.now() }
+}
 
 const formNode = (
   page: IThreeStagePage,
@@ -420,6 +561,7 @@ const mediaSubtitle = (node: FreeCanvasMediaNode): string => {
 
 const formSubtitle = (type: ThreeStageKey): string => {
   if (type === 'character') return '人物板节点'
+  if (type === 'object') return '物品版节点'
   if (type === 'storyboard') return '故事板节点'
   return '视频提示词节点'
 }

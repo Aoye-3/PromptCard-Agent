@@ -22,10 +22,11 @@ import {
   useReactFlow
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ChevronLeft, ChevronRight, Database, FileText, Home, Image, Layers, MousePointer2, PanelLeft, PanelRight, Pencil, Plus, Trash2, Type, Workflow } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Database, FileText, Home, Image, Layers, Lock, MousePointer2, Package, PanelLeft, PanelRight, Pencil, Plus, RotateCcw, Trash2, Type, Unlock, Workflow } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import {
   addCharacterFormToPage,
+  addObjectFormToPage,
   addStoryVideoPairToPage,
   addThreeStagePage,
   getSelectedThreeStageFormContext,
@@ -38,15 +39,19 @@ import {
 import {
   addFreeCanvasEdge,
   addFreeCanvasMediaNode,
+  buildFreeCanvasFormOutput,
   buildFreeCanvasGraph,
   createFreeCanvasMediaNode,
   getFreeCanvasConnectedChain,
+  getFormFixedContentOverrides,
+  removeFreeCanvasNodes,
   removeFreeCanvasFlowNodes,
   type FreeCanvasFlowEdge,
   type FreeCanvasFlowNode,
   type FreeCanvasMediaNodeKind,
   type FreeCanvasNodeData,
   updateFreeCanvasMediaNode,
+  updateFreeCanvasFormFixedContent,
   updateFreeCanvasNodePosition
 } from '@/domain/free-canvas/free-canvas'
 import {
@@ -94,7 +99,7 @@ const FreeCanvasBuilderInner = ({
   const selectedField = selectedStageDefinition.fields.find(field => field.id === normalizedThreeStage.selectedFieldId && !field.fixedValue) ||
     selectedStageDefinition.fields.find(field => !field.fixedValue) ||
     selectedStageDefinition.fields[0]
-  const selectedOutput = selectedStageDefinition.buildOutput(selectedForm.section.fields, normalizedThreeStage)
+  const selectedOutput = buildFreeCanvasFormOutput(selectedForm, getOutputProjectForForm(normalizedThreeStage, selectedForm))
   const graph = useMemo(() => buildFreeCanvasGraph(normalizedThreeStage), [normalizedThreeStage])
   const pages = useMemo(() => normalizeThreeStagePages(normalizedThreeStage), [normalizedThreeStage])
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
@@ -137,6 +142,37 @@ const FreeCanvasBuilderInner = ({
     onChange(updateFreeCanvasMediaNode(normalizedThreeStage, nodeId.replace(/^media:/, ''), { text }))
   }, [normalizedThreeStage, onChange])
 
+  const updateFixedContent = useCallback((form: IThreeStageForm, contentId: string, value: string): void => {
+    onChange(updateFreeCanvasFormFixedContent(normalizedThreeStage, form.id, contentId, { value }))
+  }, [normalizedThreeStage, onChange])
+
+  const toggleFixedContent = useCallback((form: IThreeStageForm, contentId: string, unlocked: boolean): void => {
+    const overrides = getFormFixedContentOverrides(form)
+    const defaultValue = getFixedContentDefault(form, contentId)
+    onChange(updateFreeCanvasFormFixedContent(normalizedThreeStage, form.id, contentId, {
+      value: overrides[contentId]?.value ?? defaultValue,
+      unlocked
+    }))
+  }, [normalizedThreeStage, onChange])
+
+  const resetFixedContent = useCallback((form: IThreeStageForm, contentId: string): void => {
+    onChange(updateFreeCanvasFormFixedContent(normalizedThreeStage, form.id, contentId, null))
+  }, [normalizedThreeStage, onChange])
+
+  const copyFormOutput = useCallback(async (form: IThreeStageForm): Promise<void> => {
+    const output = buildFreeCanvasFormOutput(form, getOutputProjectForForm(normalizedThreeStage, form))
+    if (!output.trim()) {
+      window.alert(`${form.title}还没有可复制内容。`)
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(output)
+      window.alert('已复制到剪贴板。')
+    } catch {
+      window.alert('复制失败，请检查剪贴板权限。')
+    }
+  }, [normalizedThreeStage])
+
   const canvasNodes = useMemo(() => graph.nodes.map(node => {
     if (node.data.nodeKind !== 'threeStageForm' || !node.data.formId) {
       return {
@@ -154,10 +190,14 @@ const FreeCanvasBuilderInner = ({
         form: findThreeStageForm(normalizedThreeStage, node.data.formId),
         selectedFieldId: normalizedThreeStage.selectedFieldId,
         onSelectField: selectCanvasField,
-        onUpdateField: updateField
+        onUpdateField: updateField,
+        onUpdateFixedContent: updateFixedContent,
+        onToggleFixedContent: toggleFixedContent,
+        onResetFixedContent: resetFixedContent,
+        onCopyOutput: copyFormOutput
       }
     }
-  }), [graph.nodes, normalizedThreeStage, selectCanvasField, updateField, updateMediaText])
+  }), [copyFormOutput, graph.nodes, normalizedThreeStage, resetFixedContent, selectCanvasField, toggleFixedContent, updateField, updateFixedContent, updateMediaText])
 
   const [nodes, setNodes] = useState<FreeCanvasFlowNode[]>(canvasNodes)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
@@ -197,7 +237,7 @@ const FreeCanvasBuilderInner = ({
         formType: node.data.formType,
         mediaAssetId: node.data.mediaNode?.assetId || null,
         text: node.data.mediaNode?.text || node.data.subtitle,
-        output: node.data.form ? getStageDefinition(node.data.form.type).buildOutput(node.data.form.section.fields, normalizedThreeStage) : undefined
+        output: node.data.form ? buildFreeCanvasFormOutput(node.data.form, getOutputProjectForForm(normalizedThreeStage, node.data.form)) : undefined
       })),
       selectedChainEdges: selectedChain.edges.map(edge => ({
         id: edge.id,
@@ -209,8 +249,14 @@ const FreeCanvasBuilderInner = ({
   })
 
   useEffect(() => {
-    setNodes(canvasNodes)
-  }, [canvasNodes])
+    setNodes(currentNodes => {
+      const selectedIds = new Set(currentNodes.filter(node => node.selected).map(node => node.id))
+      return canvasNodes.map(node => ({
+        ...node,
+        selected: selectedIds.has(node.id) || node.id === selectedNodeId
+      }))
+    })
+  }, [canvasNodes, selectedNodeId])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -269,6 +315,15 @@ const FreeCanvasBuilderInner = ({
     setContextMenu(null)
   }
 
+  const createObject = (position = nextNodePosition()): void => {
+    const currentNodeIds = new Set(graph.nodes.map(node => node.id))
+    const withObject = addObjectFormToPage(normalizedThreeStage, selectedContext.page.id)
+    const newNode = buildFreeCanvasGraph(withObject).nodes.find(node => !currentNodeIds.has(node.id) && node.data.nodeKind === 'threeStageForm')
+    const positioned = newNode ? updateFreeCanvasNodePosition(withObject, newNode.id, position) : withObject
+    onChange(positioned)
+    setContextMenu(null)
+  }
+
   const createPage = (): void => {
     onChange(addThreeStagePage(normalizedThreeStage))
   }
@@ -304,15 +359,23 @@ const FreeCanvasBuilderInner = ({
   }
 
   const handleNodesChange = (changes: NodeChange<FreeCanvasFlowNode>[]): void => {
-    setNodes(current => applyNodeChanges(changes, current) as FreeCanvasFlowNode[])
+    const nonRemovalChanges = changes.filter(change => change.type !== 'remove')
+    if (nonRemovalChanges.length > 0) {
+      setNodes(current => applyNodeChanges(nonRemovalChanges, current) as FreeCanvasFlowNode[])
+    }
     const removedNodeIds = changes
       .filter(change => change.type === 'remove')
       .map(change => change.id)
     if (removedNodeIds.length === 0) return
 
+    const result = removeFreeCanvasNodes(normalizedThreeStage, removedNodeIds)
+    if (result.blockedReason) {
+      window.alert(result.blockedReason)
+      return
+    }
     setSelectedNodeId(current => current && removedNodeIds.includes(current) ? null : current)
     setSelectedEdgeId(null)
-    onChange(removeFreeCanvasFlowNodes(normalizedThreeStage, removedNodeIds))
+    onChange(result.threeStage)
   }
 
   const selectLayerNode = (node: FreeCanvasFlowNode): void => {
@@ -357,34 +420,18 @@ const FreeCanvasBuilderInner = ({
 
   return (
     <section className="fixed inset-x-0 bottom-[56px] top-14 z-20 overflow-hidden bg-[#f7f8fb]">
-      <div className={`absolute top-6 z-20 flex max-w-[calc(100vw-520px)] items-center gap-3 rounded-[20px] border border-gray-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur transition-all ${leftDrawerOpen ? 'left-[300px]' : 'left-6'}`}>
-        <button className="rounded-full p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-950" onClick={onBack} title="项目">
-          <Home className="h-4 w-4" />
-        </button>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="truncate text-lg font-black text-gray-950">{activeProject.title}</h1>
-            {onRenameProject && (
-              <button type="button" className="rounded-full p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900" onClick={onRenameProject} title="重命名项目">
-                <Pencil className="h-4 w-4" />
-              </button>
-            )}
-          </div>
-          <p className="truncate text-xs font-semibold text-gray-400">自由画布式构建 / React Flow + 自建媒体层</p>
-        </div>
-        <button className="rounded-full bg-black px-3 py-2 text-xs font-bold text-white transition hover:bg-gray-800" onClick={onSave}>
-          <Database className="h-4 w-4" />
-          {previewMode ? '预览不保存' : '保存'}
-        </button>
-      </div>
-
       <CanvasLayerDrawer
         open={leftDrawerOpen}
+        projectTitle={activeProject.title}
+        previewMode={previewMode}
         pages={pages}
         selectedPageId={normalizedThreeStage.selectedPageId || pages[0]?.id}
         layerGroups={layerGroups}
         selectedNodeId={selectedNodeId}
         selectedChainNodeIds={selectedChain.nodeIds}
+        onBack={onBack}
+        onRenameProject={onRenameProject}
+        onSave={onSave}
         onToggle={() => setLeftDrawerOpen(value => !value)}
         onSelectPage={selectPage}
         onSelectNode={selectLayerNode}
@@ -392,11 +439,12 @@ const FreeCanvasBuilderInner = ({
         onDeletePage={deletePage}
       />
 
-      <div className={`h-full transition-[padding] ${leftDrawerOpen ? 'pl-[280px]' : 'pl-0'} ${rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'}`} data-free-canvas-screen>
+      <div className={`h-full transition-[padding] ${leftDrawerOpen ? 'pl-[320px]' : 'pl-0'} ${rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'}`} data-free-canvas-screen>
         <ReactFlow
           nodes={nodes}
           edges={canvasEdges}
           nodeTypes={nodeTypes}
+          deleteKeyCode={['Backspace', 'Delete']}
           onNodesChange={handleNodesChange}
           onConnect={handleConnect}
           onEdgeClick={handleEdgeClick}
@@ -430,6 +478,7 @@ const FreeCanvasBuilderInner = ({
           x={contextMenu.x}
           y={contextMenu.y}
           onCreateCharacter={() => createCharacter({ x: contextMenu.flowX, y: contextMenu.flowY })}
+          onCreateObject={() => createObject({ x: contextMenu.flowX, y: contextMenu.flowY })}
           onCreatePair={() => createPair({ x: contextMenu.flowX, y: contextMenu.flowY })}
           onCreateMedia={(kind) => createMedia(kind, { x: contextMenu.flowX, y: contextMenu.flowY })}
         />
@@ -437,6 +486,7 @@ const FreeCanvasBuilderInner = ({
 
       <CanvasBottomToolbar
         onCreateCharacter={() => createCharacter()}
+        onCreateObject={() => createObject()}
         onCreatePair={() => createPair()}
         onCreateMedia={(kind) => createMedia(kind)}
       />
@@ -490,11 +540,16 @@ type CanvasLayerGroups = {
 
 const CanvasLayerDrawer = ({
   open,
+  projectTitle,
+  previewMode,
   pages,
   selectedPageId,
   layerGroups,
   selectedNodeId,
   selectedChainNodeIds,
+  onBack,
+  onRenameProject,
+  onSave,
   onToggle,
   onSelectPage,
   onSelectNode,
@@ -502,11 +557,16 @@ const CanvasLayerDrawer = ({
   onDeletePage
 }: {
   open: boolean
+  projectTitle: string
+  previewMode?: boolean
   pages: ReturnType<typeof normalizeThreeStagePages>
   selectedPageId?: string
   layerGroups: CanvasLayerGroups
   selectedNodeId: string | null
   selectedChainNodeIds: string[]
+  onBack: () => void
+  onRenameProject?: () => void
+  onSave: () => void
   onToggle: () => void
   onSelectPage: (pageId: string) => void
   onSelectNode: (node: FreeCanvasFlowNode) => void
@@ -514,16 +574,41 @@ const CanvasLayerDrawer = ({
   onDeletePage: (pageId: string) => void
 }) => (
   <>
-    <button
-      type="button"
-      className={`absolute top-3 z-40 flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:text-gray-950 ${open ? 'left-[244px]' : 'left-3'}`}
-      onClick={onToggle}
-      title={open ? '收起 Pages / Layers' : '展开 Pages / Layers'}
-    >
-      {open ? <ChevronLeft className="h-3.5 w-3.5" /> : <PanelLeft className="h-3.5 w-3.5" />}
-    </button>
+    {!open && (
+      <button
+        type="button"
+        className="absolute left-3 top-3 z-40 flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 shadow-sm transition hover:text-gray-950"
+        onClick={onToggle}
+        title="展开 Pages / Layers"
+      >
+        <PanelLeft className="h-3.5 w-3.5" />
+      </button>
+    )}
     {open && (
-      <aside className="absolute bottom-0 left-0 top-0 z-30 flex w-[280px] flex-col overflow-hidden border-r border-gray-200 bg-white">
+      <aside className="absolute bottom-0 left-0 top-0 z-30 flex w-[320px] flex-col overflow-hidden border-r border-gray-200 bg-white">
+        <div className="border-b border-gray-200 px-3 py-3">
+          <div className="flex items-center gap-2">
+            <button type="button" className="rounded-md p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-950" onClick={onBack} title="返回项目">
+              <Home className="h-4 w-4" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate text-sm font-black text-gray-950">{projectTitle}</h1>
+              <p className="truncate text-[10px] font-semibold text-gray-400">自由画布式构建</p>
+            </div>
+            {onRenameProject && (
+              <button type="button" className="rounded-md p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-900" onClick={onRenameProject} title="重命名项目">
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+            <button type="button" className="rounded-md p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-950" onClick={onToggle} title="收起 Pages / Layers">
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <button className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-black px-3 py-2 text-xs font-bold text-white transition hover:bg-gray-800" onClick={onSave}>
+            <Database className="h-3.5 w-3.5" />
+            {previewMode ? '预览不保存' : '保存项目'}
+          </button>
+        </div>
         <div className="border-b border-gray-100 px-3 py-3">
           <div className="mb-2 flex items-center gap-2 text-xs font-black text-gray-950">
             <div className="flex items-center gap-2">
@@ -640,7 +725,17 @@ const ThreeStageFormNode = ({ data, selected }: NodeProps<Node<FreeCanvasNodeDat
       <div className="nowheel flex-1 space-y-3 overflow-y-auto p-4">
         {form && stage ? layout.map(item => {
           if (item.type === 'locked') {
-            return <CanvasLockedBlock key={item.id} text={item.text} />
+            return (
+              <CanvasFixedContentBlock
+                key={item.id}
+                form={form}
+                contentId={item.id}
+                defaultValue={item.text}
+                onUpdate={data.onUpdateFixedContent}
+                onToggle={data.onToggleFixedContent}
+                onReset={data.onResetFixedContent}
+              />
+            )
           }
           const field = stage.fields.find(candidate => candidate.id === item.fieldId)
           if (!field) return null
@@ -652,12 +747,30 @@ const ThreeStageFormNode = ({ data, selected }: NodeProps<Node<FreeCanvasNodeDat
               selected={data.selectedFieldId === field.id}
               onSelect={data.onSelectField}
               onUpdate={data.onUpdateField}
+              onUpdateFixedContent={data.onUpdateFixedContent}
+              onToggleFixedContent={data.onToggleFixedContent}
+              onResetFixedContent={data.onResetFixedContent}
             />
           )
         }) : (
           <div className="rounded-2xl bg-gray-50 p-4 text-sm font-semibold text-gray-400">表单数据等待同步。</div>
         )}
       </div>
+      {form && (
+        <div className="border-t border-gray-100 p-4">
+          <button
+            type="button"
+            className="nodrag flex w-full items-center justify-center gap-2 rounded-full bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800"
+            onClick={(event) => {
+              event.stopPropagation()
+              data.onCopyOutput?.(form)
+            }}
+          >
+            <Copy className="h-4 w-4" />
+            复制{form.title}
+          </button>
+        </div>
+      )}
       <Handle type="source" position={Position.Right} className="!bg-gray-950" />
     </div>
   )
@@ -668,13 +781,19 @@ const CanvasFieldEditor = ({
   field,
   selected,
   onSelect,
-  onUpdate
+  onUpdate,
+  onUpdateFixedContent,
+  onToggleFixedContent,
+  onResetFixedContent
 }: {
   form: IThreeStageForm
   field: FieldDefinition
   selected: boolean
   onSelect?: (form: IThreeStageForm, fieldId: string) => void
   onUpdate?: (form: IThreeStageForm, fieldId: string, value: string) => void
+  onUpdateFixedContent?: (form: IThreeStageForm, contentId: string, value: string) => void
+  onToggleFixedContent?: (form: IThreeStageForm, contentId: string, unlocked: boolean) => void
+  onResetFixedContent?: (form: IThreeStageForm, contentId: string) => void
 }) => {
   const value = form.section.fields[field.id] || ''
   const commonLabel = (
@@ -687,7 +806,17 @@ const CanvasFieldEditor = ({
   )
 
   if (field.fixedValue) {
-    return <CanvasLockedBlock text={field.fixedValue} label={field.label} />
+    return (
+      <CanvasFixedContentBlock
+        form={form}
+        contentId={field.id}
+        defaultValue={field.fixedValue}
+        label={field.label}
+        onUpdate={onUpdateFixedContent}
+        onToggle={onToggleFixedContent}
+        onReset={onResetFixedContent}
+      />
+    )
   }
 
   if (field.kind === 'toggle') {
@@ -789,12 +918,70 @@ const CanvasFieldEditor = ({
   )
 }
 
-const CanvasLockedBlock = ({ text, label }: { text: string; label?: string }) => (
-  <div className="rounded-2xl border border-gray-100 bg-[#f7f5ef] p-3">
-    {label && <div className="mb-2 text-xs font-black text-gray-500">{label}</div>}
-    <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap font-sans text-sm leading-6 text-gray-700">{text}</pre>
-  </div>
-)
+const CanvasFixedContentBlock = ({
+  form,
+  contentId,
+  defaultValue,
+  label,
+  onUpdate,
+  onToggle,
+  onReset
+}: {
+  form: IThreeStageForm
+  contentId: string
+  defaultValue: string
+  label?: string
+  onUpdate?: (form: IThreeStageForm, contentId: string, value: string) => void
+  onToggle?: (form: IThreeStageForm, contentId: string, unlocked: boolean) => void
+  onReset?: (form: IThreeStageForm, contentId: string) => void
+}) => {
+  const override = getFormFixedContentOverrides(form)[contentId]
+  const value = override?.value ?? defaultValue
+  const unlocked = Boolean(override?.unlocked)
+
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-[#f7f5ef] p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div className="text-xs font-black text-gray-500">{label || '固定内容'}</div>
+        <div className="nodrag flex items-center gap-1">
+          {override && (
+            <button
+              type="button"
+              className="rounded-lg p-1.5 text-gray-400 hover:bg-white hover:text-gray-950"
+              onClick={(event) => {
+                event.stopPropagation()
+                onReset?.(form, contentId)
+              }}
+              title="恢复默认"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="rounded-lg p-1.5 text-gray-400 hover:bg-white hover:text-gray-950"
+            onClick={(event) => {
+              event.stopPropagation()
+              onToggle?.(form, contentId, !unlocked)
+            }}
+            title={unlocked ? '重新锁定' : '解锁修改'}
+          >
+            {unlocked ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+          </button>
+        </div>
+      </div>
+      {unlocked ? (
+        <textarea
+          className="nodrag nowheel min-h-[96px] w-full resize-y rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-gray-900 outline-none focus:border-gray-950"
+          value={value}
+          onChange={(event) => onUpdate?.(form, contentId, event.target.value)}
+        />
+      ) : (
+        <pre className="max-h-56 overflow-y-auto whitespace-pre-wrap font-sans text-sm leading-6 text-gray-700">{value}</pre>
+      )}
+    </div>
+  )
+}
 
 const FreeCanvasMediaNode = ({ data, selected }: NodeProps<Node<FreeCanvasNodeData>>) => {
   const media = data.mediaNode
@@ -847,17 +1034,20 @@ const CanvasCreateMenu = ({
   x,
   y,
   onCreateCharacter,
+  onCreateObject,
   onCreatePair,
   onCreateMedia
 }: {
   x: number
   y: number
   onCreateCharacter: () => void
+  onCreateObject: () => void
   onCreatePair: () => void
   onCreateMedia: (kind: FreeCanvasMediaNodeKind) => void
 }) => (
   <div className="fixed z-40 w-64 rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl" style={{ left: x, top: y }}>
     <CreateMenuButton label="新建人物板" onClick={onCreateCharacter} />
+    <CreateMenuButton label="新建物品版" onClick={onCreateObject} />
     <CreateMenuButton label="新建故事+提示词组" onClick={onCreatePair} />
     <CreateMenuButton label="新建图片节点" onClick={() => onCreateMedia('imageAsset')} />
     <CreateMenuButton label="新建文字标注" onClick={() => onCreateMedia('textOverlay')} />
@@ -873,15 +1063,18 @@ const CreateMenuButton = ({ label, onClick }: { label: string; onClick: () => vo
 
 const CanvasBottomToolbar = ({
   onCreateCharacter,
+  onCreateObject,
   onCreatePair,
   onCreateMedia
 }: {
   onCreateCharacter: () => void
+  onCreateObject: () => void
   onCreatePair: () => void
   onCreateMedia: (kind: FreeCanvasMediaNodeKind) => void
 }) => (
   <div className="absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border border-gray-200 bg-white/95 px-3 py-2 shadow-[0_18px_60px_rgba(15,23,42,0.18)] backdrop-blur" data-free-canvas-toolbar>
     <ToolbarButton title="人物板" onClick={onCreateCharacter}><Plus className="h-4 w-4" /></ToolbarButton>
+    <ToolbarButton title="物品版" onClick={onCreateObject}><Package className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="故事+提示词组" onClick={onCreatePair}><Workflow className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="图片节点" onClick={() => onCreateMedia('imageAsset')}><Image className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="文字标注" onClick={() => onCreateMedia('textOverlay')}><Type className="h-4 w-4" /></ToolbarButton>
@@ -906,6 +1099,25 @@ const findThreeStageForm = (threeStage: IThreeStageProject, formId: string): ITh
     }
   }
   return undefined
+}
+
+const getFixedContentDefault = (form: IThreeStageForm, contentId: string): string => {
+  const stage = getStageDefinition(form.type)
+  const layoutItem = stage.layout?.find(item => item.type === 'locked' && item.id === contentId)
+  if (layoutItem?.type === 'locked') return layoutItem.text
+  return stage.fields.find(field => field.id === contentId)?.fixedValue || ''
+}
+
+const getOutputProjectForForm = (threeStage: IThreeStageProject, form: IThreeStageForm): IThreeStageProject => {
+  if (form.type !== 'videoPrompt') return threeStage
+  for (const page of normalizeThreeStagePages(threeStage)) {
+    for (const item of page.items) {
+      if (item.kind === 'storyVideoPair' && item.videoPromptForm.id === form.id) {
+        return { ...threeStage, storyboard: item.storyboardForm.section }
+      }
+    }
+  }
+  return threeStage
 }
 
 const getFormPageId = (threeStage: IThreeStageProject, formId: string): string | null => {

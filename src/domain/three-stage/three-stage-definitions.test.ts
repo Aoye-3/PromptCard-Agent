@@ -1,7 +1,21 @@
 import { describe, expect, test } from 'vitest'
-import { buildThreeStageOutput, getStageDefinition } from './three-stage-definitions'
+import { buildThreeStageOutput, getStageDefinition, getStageFixedContent, normalizeFixedContentOverrides } from './three-stage-definitions'
 
 describe('three-stage definitions', () => {
+  test('builds object identity board output from fixed copy and the optional object note', () => {
+    const output = buildThreeStageOutput('object', {
+      objectNotes: '打开状态展示内部接口，保持黄铜与深色皮革材质。'
+    })
+
+    expect(getStageDefinition('object').fields.map(field => field.id)).toEqual(['objectNotes'])
+    expect(output).toContain('创建一张艺术性的 16:9 物品设定身份板。')
+    expect(output).toContain('[主体]：使用参考图像中的物品。')
+    expect(output).toContain('物品设定批注：\n【打开状态展示内部接口，保持黄铜与深色皮革材质。】')
+    expect(output).toContain('固定批注：\n只做多角度参考，不要直接整体作为画面主体物。')
+    expect(output).toContain('不要添加任何文字。')
+    expect(output).not.toContain('角色身份板')
+  })
+
   test('builds character output from fixed copy and the optional character note', () => {
     const output = buildThreeStageOutput('character', {
       characterNotes: '性格安静但执拗，剧情倾向是守护家人'
@@ -85,6 +99,53 @@ describe('three-stage definitions', () => {
     expect(output).toContain('保持角色参考相同的绝对核心主体身份')
     expect(output).toContain('镜头提示词【1-4】：【追逐，滚动，回望】')
     expect(output).not.toContain('用户误填')
+  })
+
+  test('applies per-form fixed content overrides without changing the default definition', () => {
+    const defaultFixed = getStageFixedContent('videoPrompt').duration
+    const overridden = buildThreeStageOutput('videoPrompt', {}, undefined, {
+      duration: { value: 'Custom node duration', unlocked: false }
+    })
+    const defaultOutput = buildThreeStageOutput('videoPrompt', {})
+
+    expect(overridden).toContain('Custom node duration')
+    expect(overridden).not.toContain(defaultFixed)
+    expect(defaultOutput).toContain(defaultFixed)
+    expect(getStageFixedContent('videoPrompt').duration).toBe(defaultFixed)
+  })
+
+  test('applies layout locked-block overrides to final output', () => {
+    const defaultFixed = getStageFixedContent('storyboard')['storyboard-annotation']
+    const overridden = buildThreeStageOutput('storyboard', {}, undefined, {
+      'storyboard-annotation': { value: 'Custom annotation', unlocked: true }
+    })
+
+    expect(overridden).toContain('Custom annotation')
+    expect(overridden).not.toContain(defaultFixed)
+  })
+
+  test('applies every fixed block exposed by each stage to final output', () => {
+    for (const stage of ['character', 'object', 'storyboard', 'videoPrompt'] as const) {
+      for (const contentId of Object.keys(getStageFixedContent(stage))) {
+        const marker = `override:${stage}:${contentId}`
+        const output = buildThreeStageOutput(stage, {}, undefined, {
+          [contentId]: { value: marker, unlocked: false }
+        })
+        expect(output, `${stage}:${contentId}`).toContain(marker)
+      }
+    }
+  })
+
+  test('ignores malformed and unknown persisted fixed content overrides', () => {
+    const overrides = normalizeFixedContentOverrides('character', {
+      'character-reference': { value: 42, unlocked: 'yes' },
+      unknown: { value: 'must not appear', unlocked: true }
+    })
+    const output = buildThreeStageOutput('character', {}, undefined, overrides)
+
+    expect(overrides).toEqual({})
+    expect(output).not.toContain('undefined')
+    expect(output).not.toContain('must not appear')
   })
 
   test('injects storyboard output and optional audio constraints into video prompt output', () => {

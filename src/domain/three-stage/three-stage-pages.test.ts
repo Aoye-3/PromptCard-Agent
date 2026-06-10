@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { buildThreeStageOutput } from './three-stage-definitions'
 import {
+  addObjectFormToPage,
   addThreeStagePage,
   addStoryVideoPairToPage,
   duplicateThreeStagePage,
@@ -12,6 +13,7 @@ import {
   syncThreeStageLegacyFields
 } from './three-stage-pages'
 import type { IThreeStageProject, IThreeStageStoryVideoPairItem } from '@/models/PromptHistory.model'
+import type { IThreeStageCharacterItem } from '@/models/PromptHistory.model'
 
 const legacyProject = (): IThreeStageProject => ({
   selectedStage: 'character',
@@ -68,7 +70,7 @@ describe('three-stage pages', () => {
       pages: [{ ...page, items: [page.items[0]] }]
     }, 200)
 
-    expect(repaired[0].items.map(item => item.kind)).toEqual(['character', 'storyVideoPair'])
+    expect(repaired[0].items.map(item => item.kind)).toEqual(['character'])
   })
 
   test('duplicates a page with a new pair id and one-to-one storyboard/video binding', () => {
@@ -128,6 +130,31 @@ describe('three-stage pages', () => {
     expect(pairs[1].videoPromptForm.number).toBe(2)
   })
 
+  test('adds an independent object board form to the selected page', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(375)
+    const source = syncThreeStageLegacyFields(legacyProject())
+
+    const next = addObjectFormToPage(source, source.pages![0].id)
+    const context = getSelectedThreeStageFormContext(next)
+
+    expect(context.form.type).toBe('object')
+    expect(context.form.title).toBe('物品版 #1')
+    expect(context.item.kind).toBe('character')
+  })
+
+  test('keeps object board type when duplicating a page', () => {
+    const source = syncThreeStageLegacyFields(legacyProject())
+    const withObject = addObjectFormToPage(source, source.pages![0].id)
+
+    const duplicated = duplicateThreeStagePage(withObject, withObject.pages![0].id)
+    const objectForms = normalizeThreeStagePages(duplicated)
+      .flatMap(page => page.items)
+      .filter((item): item is IThreeStageCharacterItem => item.kind === 'character' && item.form.type === 'object')
+
+    expect(objectForms).toHaveLength(2)
+    expect(objectForms.map(item => item.form.number)).toEqual([1, 2])
+  })
+
   test('removes the whole bound pair when deleting either paired card', () => {
     const base = syncThreeStageLegacyFields(legacyProject())
     const source = syncThreeStageLegacyFields(addStoryVideoPairToPage(base, base.pages![0].id))
@@ -138,6 +165,30 @@ describe('three-stage pages', () => {
 
     expect(pairsOf(next)).toHaveLength(1)
     expect(pairsOf(next).some(candidate => candidate.pairId === pair.pairId)).toBe(false)
+  })
+
+  test('keeps the current selection when removing a different item', () => {
+    const base = syncThreeStageLegacyFields(legacyProject())
+    const source = addObjectFormToPage(base, base.pages![0].id)
+    const page = source.pages![0]
+    const pair = page.items.find((item): item is IThreeStageStoryVideoPairItem => item.kind === 'storyVideoPair')!
+    const object = page.items.find(item => item.kind === 'character' && item.form.type === 'object')!
+    const selected = selectThreeStageForm(source, page.id, pair.storyboardForm.id)
+
+    const next = removeThreeStageItem(selected, page.id, object.id)
+
+    expect(next.selectedFormId).toBe(pair.storyboardForm.id)
+  })
+
+  test('does not recreate a deliberately deleted first-page character form', () => {
+    const source = syncThreeStageLegacyFields(legacyProject())
+    const firstPage = source.pages![0]
+    const character = firstPage.items.find(item => item.kind === 'character')!
+
+    const next = removeThreeStageItem(source, firstPage.id, character.id)
+
+    expect(normalizeThreeStagePages(next)[0].items.map(item => item.kind)).toEqual(['storyVideoPair'])
+    expect(getSelectedThreeStageFormContext(next).form.type).toBe('storyboard')
   })
 
   test('injects only the storyboard bound to the selected video prompt form', () => {

@@ -120,7 +120,8 @@ In restricted sandbox environments, Chromium launch may require elevated executi
 - Do not commit generated virtual environments, uv caches, or local runtime databases.
 - Keep docs aligned with current code behavior.
 - Label incomplete Agent/DeerFlow capabilities as roadmap instead of current behavior.
-- For storage changes, verify both browser storage fallback and dev file endpoint behavior.
+- For storage changes, verify storage-service endpoints, revision conflicts, failed-request retention, and one-time legacy browser migration. Projects and Prompt Library presets have no browser persistence fallback.
+- Save-concurrency Playwright tests must echo the request's real project ID and type. Use a request-start barrier before releasing delayed responses; fixed sleeps do not prove stale-response ordering.
 - For Agent collaboration changes, verify that Prompt library writes still require approval while card workspace edits can auto-apply.
 
 ## Roadmap / Not Yet Implemented

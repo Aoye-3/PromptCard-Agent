@@ -9,6 +9,7 @@ The three-stage builder supports structured prompt creation across:
 The current UI is page-based. Each three-stage project owns `threeStage.pages`, and each page owns an ordered list of form items:
 
 - `character`: one independent character form.
+- `object`: one independent object identity-board form, created from the free-canvas menu.
 - `storyVideoPair`: one bound storyboard form plus one bound video prompt form.
 
 The legacy top-level `threeStage.character`, `threeStage.storyboard`, `threeStage.videoPrompt`, `selectedStage`, and `selectedFieldId` fields are kept as compatibility fields. New UI behavior should read and mutate page items through `src/domain/three-stage/three-stage-pages.ts`, then call `syncThreeStageLegacyFields()` before persisting or building workspace context.
@@ -89,6 +90,35 @@ The free canvas builder is a three-stage project variant selected by `meta.build
 - Supported media node kinds are `imageAsset`, `textOverlay`, `arrowAnnotation`, and `mediaGroup`.
 
 The media layer is PromptCard-owned. tldraw may be studied as a reference for shape/store patterns, but it is not a production dependency. Media nodes are not Prompt Library presets, and Agent paths must keep using `workspace-chatbot-agent` rather than Prompt Library write permissions.
+
+### Free Canvas Fixed Content Overrides
+
+Free-canvas three-stage form nodes render fixed content from two definition sources:
+
+- `locked` layout items, keyed by their layout item id.
+- fields with `fixedValue`, keyed by their field id.
+
+Fixed content is locked by default. A user may unlock one fixed block, edit it, and lock it again without changing the shared stage definition. Per-node values and unlock state are stored under `form.meta.canvas.fixedContent`. Resetting a block removes that entry and restores the definition default.
+
+Output assembly resolves each fixed block directly by its stable layout-item or field `contentId`. It does not replace matching text in the final prompt string. Persisted override data is filtered against the current stage definition: unknown IDs, non-string values, and invalid unlock flags are ignored and fall back to the definition default.
+
+New forms, copied-source forms, and duplicated pages must start from definition defaults and must not inherit `fixedContent` overrides from their source form.
+
+Each free-canvas three-stage form node has a bottom copy action. It copies the node's complete generated output, including free fields, per-node fixed-content overrides, and the paired storyboard injection used by video-prompt forms.
+
+The free-canvas create menu also provides an independent object-board node. It uses the same fixed-content unlock, reset, copy, persistence, and page-duplication behavior as character nodes, but it is not added to the default three-node project layout.
+
+### Unified Form Deletion
+
+Standard three-stage and free-canvas deletion use the same source-form semantics:
+
+- Character and object forms are removed independently.
+- Removing either storyboard or video-prompt node removes the complete bound pair.
+- A batch deletion is rejected before mutation if it would leave any Page without a form.
+- A surviving current selection is preserved. If it was removed or is invalid, selection falls back to the first valid form on the preferred Page.
+- Normalization must not recreate a deliberately removed character or pair. It only creates the default forms when loading a legacy project with no Pages.
+
+React Flow form nodes are projections of these source forms. Free-canvas deletion must update the three-stage Page first and then let the graph re-project; deleting only the projected node causes it to reappear.
 
 ## Tests
 

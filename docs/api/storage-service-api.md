@@ -30,7 +30,9 @@ Project writes require a `revision` in the request body:
 }
 ```
 
-If the revision is stale, the service returns `409` with the current item in the response detail. The frontend must surface this as a conflict instead of silently overwriting.
+If the revision is stale, the service returns `409` with the current item in the response detail. The frontend project save coordinator adopts the returned revision and retries the newest complete local project snapshot, serially, up to three attempts. Local editable content is authoritative during this retry and is never replaced by the conflict payload.
+
+Network failures and exhausted retries leave the newest local snapshot pending. A later automatic or manual save retries it; the UI reports failure without rolling back local edits.
 
 ## Prompt Library
 

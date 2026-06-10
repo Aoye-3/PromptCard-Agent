@@ -30,7 +30,12 @@ The free canvas is the high-density editing surface for a three-stage project. I
 
 - Canvas media nodes, positions, text, and user-created edges persist through the three-stage project metadata.
 - Pages and forms persist through the normal three-stage project structure.
+- Three-stage forms are the source of truth for form nodes. React Flow nodes are projections and are never deleted ahead of their source form.
+- `removeFreeCanvasNodes()` maps selected graph node IDs to source forms and media nodes, expands either storyboard/prompt node to its complete binding group, and removes connected user edges in one domain update.
+- Multi-select deletion is atomic. If the result would leave any Page without a form, the entire operation is blocked with `每页至少保留一个表单。`
+- After deletion, a still-valid selected form remains selected. Only a removed or invalid selection falls back to the first surviving form on the preferred Page.
 - The application treats storage responses as save acknowledgements and revision metadata. A stale response must not replace newer local editable content.
+- A failed save does not restore removed nodes. The newest unsaved snapshot remains queued for the next automatic or manual save attempt.
 
 ## Verification
 

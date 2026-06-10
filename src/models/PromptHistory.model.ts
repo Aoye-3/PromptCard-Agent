@@ -28,7 +28,7 @@ export interface IPromptProject {
   meta: Record<string, any>
 }
 
-export type ThreeStageKey = 'character' | 'storyboard' | 'videoPrompt'
+export type ThreeStageKey = 'character' | 'object' | 'storyboard' | 'videoPrompt'
 
 export interface IThreeStageProject {
   character: IThreeStageSection

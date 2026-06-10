@@ -201,7 +201,7 @@ const normalizeThreeStage = (threeStage: IThreeStageProject | undefined): IThree
   if (!threeStage) return undefined
 
   const timestamp = Date.now()
-  const selectedStage: ThreeStageKey = ['character', 'storyboard', 'videoPrompt'].includes(threeStage.selectedStage)
+  const selectedStage: ThreeStageKey = ['character', 'object', 'storyboard', 'videoPrompt'].includes(threeStage.selectedStage)
     ? threeStage.selectedStage
     : 'character'
 

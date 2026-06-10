@@ -2,7 +2,7 @@
 
 ## Overview
 
-PromptCard-Manager uses Zustand for in-memory application state and `localforage` for browser persistence. In development, Vite middleware provides optional file-backed persistence for projects and Prompt library presets.
+PromptCard-Manager uses Zustand and React state for in-memory editing. The local storage service is the durable source for projects and Prompt Library presets; `localforage` is limited to UI-only cache, history, settings, templates, and legacy migration.
 
 ## Zustand Stores
 
@@ -55,13 +55,7 @@ Agent permission scope is enforced before proposals reach UI execution:
 
 ## Storage Model
 
-`src/utils/storage.ts` is the persistence facade. It configures `localforage` using the `PromptCard` database name and exposes logical groups such as projects, presets, workspace, history, and export behavior.
-
-Browser storage is the primary persistence layer. Development file storage is opportunistic:
-
-- Presets use `/__promptcard/presets`.
-- Projects use `/__promptcard/projects`.
-- If dev file endpoints are unavailable, storage falls back to browser persistence.
+`src/utils/storage.ts` is the persistence facade. Project and Prompt Library writes go through the storage service and do not fall back to browser persistence.
 
 Project autosave is idle-based and user-configurable from `我的 -> 设置 -> 自动保存`. Builder changes wait until the user has stopped editing for the configured delay before writing to storage; the default is 10 seconds. The UI should only enter the saving state when that delayed save actually starts. If autosave is disabled, the normal manual save action remains available.
 
@@ -69,12 +63,15 @@ Project autosave is idle-based and user-configurable from `我的 -> 设置 -> �
 
 Autosave responses must never replace the current in-memory project payload. A save request can complete after the user has already deleted or edited fields, especially in storyboard, three-stage, and free-canvas builders. Applying that older response wholesale can restore deleted content.
 
-`App.tsx` tracks a per-project edit sequence for structured builders. Each local storyboard or three-stage update increments the sequence. Autosave captures the sequence when the request starts, then checks it again when the response returns:
+`App.tsx` tracks a per-project edit sequence and sends all project writes through `project-save-coordinator.ts`. Each request owns a complete project snapshot, and each project has at most one storage request in progress. Later edits replace the pending snapshot with the newest complete local state; partial metadata updates are never merged onto an older in-flight content snapshot.
 
-- if the sequence still matches, the response may confirm save status and merge metadata;
-- if the sequence changed, the response is stale and must not update `storyboard`, `threeStage`, canvas positions, media nodes, or card/page content;
-- stale responses may still merge `revision` and `lastOpenedAt` metadata so the next save does not fail against an already-advanced storage revision;
-- stale responses must not set the UI to `saved`, update `updatedAt`, or create prompt-history snapshots.
+- Initial creation is one queued `POST`; edits made while it is running are persisted by a later `PUT` using the returned revision.
+- A `409` updates the coordinator revision and retries the newest local snapshot, up to three attempts.
+- Network failure retains the newest unsaved snapshot. Local content is not rolled back and the next automatic or manual save retries it.
+- Storage responses only acknowledge metadata. They never replace `storyboard`, `threeStage`, canvas nodes, media nodes, or card/page content.
+- Save status and last-saved time are stored per project. A response for project A cannot change the visible state of project B.
+- The UI displays `saved` only when the acknowledged edit sequence is still current and the coordinator has no in-flight, pending, or retained snapshot for that project.
+- Autosave effects depend on editable content snapshots, not revision or save timestamps, so metadata acknowledgements do not create save loops.
 
 Manual save for structured builders follows the same confirmation path. New project types or builder surfaces should reuse this split between content state and storage metadata instead of calling `replaceExistingProject()` from delayed save flows.
 
@@ -180,7 +177,7 @@ The Prompt Library page owns batch proposal approval. Selected pending create pr
 
 ## Merge and Normalization Behavior
 
-Project loading merges browser projects with dev file projects by ID. If both sources contain the same ID, the record with the newer `updatedAt` wins. Loaded projects are sorted by `lastOpenedAt` and then `updatedAt`.
+After one-time legacy browser migration, project loading uses the storage service as the durable source. Loaded projects are sorted by `lastOpenedAt` and then `updatedAt`; browser project data is not merged back into the active project list.
 
 Storyboard loading normalizes missing or legacy fields:
 

@@ -73,14 +73,14 @@ export const storage = {
       const project = await storageServiceClient.projects.getById(id)
       return project ? normalizeProject(project) : null
     },
-    async create(project: {
+    createDraft(project: {
       title: string
       pages: IPage[]
       currentPage: number
       meta?: Record<string, unknown>
-    }): Promise<IPromptProject> {
+    }): IPromptProject {
       const now = Date.now()
-      const newProject: IPromptProject = {
+      return normalizeProject({
         id: now.toString(),
         title: project.title,
         type: 'card',
@@ -91,16 +91,15 @@ export const storage = {
         updatedAt: now,
         lastOpenedAt: now,
         meta: project.meta || {}
-      }
-      return normalizeProject(await storageServiceClient.projects.create(newProject))
+      })
     },
-    async createStoryboard(project: {
+    createStoryboardDraft(project: {
       title: string
       storyboard?: IStoryboardProject
       meta?: Record<string, unknown>
-    }): Promise<IPromptProject> {
+    }): IPromptProject {
       const now = Date.now()
-      const newProject: IPromptProject = {
+      return normalizeProject({
         id: now.toString(),
         title: project.title,
         type: 'storyboard',
@@ -112,16 +111,15 @@ export const storage = {
         updatedAt: now,
         lastOpenedAt: now,
         meta: project.meta || {}
-      }
-      return normalizeProject(await storageServiceClient.projects.create(newProject))
+      })
     },
-    async createThreeStage(project: {
+    createThreeStageDraft(project: {
       title: string
       threeStage?: IThreeStageProject
       meta?: Record<string, unknown>
-    }): Promise<IPromptProject> {
+    }): IPromptProject {
       const now = Date.now()
-      const newProject: IPromptProject = {
+      return normalizeProject({
         id: now.toString(),
         title: project.title,
         type: 'three-stage',
@@ -133,8 +131,32 @@ export const storage = {
         updatedAt: now,
         lastOpenedAt: now,
         meta: project.meta || {}
-      }
-      return normalizeProject(await storageServiceClient.projects.create(newProject))
+      })
+    },
+    async persistCreated(project: IPromptProject): Promise<IPromptProject> {
+      return normalizeProject(await storageServiceClient.projects.create(project))
+    },
+    async create(project: {
+      title: string
+      pages: IPage[]
+      currentPage: number
+      meta?: Record<string, unknown>
+    }): Promise<IPromptProject> {
+      return this.persistCreated(this.createDraft(project))
+    },
+    async createStoryboard(project: {
+      title: string
+      storyboard?: IStoryboardProject
+      meta?: Record<string, unknown>
+    }): Promise<IPromptProject> {
+      return this.persistCreated(this.createStoryboardDraft(project))
+    },
+    async createThreeStage(project: {
+      title: string
+      threeStage?: IThreeStageProject
+      meta?: Record<string, unknown>
+    }): Promise<IPromptProject> {
+      return this.persistCreated(this.createThreeStageDraft(project))
     },
     async update(
       id: string,

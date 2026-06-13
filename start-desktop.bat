@@ -22,7 +22,8 @@ echo Window:   PromptCard Manager Dev Shell
 echo Frontend: http://127.0.0.1:3000/
 echo Data:     repository-local data folder
 echo.
-echo This launcher can be closed after the desktop window opens.
+echo The launcher stays visible until the desktop window opens.
+echo Normal launches reuse the current shell; Rust or Tauri changes trigger one rebuild.
 echo Close the desktop app window to stop the local services.
 echo ======================================
 echo.

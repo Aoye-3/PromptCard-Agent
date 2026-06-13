@@ -53,6 +53,7 @@ async function migrateBrowserCacheOnce(): Promise<void> {
 
   if ((projects && projects.length > 0) || workspace || (presets && presets.length > 0)) {
     await storageServiceClient.migrateBrowserCache({
+      migrationId: 'browser-cache-v1',
       projects: projects || [],
       workspace: workspace || undefined,
       presets: presets || []
@@ -241,22 +242,7 @@ export const storage = {
       return storageServiceClient.presets.create(preset)
     },
     async saveAll(presets: IPreset[]): Promise<void> {
-      const current = await this.getAll()
-      const currentIds = new Set(current.map(preset => preset.id))
-      const nextIds = new Set(presets.map(preset => preset.id))
-
-      for (const preset of presets) {
-        if (currentIds.has(preset.id)) {
-          await storageServiceClient.presets.update(preset.id, preset.revision || 1, preset)
-        } else {
-          await storageServiceClient.presets.create(preset)
-        }
-      }
-
-      const removedIds = current.filter(preset => !nextIds.has(preset.id)).map(preset => preset.id)
-      if (removedIds.length > 0) {
-        await storageServiceClient.presets.trash(removedIds, 'user')
-      }
+      await storageServiceClient.presets.replaceAll(presets)
     },
     async incrementUsage(id: string): Promise<void> {
       const preset = await this.getById(id)
@@ -423,6 +409,7 @@ export const storage = {
       history: await this.history.getAll(),
       templates: await this.templates.getAll(),
       settings: await this.settings.get(),
+      assetReferences: collectAssetReferences(await this.projects.getAll()),
       exportTime: new Date().toISOString(),
       version: '4.0.0'
     }
@@ -437,6 +424,7 @@ export const storage = {
       }
       await this.cards.saveAll(data.cards || [])
       await storageServiceClient.migrateBrowserCache({
+        migrationId: `logical-import-${data.exportTime || 'v4'}`,
         projects: data.projects || [],
         presets: data.presets || []
       })
@@ -450,4 +438,20 @@ export const storage = {
       return false
     }
   }
+}
+
+const collectAssetReferences = (value: unknown): string[] => {
+  const found = new Set<string>()
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit)
+      return
+    }
+    if (!candidate || typeof candidate !== 'object') return
+    const record = candidate as Record<string, unknown>
+    if (typeof record.assetId === 'string' && record.assetId) found.add(record.assetId)
+    Object.values(record).forEach(visit)
+  }
+  visit(value)
+  return Array.from(found).sort()
 }

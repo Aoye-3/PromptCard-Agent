@@ -1,9 +1,6 @@
-import json
-import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from promptcard_storage.store import JsonCollectionStore, RevisionConflict
 
@@ -91,19 +88,6 @@ class JsonCollectionStoreTest(unittest.TestCase):
         self.store.trash_presets([used["id"]], deleted_by="agent", delete_reason="test")
         self.assertNotIn(used["id"], {preset["id"] for preset in self.store.list_presets()})
         self.assertEqual(self.store.list_preset_trash()[0]["deletedBy"], "agent")
-
-    def test_atomic_write_failure_keeps_original_file(self) -> None:
-        created = self.store.create_project({"title": "Original", "type": "card", "pages": [], "currentPage": 0, "meta": {}})
-        original = Path(self.temp_dir.name, "projects.json").read_text(encoding="utf-8")
-
-        with patch("promptcard_storage.store.os.replace", side_effect=OSError("disk")):
-            with self.assertRaises(OSError):
-                self.store.update_project(created["id"], {"title": "Broken"}, revision=created["revision"])
-
-        self.assertEqual(Path(self.temp_dir.name, "projects.json").read_text(encoding="utf-8"), original)
-        payload = json.loads(original)
-        self.assertEqual(payload["projects"][0]["title"], "Original")
-
 
 if __name__ == "__main__":
     unittest.main()

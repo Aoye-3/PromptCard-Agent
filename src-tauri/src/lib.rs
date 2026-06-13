@@ -68,27 +68,22 @@ $sourceRoot = {source_root_literal}
 $ports = @(3000, 8001, 8002)
 $connections = Get-NetTCPConnection -LocalPort $ports -State Listen -ErrorAction SilentlyContinue
 $processIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
-function Test-PromptCardProcess($process) {{
+function Test-PromptCardProcess($process, $parentProcess) {{
   if (!$process) {{ return $false }}
   $commandLine = [string]$process.CommandLine
-  return $commandLine.Contains($sourceRoot) -or
-    $commandLine.Contains('promptcard_storage') -or
-    $commandLine.Contains('app.gateway.app:app') -or
-    $commandLine.Contains('vite --strictPort') -or
-    $commandLine.Contains('start-storage-service.ps1') -or
-    $commandLine.Contains('start-agent-runtime.ps1') -or
-    $commandLine.Contains('start-dev-with-agent.ps1') -or
-    $commandLine.Contains('start-desktop-dev-services.ps1')
+  $parentCommandLine = if ($parentProcess) {{ [string]$parentProcess.CommandLine }} else {{ '' }}
+  return $commandLine.Contains($sourceRoot) -or $parentCommandLine.Contains($sourceRoot)
 }}
 foreach ($processId in $processIds) {{
   if (!$processId) {{ continue }}
   $process = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
   if (!$process) {{ continue }}
   $parentProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction SilentlyContinue
-  if (Test-PromptCardProcess $process) {{
+  if (Test-PromptCardProcess $process $parentProcess) {{
     Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     Write-Output "Stopped $processId $($process.Name)"
-    if (Test-PromptCardProcess $parentProcess) {{
+    $grandParentProcess = if ($parentProcess) {{ Get-CimInstance Win32_Process -Filter "ProcessId=$($parentProcess.ParentProcessId)" -ErrorAction SilentlyContinue }} else {{ $null }}
+    if (Test-PromptCardProcess $parentProcess $grandParentProcess) {{
       Stop-Process -Id $parentProcess.ProcessId -Force -ErrorAction SilentlyContinue
       Write-Output "Stopped parent $($parentProcess.ProcessId) $($parentProcess.Name)"
     }}

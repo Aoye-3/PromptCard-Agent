@@ -28,9 +28,12 @@ function Test-StorageService {
   try {
     $response = Invoke-WebRequest -UseBasicParsing $StorageHealthUrl -TimeoutSec 2
     if ($response.StatusCode -ne 200) { return $false }
-    if (!$env:PROMPTCARD_STORAGE_DATA_DIR) { return $true }
-
     $payload = $response.Content | ConvertFrom-Json
+    if ($payload.serviceVersion -ne "2.0.0" -or $payload.schemaVersion -ne 1 -or !$payload.capabilities.sqlite) {
+      Write-Host "PromptCard storage service is running an incompatible storage version."
+      return $false
+    }
+    if (!$env:PROMPTCARD_STORAGE_DATA_DIR) { return $true }
     if (!$payload.storage) { return $false }
     $expected = [System.IO.Path]::GetFullPath($env:PROMPTCARD_STORAGE_DATA_DIR).TrimEnd('\')
     $actual = [System.IO.Path]::GetFullPath([string]$payload.storage).TrimEnd('\')
@@ -42,6 +45,32 @@ function Test-StorageService {
   }
   catch {
     return $false
+  }
+}
+
+function Stop-StaleStorageListener {
+  try {
+    $uri = [System.Uri]$StorageHealthUrl
+    if ($uri.Port -ne 8002 -or $uri.Host -notin @("127.0.0.1", "localhost")) { return }
+    $listeners = Get-NetTCPConnection -State Listen -LocalPort $uri.Port -ErrorAction SilentlyContinue
+    foreach ($listener in $listeners) {
+      $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+      $parent = if ($process) { Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction SilentlyContinue } else { $null }
+      $commandLine = [string]$process.CommandLine
+      $parentCommandLine = [string]$parent.CommandLine
+      $owned = $commandLine.Contains([string]$RepoRoot) -or
+        $parentCommandLine.Contains([string]$RepoRoot) -or
+        $parentCommandLine.Contains("start-storage-service.ps1")
+      if (!$owned) {
+        throw "Port $($uri.Port) is occupied by an unknown process $($listener.OwningProcess); refusing to stop it."
+      }
+      Write-Host "Stopping stale PromptCard storage service process $($listener.OwningProcess)."
+      Stop-Process -Id $listener.OwningProcess -Force
+    }
+    if ($listeners) { Start-Sleep -Milliseconds 500 }
+  }
+  catch {
+    throw "Unable to replace stale PromptCard storage service: $($_.Exception.Message)"
   }
 }
 
@@ -67,7 +96,48 @@ function Test-AgentRuntime {
 }
 
 function Test-Frontend {
-  return Test-HttpOk $FrontendUrl
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing $FrontendUrl -TimeoutSec 2
+    if ($response.StatusCode -ne 200) { return $false }
+    $scriptMatch = [regex]::Match($response.Content, '<script[^>]+type=["'']module["''][^>]+src=["'']([^"'']+)["'']')
+    if (!$scriptMatch.Success) { return $false }
+    $entryUrl = [System.Uri]::new([System.Uri]$FrontendUrl, $scriptMatch.Groups[1].Value).AbsoluteUri
+    $entry = Invoke-WebRequest -UseBasicParsing $entryUrl -TimeoutSec 2
+    if ($entry.StatusCode -ne 200) { return $false }
+    if ($entry.Content -match '/node_modules/(react|react-dom)/(index|client)\.js') {
+      Write-Host "Vite frontend is serving unoptimized CommonJS React modules."
+      return $false
+    }
+    return $true
+  }
+  catch {
+    return $false
+  }
+}
+
+function Stop-StaleFrontendListener {
+  try {
+    $uri = [System.Uri]$FrontendUrl
+    if ($uri.Port -ne 3000 -or $uri.Host -notin @("127.0.0.1", "localhost")) { return }
+    $listeners = Get-NetTCPConnection -State Listen -LocalPort $uri.Port -ErrorAction SilentlyContinue
+    foreach ($listener in $listeners) {
+      $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
+      $parent = if ($process) { Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction SilentlyContinue } else { $null }
+      $commandLine = [string]$process.CommandLine
+      $parentCommandLine = [string]$parent.CommandLine
+      $owned = ($commandLine.Contains([string]$RepoRoot) -or $parentCommandLine.Contains([string]$RepoRoot)) -and
+        ($commandLine.Contains("vite") -or $parentCommandLine.Contains("npm.cmd run dev"))
+      if (!$owned) {
+        throw "Port $($uri.Port) is occupied by an unknown process $($listener.OwningProcess); refusing to stop it."
+      }
+      Write-Host "Stopping stale PromptCard frontend process $($listener.OwningProcess)."
+      Stop-Process -Id $listener.OwningProcess -Force
+    }
+    if ($listeners) { Start-Sleep -Milliseconds 500 }
+  }
+  catch {
+    throw "Unable to replace stale PromptCard frontend: $($_.Exception.Message)"
+  }
 }
 
 function Wait-UntilHealthy($Name, $Probe) {
@@ -80,6 +150,7 @@ function Wait-UntilHealthy($Name, $Probe) {
 }
 
 if (-not (Test-StorageService)) {
+  Stop-StaleStorageListener
   Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$StorageScript`"" -WindowStyle Hidden
   Wait-UntilHealthy "PromptCard storage service at $StorageHealthUrl" ${function:Test-StorageService}
 }
@@ -99,6 +170,8 @@ if (Test-Frontend) {
   Write-Host "Vite frontend is already healthy at $FrontendUrl"
   exit 0
 }
+
+Stop-StaleFrontendListener
 
 Push-Location $RepoRoot
 try {

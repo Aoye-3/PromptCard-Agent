@@ -16,6 +16,23 @@ import {
 export type FreeCanvasMediaNodeKind = 'imageAsset' | 'textOverlay' | 'arrowAnnotation' | 'mediaGroup'
 export type FreeCanvasNodeKind = 'threeStageForm' | FreeCanvasMediaNodeKind
 
+export interface FreeCanvasCropRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface FreeCanvasCropLines {
+  horizontal: number[]
+  vertical: number[]
+}
+
+export interface FreeCanvasCropRegion extends FreeCanvasCropRect {
+  row: number
+  column: number
+}
+
 export interface FreeCanvasPosition {
   x: number
   y: number
@@ -33,12 +50,7 @@ export interface FreeCanvasMediaNode {
   imagePrompt?: string
   sourceNodeId?: string | null
   generatedFromAgent?: boolean
-  crop?: {
-    x: number
-    y: number
-    width: number
-    height: number
-  } | null
+  crop?: FreeCanvasCropRect | null
   text?: string
   color?: string
   meta: Record<string, unknown>
@@ -82,6 +94,7 @@ export interface FreeCanvasNodeData extends Record<string, unknown> {
   onResetFixedContent?: (form: IThreeStageForm, contentId: string) => void
   onCopyOutput?: (form: IThreeStageForm) => void
   onUpdateMediaText?: (nodeId: string, text: string) => void
+  onStartImageCrop?: (nodeId: string) => void
 }
 
 export type FreeCanvasFlowNode = Node<FreeCanvasNodeData>
@@ -143,6 +156,73 @@ export const addFreeCanvasMediaNode = (
   const meta = getFreeCanvasMeta(threeStage)
   return setFreeCanvasMeta(threeStage, { mediaNodes: [...meta.mediaNodes, normalizeMediaNode(node)] })
 }
+
+export const normalizeFreeCanvasCropLines = (lines: number[], minimumGap = 0.005): number[] => {
+  const sorted = lines
+    .filter(value => Number.isFinite(value) && value > 0 && value < 1)
+    .sort((left, right) => left - right)
+
+  return sorted.filter((value, index) => index === 0 || value - sorted[index - 1] >= minimumGap)
+}
+
+export const buildFreeCanvasCropGrid = (lines: FreeCanvasCropLines): FreeCanvasCropRegion[] => {
+  const horizontal = [0, ...normalizeFreeCanvasCropLines(lines.horizontal), 1]
+  const vertical = [0, ...normalizeFreeCanvasCropLines(lines.vertical), 1]
+  const regions: FreeCanvasCropRegion[] = []
+
+  for (let row = 0; row < horizontal.length - 1; row += 1) {
+    for (let column = 0; column < vertical.length - 1; column += 1) {
+      regions.push({
+        x: vertical[column],
+        y: horizontal[row],
+        width: vertical[column + 1] - vertical[column],
+        height: horizontal[row + 1] - horizontal[row],
+        row,
+        column
+      })
+    }
+  }
+  return regions
+}
+
+export const createFreeCanvasCroppedNodes = (
+  source: FreeCanvasMediaNode,
+  lines: FreeCanvasCropLines,
+  timestamp = Date.now()
+): FreeCanvasMediaNode[] => {
+  if (!source.assetId) return []
+  const regions = buildFreeCanvasCropGrid(lines)
+  const startX = source.position.x + source.width + 40
+  const gap = 10
+
+  return regions.map((region, index) => ({
+    ...createFreeCanvasMediaNode('imageAsset', {
+      x: startX + source.width * region.x + region.column * gap,
+      y: source.position.y + source.height * region.y + region.row * gap
+    }, timestamp + index),
+    title: `${source.title} ${index + 1}`,
+    width: source.width * region.width,
+    height: source.height * region.height,
+    assetId: source.assetId,
+    imageUrl: source.imageUrl,
+    sourceNodeId: source.id,
+    crop: { x: region.x, y: region.y, width: region.width, height: region.height },
+    meta: { ...source.meta, cropIndex: index }
+  }))
+}
+
+export const duplicateFreeCanvasMediaNode = (
+  source: FreeCanvasMediaNode,
+  timestamp = Date.now(),
+  offset = 28
+): FreeCanvasMediaNode => ({
+  ...source,
+  id: `${timestamp}-${source.kind}-${Math.random().toString(36).slice(2, 8)}`,
+  title: `${source.title} 副本`,
+  position: { x: source.position.x + offset, y: source.position.y + offset },
+  crop: source.crop ? { ...source.crop } : null,
+  meta: { ...source.meta, duplicatedFromNodeId: source.id }
+})
 
 export const updateFreeCanvasMediaNode = (
   threeStage: IThreeStageProject,
@@ -531,11 +611,20 @@ const normalizeMediaNode = (node: Partial<FreeCanvasMediaNode>): FreeCanvasMedia
   imagePrompt: node.imagePrompt || '',
   sourceNodeId: node.sourceNodeId || null,
   generatedFromAgent: Boolean(node.generatedFromAgent),
-  crop: node.crop || null,
+  crop: normalizeCropRect(node.crop),
   text: node.text || '',
   color: node.color || '#111827',
   meta: node.meta || {}
 })
+
+const normalizeCropRect = (crop: FreeCanvasCropRect | null | undefined): FreeCanvasCropRect | null => {
+  if (!crop) return null
+  const x = Math.min(1, Math.max(0, Number(crop.x) || 0))
+  const y = Math.min(1, Math.max(0, Number(crop.y) || 0))
+  const width = Math.min(1 - x, Math.max(0, Number(crop.width) || 0))
+  const height = Math.min(1 - y, Math.max(0, Number(crop.height) || 0))
+  return width > 0 && height > 0 ? { x, y, width, height } : null
+}
 
 const normalizeUserEdge = (edge: Partial<FreeCanvasUserEdge>): FreeCanvasUserEdge => ({
   id: edge.id || `free-canvas-edge:${edge.source || 'source'}:${edge.target || 'target'}:${Date.now()}`,

@@ -5,6 +5,7 @@ Run before merging broad implementation or documentation restructuring:
 ```powershell
 npm.cmd run test -- --run
 npm.cmd run storage:test
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest promptcard_storage.tests.test_app
 npx.cmd tsc --noEmit
 npm.cmd run lint
 npm.cmd run build

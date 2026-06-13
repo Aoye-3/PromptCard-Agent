@@ -1,28 +1,40 @@
 # Local Storage Service
 
-`promptcard_storage` is a local FastAPI service that owns durable JSON storage for PromptCard data.
+`promptcard_storage` is the sole durable owner of projects, Prompt Library presets, Trash state, and image asset metadata. Runtime records are stored in `data/promptcard.sqlite3`; image bytes remain under `data/assets/`.
 
-## Files
+## SQLite Contract
 
-- `data/projects.json`: active projects.
-- `data/project-trash.json`: deleted projects.
-- `data/prompt-library-presets.json`: active Prompt Library presets.
-- `data/prompt-library-trash.json`: deleted Prompt Library presets.
+- `SqliteStore` is the compatibility facade for project and Prompt Library CRUD plus transaction ownership. `StorageInitializer`, `AssetStore`, and `BackupManager` own JSON initialization, image files/diagnostics, and consistent backup creation respectively.
+- FastAPI routes are registered by `create_app(storage)`, allowing route contract tests to inject an isolated temporary store while the exported default `app` keeps the existing service startup contract.
+- Schema version `1` uses `projects`, `presets`, `assets`, `schema_migrations`, and `browser_imports`.
+- Projects and presets retain their existing JSON payload. Indexed columns own revision, status, ordering, usage, and timestamps.
+- Active and Trash records share one table. Delete and restore are single transactions.
+- Connections enable WAL, foreign keys, a busy timeout, and full synchronous durability. Writes begin with `BEGIN IMMEDIATE`.
+- Duplicate creates and stale revisions return conflicts instead of overwriting data.
 
-All writes use a temp file plus `os.replace`, so a failed write does not leave a half-written JSON file in place.
+## JSON Migration
 
-## Data Ownership
+When `promptcard.sqlite3` is absent, startup strictly reads the four legacy JSON files. Invalid JSON, invalid shapes, or conflicting duplicate IDs abort startup without creating a database. If an active record and Trash record share an ID with identical business payloads, the newer active state wins and the redundant Trash copy is omitted. Valid source files and an asset manifest are copied to `backups/storage-json-v1-<UTC>/`, then imported and verified in one migration transaction.
 
-Projects and Prompt Library presets are no longer browser-owned data. `src/utils/storage.ts` remains the frontend compatibility facade, but project and preset methods call `/storage-api/*`.
+Legacy JSON remains unchanged after migration and is never written again. The Vite compatibility endpoints are read-only.
 
-`localforage` is still allowed for runtime UI cache and legacy data migration paths such as prompt history, settings, templates, and one-time browser cache import.
+## Maintenance
 
-## Revisions
+Use the maintenance module while the storage service is stopped:
 
-`IPromptProject` includes required `revision: number`. `IPreset` includes optional `revision?: number` for TypeScript compatibility; the service normalizes missing legacy values to `1`.
+```powershell
+python -m promptcard_storage.maintenance --data-dir data backup backups/manual-backup
+python -m promptcard_storage.maintenance --data-dir data diagnose-assets
+python -m promptcard_storage.maintenance --data-dir data restore backups/manual-backup
+```
 
-Every successful update increments the item revision. Stale writes return conflict instead of merging fields automatically.
+Backups use the SQLite backup API and include the database, assets, and a manifest. Restore validates schema and database integrity and creates a pre-restore snapshot when current storage exists.
 
-## Agent Access
+## Verification
 
-Agent Runtime tools read projects and presets through the storage API. Direct write tools require a revision. Prompt Library model output still defaults to proposal mode; user approval remains the normal durable write path.
+`npm.cmd run storage:test` discovers every `test_*.py` file under `promptcard_storage/tests`. Core store tests run with the system Python. FastAPI route contract tests run when FastAPI is installed and otherwise report explicit skips; they can be run with the repository Agent backend environment:
+
+```powershell
+npm.cmd run storage:test
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest promptcard_storage.tests.test_app
+```

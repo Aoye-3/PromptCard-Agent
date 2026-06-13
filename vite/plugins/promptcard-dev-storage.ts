@@ -1,5 +1,5 @@
 import fs from 'fs/promises'
-import type { IncomingMessage, ServerResponse } from 'http'
+import type { ServerResponse } from 'http'
 import path from 'path'
 import type { Plugin } from 'vite'
 
@@ -10,14 +10,6 @@ const sendJson = (res: ServerResponse, statusCode: number, payload: unknown) => 
   res.statusCode = statusCode
   res.setHeader('Content-Type', 'application/json; charset=utf-8')
   res.end(JSON.stringify(payload))
-}
-
-const readRequestBody = async (req: IncomingMessage): Promise<string> => {
-  const chunks: Buffer[] = []
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
-  }
-  return Buffer.concat(chunks).toString('utf8')
 }
 
 const ensureJsonFile = async (filePath: string, emptyPayload: unknown) => {
@@ -78,18 +70,7 @@ export const promptLibraryFilePlugin = (): Plugin => ({
         }
 
         if (req.method === 'PUT') {
-          const body = JSON.parse(await readRequestBody(req))
-          if (!isValidPresetList(body.presets)) {
-            return sendJson(res, 400, { error: 'Invalid presets payload' })
-          }
-
-          const payload = {
-            schemaVersion: 1,
-            updatedAt: new Date().toISOString(),
-            presets: body.presets
-          }
-          await fs.writeFile(promptLibraryDataFile, JSON.stringify(payload, null, 2), 'utf8')
-          return sendJson(res, 200, payload)
+          return sendJson(res, 410, { error: 'Legacy JSON storage is read-only; use /storage-api/presets' })
         }
 
         return sendJson(res, 405, { error: 'Method not allowed' })
@@ -114,18 +95,7 @@ export const projectFilePlugin = (): Plugin => ({
         }
 
         if (req.method === 'PUT') {
-          const body = JSON.parse(await readRequestBody(req))
-          if (!isValidProjectList(body.projects)) {
-            return sendJson(res, 400, { error: 'Invalid projects payload' })
-          }
-
-          const payload = {
-            schemaVersion: 1,
-            updatedAt: new Date().toISOString(),
-            projects: body.projects
-          }
-          await fs.writeFile(projectsDataFile, JSON.stringify(payload, null, 2), 'utf8')
-          return sendJson(res, 200, payload)
+          return sendJson(res, 410, { error: 'Legacy JSON storage is read-only; use /storage-api/projects' })
         }
 
         return sendJson(res, 405, { error: 'Method not allowed' })

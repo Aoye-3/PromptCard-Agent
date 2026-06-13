@@ -40,10 +40,10 @@ This endpoint is implemented by Vite middleware and exists only while the Vite d
 
 Vite dev middleware also exposes:
 
-- `GET/PUT /__promptcard/presets`
-- `GET/PUT /__promptcard/projects`
+- `GET /__promptcard/presets`
+- `GET /__promptcard/projects`
 
-These endpoints write JSON files under `data/` and are compatibility-only local development helpers. Durable frontend storage should use the storage service through `/storage-api`.
+These endpoints are read-only legacy migration helpers. Their `PUT` forms return `410`; durable writes use `/storage-api`.
 
 ## Runtime Process Health
 
@@ -53,7 +53,7 @@ These endpoints write JSON files under `data/` and are compatibility-only local 
 - Agent Runtime: `http://127.0.0.1:8001/health`
 - frontend: `http://127.0.0.1:3000/`
 
-If storage or Agent Runtime is already healthy, the script reuses it instead of starting another hidden process. If the Vite frontend is already healthy, the script exits successfully instead of trying to start a second strict-port Vite process.
+Storage reuse requires service version `2.0.0`, schema version `1`, SQLite capability, and the expected data directory. Frontend reuse also fetches the Vite entry module and rejects a server that exposes raw CommonJS React modules instead of optimized dependencies. An incompatible listener is stopped only when its command line or parent proves ownership by this repository; unknown port owners are never killed automatically.
 
 The health endpoints above are the source of truth for local startup success. Historical `logs/*.log` files may exist from older runs, but the current hidden background startup path does not require redirected stdout/stderr logs.
 
@@ -124,7 +124,7 @@ Get-NetTCPConnection -LocalPort 3000 -State Listen
 
 Stop only the known development server process, then restart `npm.cmd run dev`. Because Vite uses strict port mode, this conflict must be fixed before the frontend can start.
 
-When running `npm.cmd run dev:with-agent`, a healthy existing frontend at `http://127.0.0.1:3000/` is reused and the command exits successfully. Investigate the listener only when the frontend URL does not return a successful response.
+When running `npm.cmd run dev:with-agent`, an existing frontend is reused only when both the HTML shell and transformed entry module pass validation. A broken project-owned Vite listener is replaced; an unknown port owner is reported and left untouched.
 
 ### Agent Backend Disconnected
 

@@ -22,8 +22,12 @@ import {
   useReactFlow
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ChevronLeft, ChevronRight, Copy, Database, FileText, Home, Image, Layers, Lock, MousePointer2, Package, PanelLeft, PanelRight, Pencil, Plus, RotateCcw, Trash2, Type, Unlock, Workflow } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Database, FileText, Home, Layers, Lock, MousePointer2, Package, PanelLeft, PanelRight, Pencil, Plus, RotateCcw, Trash2, Type, Unlock, Workflow } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
+import { canvasImageAssetUrl } from '@/components/canvas/canvas-image-assets'
+import { FreeCanvasMediaNode } from '@/components/canvas/FreeCanvasMediaNode'
+import { ImageCropEditor } from '@/components/canvas/ImageCropEditor'
+import { useCanvasImageInteractions } from '@/components/canvas/useCanvasImageInteractions'
 import {
   addCharacterFormToPage,
   addObjectFormToPage,
@@ -105,6 +109,7 @@ const FreeCanvasBuilderInner = ({
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(true)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
 
   const updateFormSection = useCallback((form: IThreeStageForm, section: IThreeStageSection, fieldId?: string): void => {
     const pageId = getFormPageId(normalizedThreeStage, form.id) || selectedContext.page.id
@@ -173,13 +178,25 @@ const FreeCanvasBuilderInner = ({
     }
   }, [normalizedThreeStage])
 
+  const selectedMedia = graph.nodes.find(node => node.id === selectedNodeId)?.data.mediaNode
+  const imageInteractions = useCanvasImageInteractions({
+    threeStage: normalizedThreeStage,
+    mediaNodes: graph.nodes.flatMap(node => node.data.mediaNode ? [node.data.mediaNode] : []),
+    selectedMedia,
+    screenToFlowPosition: position => reactFlow.screenToFlowPosition(position),
+    onChange,
+    onSelectNode: setSelectedNodeId,
+    isTypingTarget
+  })
+
   const canvasNodes = useMemo(() => graph.nodes.map(node => {
     if (node.data.nodeKind !== 'threeStageForm' || !node.data.formId) {
       return {
         ...node,
         data: {
           ...node.data,
-          onUpdateMediaText: updateMediaText
+          onUpdateMediaText: updateMediaText,
+          onStartImageCrop: imageInteractions.startImageCrop
         }
       }
     }
@@ -197,10 +214,9 @@ const FreeCanvasBuilderInner = ({
         onCopyOutput: copyFormOutput
       }
     }
-  }), [copyFormOutput, graph.nodes, normalizedThreeStage, resetFixedContent, selectCanvasField, toggleFixedContent, updateField, updateFixedContent, updateMediaText])
+  }), [copyFormOutput, graph.nodes, imageInteractions.startImageCrop, normalizedThreeStage, resetFixedContent, selectCanvasField, toggleFixedContent, updateField, updateFixedContent, updateMediaText])
 
   const [nodes, setNodes] = useState<FreeCanvasFlowNode[]>(canvasNodes)
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [spacePressed, setSpacePressed] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowX: number; flowY: number } | null>(null)
   const selectedNode = nodes.find(node => node.id === selectedNodeId) || null
@@ -439,7 +455,14 @@ const FreeCanvasBuilderInner = ({
         onDeletePage={deletePage}
       />
 
-      <div className={`h-full transition-[padding] ${leftDrawerOpen ? 'pl-[320px]' : 'pl-0'} ${rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'}`} data-free-canvas-screen>
+      <div
+        className={`relative h-full transition-[padding] ${leftDrawerOpen ? 'pl-[320px]' : 'pl-0'} ${rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'}`}
+        data-free-canvas-screen
+        onDragEnterCapture={imageInteractions.handleDragEnter}
+        onDragOverCapture={imageInteractions.handleDragOver}
+        onDragLeaveCapture={imageInteractions.handleDragLeave}
+        onDropCapture={imageInteractions.handleDrop}
+      >
         <ReactFlow
           nodes={nodes}
           edges={canvasEdges}
@@ -471,7 +494,33 @@ const FreeCanvasBuilderInner = ({
           <MiniMap pannable zoomable className="!bottom-4 !left-4 !right-auto transition-all" />
           <Controls className="!bottom-6 !left-auto !right-6 transition-all" />
         </ReactFlow>
+        {imageInteractions.fileDragActive && (
+          <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-[#c96442] bg-white/80 text-base font-semibold text-[#9f4429] backdrop-blur-sm">
+            松开以添加图片
+          </div>
+        )}
       </div>
+
+      {imageInteractions.assetUploadError && (
+        <div className="absolute left-1/2 top-5 z-50 -translate-x-1/2 rounded-full border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-lg" role="alert">
+          {imageInteractions.assetUploadError}
+        </div>
+      )}
+
+      {imageInteractions.clipboardNotice && (
+        <div className="absolute left-1/2 top-5 z-50 -translate-x-1/2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-lg" role="status">
+          {imageInteractions.clipboardNotice}
+        </div>
+      )}
+
+      {imageInteractions.cropMedia?.assetId && (
+        <ImageCropEditor
+          media={imageInteractions.cropMedia}
+          imageUrl={canvasImageAssetUrl(imageInteractions.cropMedia.assetId)}
+          onCancel={imageInteractions.cancelImageCrop}
+          onConfirm={imageInteractions.confirmImageCrop}
+        />
+      )}
 
       {contextMenu && (
         <CanvasCreateMenu
@@ -983,48 +1032,6 @@ const CanvasFixedContentBlock = ({
   )
 }
 
-const FreeCanvasMediaNode = ({ data, selected }: NodeProps<Node<FreeCanvasNodeData>>) => {
-  const media = data.mediaNode
-  if (media?.kind === 'textOverlay') {
-    return (
-      <div className={`relative min-w-[180px] max-w-[360px] rounded-md p-1 ${selected ? 'ring-2 ring-violet-500' : ''}`}>
-        <Handle type="target" position={Position.Left} className="!bg-violet-500" />
-        <textarea
-          className="nodrag nowheel block min-h-[42px] w-full resize-none bg-transparent text-base font-semibold leading-6 text-gray-950 outline-none placeholder:text-gray-400"
-          value={media.text || ''}
-          placeholder="文字标注"
-          onChange={(event) => data.onUpdateMediaText?.(media.id, event.target.value)}
-        />
-        <Handle type="source" position={Position.Right} className="!bg-violet-500" />
-      </div>
-    )
-  }
-
-  return (
-    <div className={`relative w-[280px] rounded-[18px] border bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.08)] ${selected ? 'border-violet-500' : 'border-gray-200'}`}>
-      <Handle type="target" position={Position.Left} className="!bg-violet-500" />
-      <div className="mb-3 flex items-center gap-2">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
-          {media?.kind === 'arrowAnnotation' ? <MousePointer2 className="h-4 w-4" /> : <Image className="h-4 w-4" />}
-        </span>
-        <div>
-          <div className="text-sm font-black text-gray-950">{data.title}</div>
-          <div className="text-[11px] font-bold text-gray-400">{media?.kind}</div>
-        </div>
-      </div>
-      {media?.imageUrl ? (
-        <img src={media.imageUrl} alt="" className="h-28 w-full rounded-xl object-cover" />
-      ) : (
-        <div className="flex h-28 items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50 text-xs font-bold text-gray-400">
-          {data.subtitle}
-        </div>
-      )}
-      {media?.text && <p className="mt-3 text-sm font-semibold text-gray-700">{media.text}</p>}
-      <Handle type="source" position={Position.Right} className="!bg-violet-500" />
-    </div>
-  )
-}
-
 const nodeTypes = {
   threeStageForm: ThreeStageFormNode,
   freeCanvasMedia: FreeCanvasMediaNode
@@ -1049,7 +1056,6 @@ const CanvasCreateMenu = ({
     <CreateMenuButton label="新建人物板" onClick={onCreateCharacter} />
     <CreateMenuButton label="新建物品版" onClick={onCreateObject} />
     <CreateMenuButton label="新建故事+提示词组" onClick={onCreatePair} />
-    <CreateMenuButton label="新建图片节点" onClick={() => onCreateMedia('imageAsset')} />
     <CreateMenuButton label="新建文字标注" onClick={() => onCreateMedia('textOverlay')} />
     <CreateMenuButton label="新建箭头标注" onClick={() => onCreateMedia('arrowAnnotation')} />
   </div>
@@ -1076,7 +1082,6 @@ const CanvasBottomToolbar = ({
     <ToolbarButton title="人物板" onClick={onCreateCharacter}><Plus className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="物品版" onClick={onCreateObject}><Package className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="故事+提示词组" onClick={onCreatePair}><Workflow className="h-4 w-4" /></ToolbarButton>
-    <ToolbarButton title="图片节点" onClick={() => onCreateMedia('imageAsset')}><Image className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="文字标注" onClick={() => onCreateMedia('textOverlay')}><Type className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="箭头标注" onClick={() => onCreateMedia('arrowAnnotation')}><MousePointer2 className="h-4 w-4" /></ToolbarButton>
   </div>

@@ -17,7 +17,7 @@ New features should extend `meta` instead of changing the top-level shape unless
 
 ## Initialization
 
-On first initialization, `preset.store` loads presets through `storage.presets.getAll()`. Durable seeding happens in the storage service when `data/prompt-library-presets.json` is empty. The frontend no longer creates or persists default presets.
+On first initialization, `preset.store` loads presets through `storage.presets.getAll()`. During first SQLite creation, the service imports legacy Prompt JSON or seeds an otherwise empty database from the bundled preset file.
 
 ## Current Operations
 
@@ -45,11 +45,9 @@ Three-stage field metadata must not require a new preset shape. If a field needs
 The primary durable API is `/storage-api/presets`. In development, Vite still exposes legacy helpers:
 
 - `GET /__promptcard/presets`
-- `PUT /__promptcard/presets`
+- `PUT /__promptcard/presets` returns `410 Gone`
 
-The endpoint validates that incoming presets match the expected preset list shape before writing `data/prompt-library-presets.json`.
-
-These endpoints are development conveniences. They are not the Prompt Library source of truth.
+The legacy endpoint exists only to inspect migration source data. Prompt Library writes use `/storage-api/presets`; whole-library replacements use one atomic batch transaction.
 
 ## Agent Write Safety
 

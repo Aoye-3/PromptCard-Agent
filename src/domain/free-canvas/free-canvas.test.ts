@@ -5,11 +5,15 @@ import {
   addFreeCanvasEdge,
   buildFreeCanvasFormOutput,
   buildFreeCanvasGraph,
+  buildFreeCanvasCropGrid,
+  createFreeCanvasCroppedNodes,
+  duplicateFreeCanvasMediaNode,
   createFreeCanvasMediaNode,
   getFreeCanvasConnectedChain,
   getFormFixedContentOverrides,
   getFreeCanvasMeta,
   mediaNodeFlowId,
+  normalizeFreeCanvasCropLines,
   removeFreeCanvasNodes,
   removeFreeCanvasFlowNodes,
   removeFreeCanvasMediaNode,
@@ -67,6 +71,83 @@ describe('free canvas domain', () => {
     })
     expect(getFreeCanvasMeta(updated).mediaNodes[0].crop).toEqual({ x: 0.1, y: 0.2, width: 0.5, height: 0.6 })
     expect(getFreeCanvasMeta(removed).mediaNodes).toEqual([])
+  })
+
+  test('normalizes crop lines into sorted unique interior positions', () => {
+    expect(normalizeFreeCanvasCropLines([0.75, -1, 0.5, 0.501, 1, 0.02, Number.NaN])).toEqual([
+      0.02,
+      0.5,
+      0.75
+    ])
+  })
+
+  test('builds crop regions from left to right and top to bottom', () => {
+    const regions = buildFreeCanvasCropGrid({ horizontal: [0.25, 0.5, 0.75], vertical: [1 / 3, 2 / 3] })
+
+    expect(regions).toHaveLength(12)
+    expect(regions[0]).toEqual({ x: 0, y: 0, width: 1 / 3, height: 0.25, row: 0, column: 0 })
+    expect(regions[1]).toMatchObject({ row: 0, column: 1 })
+    expect(regions[3]).toMatchObject({ row: 1, column: 0 })
+    expect(regions[11]).toMatchObject({ row: 3, column: 2 })
+  })
+
+  test('creates non-destructive cropped nodes in the source grid layout', () => {
+    const source = {
+      ...createFreeCanvasMediaNode('imageAsset', { x: 100, y: 80 }, 700),
+      assetId: 'asset-1',
+      width: 300,
+      height: 240
+    }
+    const nodes = createFreeCanvasCroppedNodes(source, { horizontal: [0.5], vertical: [0.5] }, 800)
+
+    expect(nodes).toHaveLength(4)
+    expect(nodes.map(node => node.assetId)).toEqual(['asset-1', 'asset-1', 'asset-1', 'asset-1'])
+    expect(nodes.map(node => node.sourceNodeId)).toEqual([source.id, source.id, source.id, source.id])
+    expect(nodes.map(node => node.crop)).toEqual([
+      { x: 0, y: 0, width: 0.5, height: 0.5 },
+      { x: 0.5, y: 0, width: 0.5, height: 0.5 },
+      { x: 0, y: 0.5, width: 0.5, height: 0.5 },
+      { x: 0.5, y: 0.5, width: 0.5, height: 0.5 }
+    ])
+    expect(nodes.map(node => node.position)).toEqual([
+      { x: 440, y: 80 },
+      { x: 600, y: 80 },
+      { x: 440, y: 210 },
+      { x: 600, y: 210 }
+    ])
+  })
+
+  test('preserves unequal crop region proportions and grid offsets', () => {
+    const source = {
+      ...createFreeCanvasMediaNode('imageAsset', { x: 10, y: 20 }, 900),
+      assetId: 'asset-2',
+      width: 400,
+      height: 300
+    }
+    const nodes = createFreeCanvasCroppedNodes(source, { horizontal: [0.25], vertical: [0.75] }, 901)
+
+    expect(nodes.map(node => ({ width: node.width, height: node.height, position: node.position }))).toEqual([
+      { width: 300, height: 75, position: { x: 450, y: 20 } },
+      { width: 100, height: 75, position: { x: 760, y: 20 } },
+      { width: 300, height: 225, position: { x: 450, y: 105 } },
+      { width: 100, height: 225, position: { x: 760, y: 105 } }
+    ])
+  })
+
+  test('duplicates a media node with a new id and offset while sharing its asset', () => {
+    const source = {
+      ...createFreeCanvasMediaNode('imageAsset', { x: 40, y: 60 }, 1000),
+      assetId: 'asset-copy.png',
+      crop: { x: 0.25, y: 0, width: 0.5, height: 1 }
+    }
+
+    const copy = duplicateFreeCanvasMediaNode(source, 1100)
+
+    expect(copy.id).not.toBe(source.id)
+    expect(copy.position).toEqual({ x: 68, y: 88 })
+    expect(copy.assetId).toBe(source.assetId)
+    expect(copy.crop).toEqual(source.crop)
+    expect(copy.title).toBe(`${source.title} 副本`)
   })
 
   test('projects an object board as an independent canvas form node', () => {

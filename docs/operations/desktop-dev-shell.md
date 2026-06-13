@@ -10,6 +10,8 @@ The desktop dev shell is a Tauri window for local self-use while the source tree
 - Stops the local storage service, Agent Runtime, and Vite frontend when the desktop window closes.
 - Shows a desktop-only source update action under the Me screen settings.
 
+The main webview sets `dragDropEnabled: false`. Windows requires this for Explorer file drags to reach the React HTML5 handlers used by the free canvas. Re-enabling Tauri's native interception would require a separate native path-to-asset bridge.
+
 ## Commands
 
 Windows Tauri development requires Rust plus Microsoft C++ Build Tools. If `cargo check` fails with `link.exe not found`, install Visual Studio Build Tools with the Visual C++ workload and retry.
@@ -24,6 +26,14 @@ Or double-click:
 
 ```text
 start-desktop.bat
+```
+
+The desktop launcher starts or reuses local services, then directly runs the existing debug shell when it is newer than the Rust sources and Tauri configuration. This skips the `tauri dev` compile/watch startup on normal launches. Changes under `src-tauri/src/`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, or `src-tauri/build.rs` automatically use the slower rebuild path once. The launcher remains visible with progress until the application window is detected.
+
+To deliberately rebuild the shell while diagnosing native changes, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\launch-desktop-shell.ps1 -ForceRebuild
 ```
 
 `start-desktop.bat` is only a launcher. It starts `npm.cmd run tauri:dev` in a detached hidden process and exits after a successful launch request, so closing the launcher terminal does not close the desktop window or its local services.
@@ -41,8 +51,8 @@ That script delegates to `scripts/start-dev-with-agent.ps1`. For self-use develo
 The desktop shell defaults to the existing repository-local development data:
 
 ```text
-data/projects.json
-data/prompt-library-presets.json
+data/promptcard.sqlite3
+data/assets/
 agent-runtime/.deer-flow
 ```
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, WheelEvent } from 'react'
 import { Bot, ChevronDown, ChevronLeft, ChevronRight, Copy, Database, Eraser, Home, Link2, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { buildThreeStageWorkspaceContext } from '@/utils/agent-workspace'
@@ -35,6 +36,19 @@ import {
   syncThreeStageLegacyFields,
   updateThreeStageFormSection
 } from '@/domain/three-stage/three-stage-pages'
+
+export const MIN_THREE_STAGE_RAIL_ZOOM = 0.72
+export const MAX_THREE_STAGE_RAIL_ZOOM = 1.36
+const DEFAULT_THREE_STAGE_RAIL_ZOOM = 1
+const THREE_STAGE_RAIL_ZOOM_STEP = 0.08
+
+export const getNextThreeStageRailZoom = (currentZoom: number, deltaY: number): number => {
+  if (deltaY === 0) return currentZoom
+  const direction = deltaY < 0 ? 1 : -1
+  const nextZoom = currentZoom + direction * THREE_STAGE_RAIL_ZOOM_STEP
+  const clampedZoom = Math.min(MAX_THREE_STAGE_RAIL_ZOOM, Math.max(MIN_THREE_STAGE_RAIL_ZOOM, nextZoom))
+  return Number(clampedZoom.toFixed(2))
+}
 
 interface ThreeStageBuilderScreenProps {
   activeProject: IPromptProject
@@ -76,6 +90,7 @@ const ThreeStageBuilderScreen = ({
   const [pairSourceId, setPairSourceId] = useState('')
   const stageRailRef = useRef<HTMLDivElement>(null)
   const [stageRailScroll, setStageRailScroll] = useState({ left: 0, max: 0 })
+  const [stageZoom, setStageZoom] = useState(DEFAULT_THREE_STAGE_RAIL_ZOOM)
   const selectedField = selectedStageDefinition.fields.find(field => field.id === normalizedThreeStage.selectedFieldId && !field.fixedValue) ||
     selectedStageDefinition.fields.find(field => !field.fixedValue) ||
     selectedStageDefinition.fields[0]
@@ -113,7 +128,16 @@ const ThreeStageBuilderScreen = ({
 
   useEffect(() => {
     updateStageRailScroll()
-  }, [currentPage.id, currentPage.items.length, updateStageRailScroll])
+  }, [currentPage.id, currentPage.items.length, stageZoom, updateStageRailScroll])
+
+  const stageRailZoomStyle = useMemo(() => ({ zoom: stageZoom } as CSSProperties), [stageZoom])
+
+  const handleStageRailWheel = (event: WheelEvent<HTMLDivElement>): void => {
+    if (!event.ctrlKey) return
+    event.preventDefault()
+    setStageZoom(current => getNextThreeStageRailZoom(current, event.deltaY))
+    window.setTimeout(updateStageRailScroll, 0)
+  }
 
   const scrollStageRailBy = (direction: -1 | 1): void => {
     const rail = stageRailRef.current
@@ -334,8 +358,14 @@ const ThreeStageBuilderScreen = ({
         <div className="relative min-w-0">
           <div
             ref={stageRailRef}
-            className="flex min-w-0 items-start gap-4 overflow-x-auto pb-24 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="min-w-0 overflow-x-auto pb-24 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             onScroll={updateStageRailScroll}
+            onWheel={handleStageRailWheel}
+          >
+          <div
+            className="inline-flex min-w-max items-start gap-4"
+            style={stageRailZoomStyle}
+            data-three-stage-rail-zoom={stageZoom.toFixed(2)}
           >
           {currentPage.items.map(item => item.kind === 'character' ? (
             <div key={item.id} className="contents">
@@ -426,6 +456,7 @@ const ThreeStageBuilderScreen = ({
               onClick={createCharacter}
             />
           )}
+          </div>
           </div>
           <FloatingHorizontalScroll
             left={stageRailScroll.left}

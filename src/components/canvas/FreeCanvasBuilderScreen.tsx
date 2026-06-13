@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import {
   applyNodeChanges,
   Background,
@@ -22,9 +22,12 @@ import {
   useReactFlow
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ChevronLeft, ChevronRight, Copy, Database, FileText, Home, Image, Layers, Lock, MousePointer2, Package, PanelLeft, PanelRight, Pencil, Plus, RotateCcw, Scissors, Trash2, Type, Unlock, Workflow } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Copy, Database, FileText, Home, Layers, Lock, MousePointer2, Package, PanelLeft, PanelRight, Pencil, Plus, RotateCcw, Trash2, Type, Unlock, Workflow } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
+import { canvasImageAssetUrl } from '@/components/canvas/canvas-image-assets'
+import { FreeCanvasMediaNode } from '@/components/canvas/FreeCanvasMediaNode'
 import { ImageCropEditor } from '@/components/canvas/ImageCropEditor'
+import { useCanvasImageInteractions } from '@/components/canvas/useCanvasImageInteractions'
 import {
   addCharacterFormToPage,
   addObjectFormToPage,
@@ -42,24 +45,19 @@ import {
   addFreeCanvasMediaNode,
   buildFreeCanvasFormOutput,
   buildFreeCanvasGraph,
-  createFreeCanvasCroppedNodes,
   createFreeCanvasMediaNode,
-  duplicateFreeCanvasMediaNode,
   getFreeCanvasConnectedChain,
   getFormFixedContentOverrides,
-  mediaNodeFlowId,
   removeFreeCanvasNodes,
   removeFreeCanvasFlowNodes,
   type FreeCanvasFlowEdge,
   type FreeCanvasFlowNode,
   type FreeCanvasMediaNodeKind,
-  type FreeCanvasCropLines,
   type FreeCanvasNodeData,
   updateFreeCanvasMediaNode,
   updateFreeCanvasFormFixedContent,
   updateFreeCanvasNodePosition
 } from '@/domain/free-canvas/free-canvas'
-import { storageServiceClient } from '@/storage/storage-service-client'
 import {
   createStoryboardShotRange,
   getStageDefinition,
@@ -99,8 +97,6 @@ const FreeCanvasBuilderInner = ({
 }: FreeCanvasBuilderScreenProps) => {
   const reactFlow = useReactFlow<FreeCanvasFlowNode>()
   const normalizedThreeStage = useMemo(() => syncThreeStageLegacyFields(threeStage), [threeStage])
-  const threeStageRef = useRef(normalizedThreeStage)
-  threeStageRef.current = normalizedThreeStage
   const selectedContext = getSelectedThreeStageFormContext(normalizedThreeStage)
   const selectedForm = selectedContext.form
   const selectedStageDefinition = getStageDefinition(selectedForm.type)
@@ -113,11 +109,7 @@ const FreeCanvasBuilderInner = ({
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(true)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
-  const [cropNodeId, setCropNodeId] = useState<string | null>(null)
-  const [assetUploadError, setAssetUploadError] = useState<string | null>(null)
-  const [clipboardNotice, setClipboardNotice] = useState<string | null>(null)
-  const [fileDragActive, setFileDragActive] = useState(false)
-  const fileDragDepthRef = useRef(0)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
 
   const updateFormSection = useCallback((form: IThreeStageForm, section: IThreeStageSection, fieldId?: string): void => {
     const pageId = getFormPageId(normalizedThreeStage, form.id) || selectedContext.page.id
@@ -155,10 +147,6 @@ const FreeCanvasBuilderInner = ({
     onChange(updateFreeCanvasMediaNode(normalizedThreeStage, nodeId.replace(/^media:/, ''), { text }))
   }, [normalizedThreeStage, onChange])
 
-  const startImageCrop = useCallback((nodeId: string): void => {
-    setCropNodeId(nodeId.replace(/^media:/, ''))
-  }, [])
-
   const updateFixedContent = useCallback((form: IThreeStageForm, contentId: string, value: string): void => {
     onChange(updateFreeCanvasFormFixedContent(normalizedThreeStage, form.id, contentId, { value }))
   }, [normalizedThreeStage, onChange])
@@ -190,6 +178,17 @@ const FreeCanvasBuilderInner = ({
     }
   }, [normalizedThreeStage])
 
+  const selectedMedia = graph.nodes.find(node => node.id === selectedNodeId)?.data.mediaNode
+  const imageInteractions = useCanvasImageInteractions({
+    threeStage: normalizedThreeStage,
+    mediaNodes: graph.nodes.flatMap(node => node.data.mediaNode ? [node.data.mediaNode] : []),
+    selectedMedia,
+    screenToFlowPosition: position => reactFlow.screenToFlowPosition(position),
+    onChange,
+    onSelectNode: setSelectedNodeId,
+    isTypingTarget
+  })
+
   const canvasNodes = useMemo(() => graph.nodes.map(node => {
     if (node.data.nodeKind !== 'threeStageForm' || !node.data.formId) {
       return {
@@ -197,7 +196,7 @@ const FreeCanvasBuilderInner = ({
         data: {
           ...node.data,
           onUpdateMediaText: updateMediaText,
-          onStartImageCrop: startImageCrop
+          onStartImageCrop: imageInteractions.startImageCrop
         }
       }
     }
@@ -215,16 +214,12 @@ const FreeCanvasBuilderInner = ({
         onCopyOutput: copyFormOutput
       }
     }
-  }), [copyFormOutput, graph.nodes, normalizedThreeStage, resetFixedContent, selectCanvasField, startImageCrop, toggleFixedContent, updateField, updateFixedContent, updateMediaText])
+  }), [copyFormOutput, graph.nodes, imageInteractions.startImageCrop, normalizedThreeStage, resetFixedContent, selectCanvasField, toggleFixedContent, updateField, updateFixedContent, updateMediaText])
 
   const [nodes, setNodes] = useState<FreeCanvasFlowNode[]>(canvasNodes)
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [spacePressed, setSpacePressed] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; flowX: number; flowY: number } | null>(null)
   const selectedNode = nodes.find(node => node.id === selectedNodeId) || null
-  const selectedNodeRef = useRef(selectedNode)
-  selectedNodeRef.current = selectedNode
-  const copiedMediaNodeRef = useRef<FreeCanvasNodeData['mediaNode']>(undefined)
   const selectedChain = useMemo(() => getFreeCanvasConnectedChain({ nodes: canvasNodes, edges: graph.edges }, selectedEdgeId), [canvasNodes, graph.edges, selectedEdgeId])
   const layerGroups = useMemo(() => buildLayerGroups(graph.nodes), [graph.nodes])
   const agentTargetTitle = selectedEdgeId
@@ -427,120 +422,6 @@ const FreeCanvasBuilderInner = ({
     setContextMenu({ x: event.clientX, y: event.clientY, flowX: position.x, flowY: position.y })
   }, [reactFlow])
 
-  const handleDragOver = useCallback((event: ReactDragEvent<Element>) => {
-    if (isFileDrag(event.dataTransfer)) {
-      event.preventDefault()
-      event.dataTransfer.dropEffect = 'copy'
-    }
-  }, [])
-
-  const handleDragEnter = useCallback((event: ReactDragEvent<Element>) => {
-    if (!isFileDrag(event.dataTransfer)) return
-    event.preventDefault()
-    fileDragDepthRef.current += 1
-    setFileDragActive(true)
-  }, [])
-
-  const handleDragLeave = useCallback((event: ReactDragEvent<Element>) => {
-    if (!isFileDrag(event.dataTransfer)) return
-    fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1)
-    if (fileDragDepthRef.current === 0) setFileDragActive(false)
-  }, [])
-
-  useEffect(() => {
-    if (!clipboardNotice) return
-    const timeoutId = window.setTimeout(() => setClipboardNotice(null), 1600)
-    return () => window.clearTimeout(timeoutId)
-  }, [clipboardNotice])
-
-  const uploadImageFiles = useCallback(async (files: File[], position: { x: number; y: number }): Promise<void> => {
-    setAssetUploadError(null)
-    try {
-      const uploadedNodes = await Promise.all(files.map(async (file, index) => {
-        const [asset, dimensions] = await Promise.all([
-          storageServiceClient.assets.upload(file),
-          getImageDimensions(file)
-        ])
-        const size = fitImageNode(dimensions.width, dimensions.height)
-        return {
-          ...createFreeCanvasMediaNode('imageAsset', {
-            x: position.x + index * 28,
-            y: position.y + index * 28
-          }),
-          title: file.name,
-          width: size.width,
-          height: size.height,
-          assetId: asset.id,
-          imageUrl: storageServiceClient.assets.url(asset.id),
-          meta: { originalWidth: dimensions.width, originalHeight: dimensions.height }
-        }
-      }))
-      const next = uploadedNodes.reduce((current, node) => addFreeCanvasMediaNode(current, node), threeStageRef.current)
-      onChange(next)
-    } catch (error) {
-      setAssetUploadError(error instanceof Error ? error.message : '图片上传失败。')
-    }
-  }, [onChange])
-
-  const handleDrop = useCallback(async (event: ReactDragEvent<Element>) => {
-    fileDragDepthRef.current = 0
-    setFileDragActive(false)
-    const files = Array.from(event.dataTransfer.files).filter(isSupportedImageFile)
-    event.preventDefault()
-    if (files.length === 0) {
-      setAssetUploadError('仅支持 PNG、JPEG 和 WebP 图片。')
-      return
-    }
-    const dropPosition = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
-    await uploadImageFiles(files, dropPosition)
-  }, [reactFlow, uploadImageFiles])
-
-  useEffect(() => {
-    const handleCopy = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c' || isTypingTarget(event.target)) return
-      const media = selectedNodeRef.current?.data.mediaNode
-      if (!media) return
-      event.preventDefault()
-      copiedMediaNodeRef.current = media
-      setClipboardNotice('已复制图片节点')
-    }
-    const handlePaste = (event: ClipboardEvent) => {
-      if (isTypingTarget(event.target)) return
-      const files = getClipboardImageFiles(event.clipboardData)
-      if (files.length > 0) {
-        event.preventDefault()
-        const position = reactFlow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
-        void uploadImageFiles(files, position)
-        return
-      }
-      const copied = copiedMediaNodeRef.current
-      if (!copied) return
-      event.preventDefault()
-      const duplicate = duplicateFreeCanvasMediaNode(copied)
-      onChange(addFreeCanvasMediaNode(threeStageRef.current, duplicate))
-      setSelectedNodeId(mediaNodeFlowId(duplicate.id))
-      setClipboardNotice('已粘贴图片节点')
-    }
-    window.addEventListener('keydown', handleCopy)
-    document.addEventListener('paste', handlePaste)
-    return () => {
-      window.removeEventListener('keydown', handleCopy)
-      document.removeEventListener('paste', handlePaste)
-    }
-  }, [onChange, reactFlow, uploadImageFiles])
-
-  const cropMedia = cropNodeId
-    ? graph.nodes.find(node => node.data.mediaNode?.id === cropNodeId)?.data.mediaNode
-    : undefined
-
-  const confirmImageCrop = (lines: FreeCanvasCropLines): void => {
-    if (!cropMedia) return
-    const croppedNodes = createFreeCanvasCroppedNodes(cropMedia, lines)
-    const next = croppedNodes.reduce((current, node) => addFreeCanvasMediaNode(current, node), threeStageRef.current)
-    onChange(next)
-    setCropNodeId(null)
-  }
-
   function nextNodePosition() {
     return { x: 120 + graph.nodes.length * 24, y: 120 + graph.nodes.length * 18 }
   }
@@ -577,10 +458,10 @@ const FreeCanvasBuilderInner = ({
       <div
         className={`relative h-full transition-[padding] ${leftDrawerOpen ? 'pl-[320px]' : 'pl-0'} ${rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'}`}
         data-free-canvas-screen
-        onDragEnterCapture={handleDragEnter}
-        onDragOverCapture={handleDragOver}
-        onDragLeaveCapture={handleDragLeave}
-        onDropCapture={handleDrop}
+        onDragEnterCapture={imageInteractions.handleDragEnter}
+        onDragOverCapture={imageInteractions.handleDragOver}
+        onDragLeaveCapture={imageInteractions.handleDragLeave}
+        onDropCapture={imageInteractions.handleDrop}
       >
         <ReactFlow
           nodes={nodes}
@@ -613,31 +494,31 @@ const FreeCanvasBuilderInner = ({
           <MiniMap pannable zoomable className="!bottom-4 !left-4 !right-auto transition-all" />
           <Controls className="!bottom-6 !left-auto !right-6 transition-all" />
         </ReactFlow>
-        {fileDragActive && (
+        {imageInteractions.fileDragActive && (
           <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-[#c96442] bg-white/80 text-base font-semibold text-[#9f4429] backdrop-blur-sm">
             松开以添加图片
           </div>
         )}
       </div>
 
-      {assetUploadError && (
+      {imageInteractions.assetUploadError && (
         <div className="absolute left-1/2 top-5 z-50 -translate-x-1/2 rounded-full border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-700 shadow-lg" role="alert">
-          {assetUploadError}
+          {imageInteractions.assetUploadError}
         </div>
       )}
 
-      {clipboardNotice && (
+      {imageInteractions.clipboardNotice && (
         <div className="absolute left-1/2 top-5 z-50 -translate-x-1/2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-lg" role="status">
-          {clipboardNotice}
+          {imageInteractions.clipboardNotice}
         </div>
       )}
 
-      {cropMedia?.assetId && (
+      {imageInteractions.cropMedia?.assetId && (
         <ImageCropEditor
-          media={cropMedia}
-          imageUrl={storageServiceClient.assets.url(cropMedia.assetId)}
-          onCancel={() => setCropNodeId(null)}
-          onConfirm={confirmImageCrop}
+          media={imageInteractions.cropMedia}
+          imageUrl={canvasImageAssetUrl(imageInteractions.cropMedia.assetId)}
+          onCancel={imageInteractions.cancelImageCrop}
+          onConfirm={imageInteractions.confirmImageCrop}
         />
       )}
 
@@ -1151,100 +1032,6 @@ const CanvasFixedContentBlock = ({
   )
 }
 
-const FreeCanvasMediaNode = ({ data, selected }: NodeProps<Node<FreeCanvasNodeData>>) => {
-  const media = data.mediaNode
-  if (media?.kind === 'textOverlay') {
-    return (
-      <div className={`relative min-w-[180px] max-w-[360px] rounded-md p-1 ${selected ? 'ring-2 ring-violet-500' : ''}`}>
-        <Handle type="target" position={Position.Left} className="!bg-violet-500" />
-        <textarea
-          className="nodrag nowheel block min-h-[42px] w-full resize-none bg-transparent text-base font-semibold leading-6 text-gray-950 outline-none placeholder:text-gray-400"
-          value={media.text || ''}
-          placeholder="文字标注"
-          onChange={(event) => data.onUpdateMediaText?.(media.id, event.target.value)}
-        />
-        <Handle type="source" position={Position.Right} className="!bg-violet-500" />
-      </div>
-    )
-  }
-
-  if (media?.kind === 'imageAsset') {
-    const imageUrl = media.assetId ? storageServiceClient.assets.url(media.assetId) : media.imageUrl
-    const crop = media.crop
-    const imageStyle = crop ? {
-      width: `${100 / crop.width}%`,
-      height: `${100 / crop.height}%`,
-      left: `${-crop.x / crop.width * 100}%`,
-      top: `${-crop.y / crop.height * 100}%`
-    } : undefined
-    return (
-      <div
-        className={`group relative overflow-visible rounded-[10px] border bg-white p-2 shadow-[0_10px_28px_rgba(15,23,42,0.08)] ${selected ? 'border-[#c96442] ring-1 ring-[#c96442]/20' : 'border-gray-200'}`}
-        style={{ width: media.width, height: media.height }}
-        onDoubleClick={(event) => {
-          event.stopPropagation()
-          if (media.assetId && !media.crop) data.onStartImageCrop?.(media.id)
-        }}
-        data-image-node
-      >
-        <Handle type="target" position={Position.Left} className="!bg-gray-950 !opacity-0 transition group-hover:!opacity-100" />
-        <div className="relative h-full w-full overflow-hidden rounded-[6px] bg-gray-50">
-          {imageUrl ? (
-            <img
-              src={imageUrl}
-              alt={media.title}
-              className={`pointer-events-none select-none ${crop ? 'absolute max-w-none' : 'h-full w-full object-contain'}`}
-              style={imageStyle}
-              draggable={false}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-xs font-semibold text-gray-400">拖入图片</div>
-          )}
-        </div>
-        {selected && media.assetId && !media.crop && (
-          <button
-            type="button"
-            className="nodrag absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-gray-200 bg-white/95 text-gray-600 shadow-sm transition hover:bg-gray-950 hover:text-white active:scale-[0.98]"
-            onClick={(event) => {
-              event.stopPropagation()
-              data.onStartImageCrop?.(media.id)
-            }}
-            title="裁切图片"
-            aria-label="裁切图片"
-          >
-            <Scissors className="h-3.5 w-3.5" />
-          </button>
-        )}
-        <Handle type="source" position={Position.Right} className="!bg-gray-950 !opacity-0 transition group-hover:!opacity-100" />
-      </div>
-    )
-  }
-
-  return (
-    <div className={`relative w-[280px] rounded-[18px] border bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.08)] ${selected ? 'border-violet-500' : 'border-gray-200'}`}>
-      <Handle type="target" position={Position.Left} className="!bg-violet-500" />
-      <div className="mb-3 flex items-center gap-2">
-        <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-50 text-violet-600">
-          {media?.kind === 'arrowAnnotation' ? <MousePointer2 className="h-4 w-4" /> : <Image className="h-4 w-4" />}
-        </span>
-        <div>
-          <div className="text-sm font-black text-gray-950">{data.title}</div>
-          <div className="text-[11px] font-bold text-gray-400">{media?.kind}</div>
-        </div>
-      </div>
-      {media?.imageUrl ? (
-        <img src={media.imageUrl} alt="" className="h-28 w-full rounded-xl object-cover" />
-      ) : (
-        <div className="flex h-28 items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50 text-xs font-bold text-gray-400">
-          {data.subtitle}
-        </div>
-      )}
-      {media?.text && <p className="mt-3 text-sm font-semibold text-gray-700">{media.text}</p>}
-      <Handle type="source" position={Position.Right} className="!bg-violet-500" />
-    </div>
-  )
-}
-
 const nodeTypes = {
   threeStageForm: ThreeStageFormNode,
   freeCanvasMedia: FreeCanvasMediaNode
@@ -1305,49 +1092,6 @@ const ToolbarButton = ({ title, onClick, children }: { title: string; onClick: (
     {children}
   </button>
 )
-
-const getImageDimensions = (file: File): Promise<{ width: number; height: number }> => new Promise((resolve, reject) => {
-  const url = URL.createObjectURL(file)
-  const image = new window.Image()
-  image.onload = () => {
-    URL.revokeObjectURL(url)
-    resolve({ width: image.naturalWidth, height: image.naturalHeight })
-  }
-  image.onerror = () => {
-    URL.revokeObjectURL(url)
-    reject(new Error('无法读取图片尺寸。'))
-  }
-  image.src = url
-})
-
-const fitImageNode = (width: number, height: number): { width: number; height: number } => {
-  const maximum = 360
-  const scale = maximum / Math.max(width, height)
-  return {
-    width: width * scale,
-    height: height * scale
-  }
-}
-
-const isSupportedImageFile = (file: File): boolean => {
-  if (['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return true
-  return /\.(png|jpe?g|webp)$/i.test(file.name)
-}
-
-const isFileDrag = (dataTransfer: DataTransfer): boolean => (
-  Array.from(dataTransfer.types).includes('Files') ||
-  Array.from(dataTransfer.items).some(item => item.kind === 'file')
-)
-
-const getClipboardImageFiles = (clipboard: DataTransfer | null): File[] => {
-  if (!clipboard) return []
-  const files = Array.from(clipboard.files).filter(isSupportedImageFile)
-  if (files.length > 0) return files
-  return Array.from(clipboard.items)
-    .filter(item => item.kind === 'file')
-    .map(item => item.getAsFile())
-    .filter((file): file is File => Boolean(file && isSupportedImageFile(file)))
-}
 
 const findThreeStageForm = (threeStage: IThreeStageProject, formId: string): IThreeStageForm | undefined => {
   for (const page of normalizeThreeStagePages(threeStage)) {

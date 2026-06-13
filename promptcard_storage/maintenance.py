@@ -8,7 +8,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .store import DATABASE_NAME, JsonCollectionStore, MigrationError
+from .store import DATABASE_NAME, MigrationError, SqliteStore
 
 
 def main() -> None:
@@ -26,7 +26,7 @@ def main() -> None:
         restore_backup(args.data_dir, args.source)
         return
 
-    store = JsonCollectionStore(args.data_dir)
+    store = SqliteStore(args.data_dir)
     result = store.backup(args.destination) if args.command == "backup" else store.diagnose_assets()
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -49,7 +49,7 @@ def restore_backup(data_dir: Path, source: Path) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     if (data_dir / DATABASE_NAME).exists():
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        JsonCollectionStore(data_dir).backup(data_dir.parent / "backups" / f"pre-restore-{stamp}")
+        SqliteStore(data_dir).backup(data_dir.parent / "backups" / f"pre-restore-{stamp}")
 
     temp_database = data_dir / f".{DATABASE_NAME}.restore"
     shutil.copy2(source_database, temp_database)

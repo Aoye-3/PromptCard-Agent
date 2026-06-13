@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import sqlite3
-import tempfile
 import threading
 import time
-import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
+from .assets import AssetStore, AssetValidationError
+from .backup import BackupManager
+from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
@@ -40,21 +40,6 @@ class DuplicateItem(Exception):
     pass
 
 
-class AssetValidationError(Exception):
-    pass
-
-
-class MigrationError(Exception):
-    pass
-
-
-ASSET_EXTENSIONS = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/webp": ".webp",
-}
-
-
 class SqliteStore:
     def __init__(
         self,
@@ -71,6 +56,22 @@ class SqliteStore:
         self._initialize_lock = threading.Lock()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._initialize()
+        self._assets = AssetStore(
+            self.data_dir,
+            self._connect,
+            self._transaction,
+            lambda: self.list_projects() + [entry["payload"] for entry in self.list_project_trash()],
+            now_ms,
+        )
+        self._backups = BackupManager(
+            self.database_path,
+            self.assets_dir,
+            DATABASE_NAME,
+            SERVICE_VERSION,
+            SCHEMA_VERSION,
+            self._connect,
+            iso_now,
+        )
 
     def health(self) -> dict[str, Any]:
         return {
@@ -303,161 +304,43 @@ class SqliteStore:
         return {"projects": imported_projects, "presets": imported_presets, "alreadyApplied": False}
 
     def save_asset(self, filename: str, content_type: str, content: bytes, max_bytes: int = 20 * 1024 * 1024) -> dict[str, Any]:
-        extension = ASSET_EXTENSIONS.get(content_type.lower())
-        if extension is None:
-            raise AssetValidationError("Only PNG, JPEG, and WebP images are supported")
-        if not content or len(content) > max_bytes:
-            raise AssetValidationError("Image must be between 1 byte and 20 MB")
-        if not is_valid_image_signature(content_type.lower(), content):
-            raise AssetValidationError("Image bytes do not match the declared type")
-        self.assets_dir.mkdir(parents=True, exist_ok=True)
-        asset_id = f"{uuid.uuid4().hex}{extension}"
-        final_path = self.assets_dir / asset_id
-        fd, temp_name = tempfile.mkstemp(prefix=".asset-", suffix=".tmp", dir=str(self.assets_dir))
         try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temp_name, final_path)
-            with self._transaction() as connection:
-                connection.execute(
-                    "INSERT INTO assets(asset_id, original_filename, relative_path, content_type, size, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (asset_id, Path(filename).name or asset_id, f"assets/{asset_id}", content_type.lower(), len(content), now_ms()),
-                )
-        except Exception:
-            Path(temp_name).unlink(missing_ok=True)
-            final_path.unlink(missing_ok=True)
-            raise
-        return {"id": asset_id, "filename": Path(filename).name or asset_id, "contentType": content_type.lower(), "size": len(content)}
+            return self._assets.save(filename, content_type, content, max_bytes)
+        except LookupError as exc:
+            raise MissingItem() from exc
 
     def get_asset(self, asset_id: str) -> tuple[Path, str]:
-        candidate = Path(asset_id)
-        if candidate.name != asset_id:
-            raise MissingItem()
-        with self._connect() as connection:
-            row = connection.execute("SELECT relative_path, content_type FROM assets WHERE asset_id=?", (asset_id,)).fetchone()
-        if not row:
-            raise MissingItem()
-        path = self.data_dir / row[0]
-        if not path.is_file():
-            raise MissingItem()
-        return path, row[1]
+        try:
+            return self._assets.get(asset_id)
+        except LookupError as exc:
+            raise MissingItem() from exc
 
     def diagnose_assets(self) -> dict[str, list[str]]:
-        with self._connect() as connection:
-            registered = {row[0] for row in connection.execute("SELECT asset_id FROM assets")}
-        on_disk = {path.name for path in self.assets_dir.iterdir() if path.is_file() and not path.name.startswith(".")} if self.assets_dir.exists() else set()
-        referenced = _collect_asset_ids(self.list_projects()) | _collect_asset_ids([entry["payload"] for entry in self.list_project_trash()])
-        return {
-            "unregisteredFiles": sorted(on_disk - registered),
-            "missingFiles": sorted(registered - on_disk),
-            "unreferencedAssets": sorted(registered - referenced),
-            "missingReferences": sorted(referenced - registered),
-        }
+        return self._assets.diagnose()
 
     def backup(self, destination: Path) -> dict[str, Any]:
-        destination.mkdir(parents=True, exist_ok=False)
-        database_copy = destination / DATABASE_NAME
-        target = sqlite3.connect(database_copy)
-        try:
-            with self._connect() as source:
-                source.backup(target)
-            target.commit()
-        finally:
-            target.close()
-        if self.assets_dir.exists():
-            shutil.copytree(self.assets_dir, destination / "assets")
-        manifest = {
-            "createdAt": iso_now(),
-            "serviceVersion": SERVICE_VERSION,
-            "schemaVersion": SCHEMA_VERSION,
-            "database": DATABASE_NAME,
-            "assets": len(list((destination / "assets").iterdir())) if (destination / "assets").exists() else 0,
-        }
-        (destination / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-        return manifest
+        return self._backups.create(destination)
 
     def _initialize(self) -> None:
         with self._initialize_lock:
-            if self.database_path.exists():
-                self._configure_existing_database()
-                return
-            migration = self._load_json_sources()
-            backup_dir = self._backup_json_sources(migration["existing_files"])
-            temp_path = self.data_dir / f".{DATABASE_NAME}.{uuid.uuid4().hex}.migrating"
-            try:
-                connection = sqlite3.connect(temp_path)
-                try:
-                    self._create_schema(connection)
-                    connection.execute("BEGIN IMMEDIATE")
-                    self._import_migration(connection, migration)
-                    connection.execute(
-                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
-                        (SCHEMA_VERSION, "json-v1-to-sqlite", now_ms()),
-                    )
-                    connection.commit()
-                finally:
-                    connection.close()
-                os.replace(temp_path, self.database_path)
-                self._configure_existing_database()
-                self._validate_migration(migration)
-            except Exception as exc:
-                temp_path.unlink(missing_ok=True)
-                self.database_path.unlink(missing_ok=True)
-                if isinstance(exc, MigrationError):
-                    raise
-                raise MigrationError(f"SQLite migration failed: {exc}") from exc
-            if backup_dir:
-                (backup_dir / "migration-complete.json").write_text(
-                    json.dumps({"database": str(self.database_path), "completedAt": iso_now()}, indent=2),
-                    encoding="utf-8",
-                )
-
-    def _load_json_sources(self) -> dict[str, Any]:
-        existing_files = [self.data_dir / name for name in JSON_SOURCES if (self.data_dir / name).exists()]
-        payloads: dict[str, Any] = {}
-        for path in existing_files:
-            try:
-                payloads[path.name] = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
-                raise MigrationError(f"Cannot parse legacy storage file: {path}") from exc
-        projects = _collection(payloads.get("projects.json"), "projects", normalize_project)
-        project_trash = _trash_items(payloads.get("project-trash.json"), normalize_project)
-        presets = _collection(payloads.get("prompt-library-presets.json"), "presets", normalize_preset)
-        preset_trash = _trash_items(payloads.get("prompt-library-trash.json"), normalize_preset)
-        if not presets and not (self.data_dir / "prompt-library-presets.json").exists():
-            presets = [normalize_preset(item) for item in self.presets_seed]
-        project_trash = _reconcile_active_trash(projects, project_trash, "projects")
-        preset_trash = _reconcile_active_trash(presets, preset_trash, "presets")
-        _ensure_unique_ids(projects + [entry["payload"] for entry in project_trash], "projects")
-        _ensure_unique_ids(presets + [entry["payload"] for entry in preset_trash], "presets")
-        return {
-            "projects": projects,
-            "project_trash": project_trash,
-            "presets": presets,
-            "preset_trash": preset_trash,
-            "existing_files": existing_files,
-        }
-
-    def _backup_json_sources(self, files: list[Path]) -> Path | None:
-        if not files and not self.assets_dir.exists():
-            return None
-        self.backups_dir.mkdir(parents=True, exist_ok=True)
-        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        destination = self.backups_dir / f"storage-json-v1-{stamp}"
-        suffix = 1
-        while destination.exists():
-            destination = self.backups_dir / f"storage-json-v1-{stamp}-{suffix}"
-            suffix += 1
-        destination.mkdir()
-        for path in files:
-            shutil.copy2(path, destination / path.name)
-        asset_manifest = []
-        if self.assets_dir.exists():
-            asset_manifest = [{"name": path.name, "size": path.stat().st_size} for path in sorted(self.assets_dir.iterdir()) if path.is_file()]
-        (destination / "assets-manifest.json").write_text(json.dumps(asset_manifest, indent=2), encoding="utf-8")
-        return destination
+            StorageInitializer(
+                data_dir=self.data_dir,
+                database_path=self.database_path,
+                assets_dir=self.assets_dir,
+                backups_dir=self.backups_dir,
+                database_name=DATABASE_NAME,
+                schema_version=SCHEMA_VERSION,
+                json_sources=JSON_SOURCES,
+                projects_seed=self.projects_seed,
+                presets_seed=self.presets_seed,
+                normalize_project=normalize_project,
+                normalize_preset=normalize_preset,
+                create_schema=self._create_schema,
+                import_migration=self._import_migration,
+                configure_database=self._configure_existing_database,
+                validate_migration=self._validate_migration,
+                now_ms=now_ms,
+            ).initialize()
 
     def _import_migration(self, connection: sqlite3.Connection, migration: dict[str, Any]) -> None:
         for item in migration["projects"]:
@@ -621,85 +504,18 @@ class SqliteStore:
 JsonCollectionStore = SqliteStore
 
 
-def _collection(payload: Any, key: str, normalizer) -> list[dict[str, Any]]:
-    if payload is None:
-        return []
-    items = payload if isinstance(payload, list) else payload.get(key)
-    if not isinstance(items, list):
-        raise MigrationError(f"Legacy {key} payload must be a list")
-    if not all(isinstance(item, dict) for item in items):
-        raise MigrationError(f"Legacy {key} contains a non-object item")
-    return [normalizer(item) for item in items]
-
-
-def _trash_items(payload: Any, normalizer) -> list[dict[str, Any]]:
-    if payload is None:
-        return []
-    items = payload.get("items") if isinstance(payload, dict) else None
-    if not isinstance(items, list):
-        raise MigrationError("Legacy trash payload must contain an items list")
-    normalized = []
-    for entry in items:
-        if not isinstance(entry, dict) or not isinstance(entry.get("payload"), dict):
-            raise MigrationError("Legacy trash entry is invalid")
-        item = normalizer(entry["payload"])
-        normalized.append({**entry, "id": item["id"], "payload": item})
-    return normalized
+def _content_type_for_path(path: Path) -> str | None:
+    return {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(path.suffix.lower())
 
 
 def _ensure_unique_ids(items: list[dict[str, Any]], label: str) -> None:
     ids = [str(item.get("id")) for item in items]
     if len(ids) != len(set(ids)):
-        raise MigrationError(f"Duplicate IDs found in legacy {label}")
-
-
-def _reconcile_active_trash(active: list[dict[str, Any]], trash: list[dict[str, Any]], label: str) -> list[dict[str, Any]]:
-    active_by_id = {item["id"]: item for item in active}
-    reconciled = []
-    for entry in trash:
-        active_item = active_by_id.get(entry["payload"]["id"])
-        if not active_item:
-            reconciled.append(entry)
-            continue
-        if _business_payload(active_item) != _business_payload(entry["payload"]):
-            raise MigrationError(f"Conflicting active and trash payloads found in legacy {label}: {active_item['id']}")
-    return reconciled
-
-
-def _business_payload(item: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in item.items() if key not in {"revision", "createdAt", "updatedAt", "lastOpenedAt"}}
-
-
-def _content_type_for_path(path: Path) -> str | None:
-    return {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(path.suffix.lower())
-
-
-def _collect_asset_ids(value: Any) -> set[str]:
-    found: set[str] = set()
-    if isinstance(value, dict):
-        asset_id = value.get("assetId")
-        if isinstance(asset_id, str) and asset_id:
-            found.add(asset_id)
-        for child in value.values():
-            found.update(_collect_asset_ids(child))
-    elif isinstance(value, list):
-        for child in value:
-            found.update(_collect_asset_ids(child))
-    return found
+        raise MigrationError(f"Duplicate IDs found in {label}")
 
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
-
-
-def is_valid_image_signature(content_type: str, content: bytes) -> bool:
-    if content_type == "image/png":
-        return content.startswith(b"\x89PNG\r\n\x1a\n")
-    if content_type == "image/jpeg":
-        return content.startswith(b"\xff\xd8\xff")
-    if content_type == "image/webp":
-        return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP"
-    return False
 
 
 def normalize_project(item: dict[str, Any]) -> dict[str, Any]:

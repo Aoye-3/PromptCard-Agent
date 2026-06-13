@@ -4,6 +4,8 @@
 
 ## SQLite Contract
 
+- `SqliteStore` is the compatibility facade for project and Prompt Library CRUD plus transaction ownership. `StorageInitializer`, `AssetStore`, and `BackupManager` own JSON initialization, image files/diagnostics, and consistent backup creation respectively.
+- FastAPI routes are registered by `create_app(storage)`, allowing route contract tests to inject an isolated temporary store while the exported default `app` keeps the existing service startup contract.
 - Schema version `1` uses `projects`, `presets`, `assets`, `schema_migrations`, and `browser_imports`.
 - Projects and presets retain their existing JSON payload. Indexed columns own revision, status, ordering, usage, and timestamps.
 - Active and Trash records share one table. Delete and restore are single transactions.
@@ -27,3 +29,12 @@ python -m promptcard_storage.maintenance --data-dir data restore backups/manual-
 ```
 
 Backups use the SQLite backup API and include the database, assets, and a manifest. Restore validates schema and database integrity and creates a pre-restore snapshot when current storage exists.
+
+## Verification
+
+`npm.cmd run storage:test` discovers every `test_*.py` file under `promptcard_storage/tests`. Core store tests run with the system Python. FastAPI route contract tests run when FastAPI is installed and otherwise report explicit skips; they can be run with the repository Agent backend environment:
+
+```powershell
+npm.cmd run storage:test
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest promptcard_storage.tests.test_app
+```

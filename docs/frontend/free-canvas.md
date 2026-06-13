@@ -21,6 +21,8 @@ The free canvas is the high-density editing surface for a three-stage project. I
 
 ## Image Nodes and Cropping
 
+- `FreeCanvasBuilderScreen` composes the canvas and project-domain updates. Browser file handling and asset persistence are isolated in `canvas-image-assets.ts`; drag, clipboard, notification, and crop orchestration live in `useCanvasImageInteractions.ts`; media-node rendering lives in `FreeCanvasMediaNode.tsx`.
+- Canvas components use the image asset service rather than calling the storage HTTP client directly.
 - Dropping PNG, JPEG, or WebP files from the operating system directly onto empty canvas space uploads each file and creates an image node at the drop position. Users do not create an empty image node first; image-node creation is intentionally absent from the toolbar and context menu. Multiple files are offset so they remain individually selectable. Windows Explorer drags that expose only the generic `Files` transfer type, or omit MIME metadata on drop, are supported.
 - The canvas captures file drag events before React Flow children and shows a `松开以添加图片` overlay when the operating-system drag is recognized. Unsupported files and upload failures produce an explicit error instead of silently doing nothing.
 - Image nodes use a minimal white surface without a media icon or permanent title bar. The image fills the node with a small white inset; connection handles appear on hover.
@@ -52,6 +54,7 @@ The free canvas is the high-density editing surface for a three-stage project. I
 
 ```powershell
 npm.cmd run test -- --run src/domain/free-canvas/free-canvas.test.ts src/domain/three-stage/three-stage-pages.test.ts src/utils/agent-workspace.test.ts src/domain/projects/project-storage-merge.test.ts
+npm.cmd run test -- --run src/components/canvas/canvas-image-assets.test.ts
 npm.cmd run build
 ```
 

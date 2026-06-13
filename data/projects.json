@@ -1,19 +1,138 @@
 {
   "schemaVersion": 1,
-  "updatedAt": "2026-06-07T20:59:38Z",
+  "updatedAt": "2026-06-10T20:13:12Z",
   "projects": [
+    {
+      "id": "1781080168635",
+      "title": "未命名项目 2",
+      "type": "card",
+      "revision": 4,
+      "pages": [
+        {
+          "id": "1781080168635",
+          "cards": [
+            {
+              "id": "1",
+              "type": "timing",
+              "title": "时长",
+              "content": "",
+              "mode": "edit",
+              "color": "amber",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            },
+            {
+              "id": "2",
+              "type": "subject",
+              "title": "主体",
+              "content": "",
+              "mode": "edit",
+              "color": "blue",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            },
+            {
+              "id": "3",
+              "type": "action",
+              "title": "动作",
+              "content": "",
+              "mode": "edit",
+              "color": "green",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            },
+            {
+              "id": "4",
+              "type": "scene",
+              "title": "场景",
+              "content": "",
+              "mode": "edit",
+              "color": "purple",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            },
+            {
+              "id": "5",
+              "type": "style",
+              "title": "风格",
+              "content": "",
+              "mode": "edit",
+              "color": "orange",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            },
+            {
+              "id": "6",
+              "type": "camera",
+              "title": "镜头",
+              "content": "",
+              "mode": "edit",
+              "color": "red",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            },
+            {
+              "id": "7",
+              "type": "lighting",
+              "title": "灯光",
+              "content": "",
+              "mode": "edit",
+              "color": "yellow",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            },
+            {
+              "id": "8",
+              "type": "audio",
+              "title": "音频",
+              "content": "",
+              "mode": "edit",
+              "color": "teal",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            },
+            {
+              "id": "9",
+              "type": "constraint",
+              "title": "约束",
+              "content": "",
+              "mode": "edit",
+              "color": "purple",
+              "createdAt": 1781080168635,
+              "updatedAt": 1781080168635,
+              "meta": {}
+            }
+          ]
+        }
+      ],
+      "currentPage": 0,
+      "createdAt": 1781080168635,
+      "updatedAt": 1781092363681,
+      "lastOpenedAt": 1781092363681,
+      "meta": {
+        "builderTemplateId": "card"
+      }
+    },
     {
       "id": "1780358101079",
       "title": "自由画布-测试",
       "type": "three-stage",
-      "revision": 571,
+      "revision": 734,
       "pages": [],
       "currentPage": 0,
       "threeStage": {
         "character": {
           "fields": {},
           "focusedFieldId": "characterNotes",
-          "updatedAt": 1780863611717,
+          "updatedAt": 1781042058367,
           "meta": {}
         },
         "storyboard": {
@@ -46,23 +165,23 @@
                   "section": {
                     "fields": {},
                     "focusedFieldId": "characterNotes",
-                    "updatedAt": 1780863611717,
+                    "updatedAt": 1781042058367,
                     "meta": {}
                   },
                   "sourceFormId": null,
                   "createdAt": 1780358101079,
-                  "updatedAt": 1780863611717,
+                  "updatedAt": 1781043814000,
                   "meta": {
                     "canvas": {
                       "position": {
-                        "x": -276.67604459724174,
-                        "y": -89.84367888577802
+                        "x": -411.4750318660626,
+                        "y": -318.81730109582986
                       }
                     }
                   }
                 },
                 "createdAt": 1780358101079,
-                "updatedAt": 1780863611717,
+                "updatedAt": 1781043814000,
                 "meta": {}
               },
               {
@@ -83,12 +202,12 @@
                   },
                   "sourceFormId": null,
                   "createdAt": 1780358101079,
-                  "updatedAt": 1780863609100,
+                  "updatedAt": 1781080130819,
                   "meta": {
                     "canvas": {
                       "position": {
-                        "x": 403.46041382209773,
-                        "y": -53.215550758253606
+                        "x": 197.7330244008557,
+                        "y": -401.41782843693017
                       }
                     }
                   }
@@ -106,18 +225,18 @@
                   },
                   "sourceFormId": null,
                   "createdAt": 1780358101079,
-                  "updatedAt": 1780863292632,
+                  "updatedAt": 1781080131829,
                   "meta": {
                     "canvas": {
                       "position": {
-                        "x": 1020.1923768162126,
-                        "y": -39.24693625679866
+                        "x": 813.6525898268808,
+                        "y": -394.7662417302385
                       }
                     }
                   }
                 },
                 "createdAt": 1780358101079,
-                "updatedAt": 1780863609100,
+                "updatedAt": 1781080131830,
                 "meta": {}
               },
               {
@@ -136,24 +255,24 @@
                   },
                   "sourceFormId": "1780358101079-character-1-mou48w",
                   "createdAt": 1780358357552,
-                  "updatedAt": 1780841772345,
+                  "updatedAt": 1781080133894,
                   "meta": {
                     "canvas": {
                       "position": {
-                        "x": 1739.9986064057853,
-                        "y": 233.2226163390721
+                        "x": 1557.1601064480162,
+                        "y": -359.3095594499943
                       }
                     }
                   }
                 },
                 "createdAt": 1780358357552,
-                "updatedAt": 1780841772345,
+                "updatedAt": 1781080133894,
                 "meta": {}
               }
             ],
             "selectedItemId": "1780358101079-character-1-mou48w",
             "createdAt": 1780358101079,
-            "updatedAt": 1780863611717,
+            "updatedAt": 1781042058367,
             "meta": {}
           }
         ],
@@ -162,55 +281,14 @@
         "selectedPairId": null,
         "meta": {
           "freeCanvas": {
-            "mediaNodes": [
-              {
-                "id": "1780358344970-textOverlay-5dyp3i",
-                "kind": "textOverlay",
-                "title": "文字标注",
-                "position": {
-                  "x": 851.7199210140965,
-                  "y": 1030.3654170230782
-                },
-                "width": 300,
-                "height": 120,
-                "assetId": null,
-                "imageUrl": "",
-                "imagePrompt": "",
-                "sourceNodeId": null,
-                "generatedFromAgent": false,
-                "crop": null,
-                "text": "文字标注             ",
-                "color": "#111827",
-                "meta": {}
-              },
-              {
-                "id": "1780852985718-imageAsset-i4o3ih",
-                "kind": "imageAsset",
-                "title": "图片节点",
-                "position": {
-                  "x": 1182.8714885148577,
-                  "y": 1033.1715047290143
-                },
-                "width": 300,
-                "height": 220,
-                "assetId": null,
-                "imageUrl": "",
-                "imagePrompt": "",
-                "sourceNodeId": null,
-                "generatedFromAgent": false,
-                "crop": null,
-                "text": "",
-                "color": "#111827",
-                "meta": {}
-              }
-            ],
+            "mediaNodes": [],
             "edges": []
           }
         }
       },
       "createdAt": 1780358101079,
-      "updatedAt": 1780865978522,
-      "lastOpenedAt": 1780865978522,
+      "updatedAt": 1781122392777,
+      "lastOpenedAt": 1781122392777,
       "meta": {
         "builderTemplateId": "free-canvas"
       }

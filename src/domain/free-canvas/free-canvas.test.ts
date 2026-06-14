@@ -22,10 +22,10 @@ import {
   updateFreeCanvasNodePosition,
   updateFreeCanvasFormFixedContent
 } from './free-canvas'
-import { addObjectFormToPage, addStoryVideoPairToPage, normalizeThreeStagePages } from '@/domain/three-stage/three-stage-pages'
+import { addObjectFormToPage, addThreeStageFormToPage, normalizeThreeStagePages } from '@/domain/three-stage/three-stage-pages'
 
 describe('free canvas domain', () => {
-  test('projects three-stage forms into canvas nodes and bound pair edges', () => {
+  test('projects independent three-stage forms into canvas nodes without fixed pair edges', () => {
     const threeStage = createThreeStageProject(100)
     const graph = buildFreeCanvasGraph(threeStage)
 
@@ -35,16 +35,12 @@ describe('free canvas domain', () => {
       'threeStageForm'
     ])
     expect(graph.nodes.map(node => node.data.formType)).toEqual(['character', 'storyboard', 'videoPrompt'])
-    expect(graph.edges).toHaveLength(1)
-    expect(graph.edges[0].source).toContain('storyboard')
-    expect(graph.edges[0].target).toContain('videoPrompt')
+    expect(graph.edges).toHaveLength(0)
   })
 
   test('persists form node positions in form canvas meta', () => {
     const threeStage = createThreeStageProject(100)
-    const form = threeStage.pages![0].items[0].kind === 'character'
-      ? threeStage.pages![0].items[0].form
-      : threeStage.pages![0].items[0].storyboardForm
+    const form = normalizeThreeStagePages(threeStage)[0].items[0].form
     const nodeId = threeStageFormNodeId(form.id)
 
     const updated = updateFreeCanvasNodePosition(threeStage, nodeId, { x: 321, y: 654 })
@@ -158,6 +154,10 @@ describe('free canvas domain', () => {
 
     expect(objectNode?.data.title).toBe('物品版 #1')
     expect(objectNode?.data.subtitle).toBe('物品版节点')
+    /*
+    expect(objectNode?.data.title).toBe('物品版 #1')
+    expect(objectNode?.data.subtitle).toBe('物品版节点')
+    */
     expect(objectNode?.data.pairId).toBeNull()
   })
 
@@ -210,7 +210,7 @@ describe('free canvas domain', () => {
 
     expect(result.blockedReason).toBeNull()
     expect(result.removedNodeIds).toEqual([objectNode.id])
-    expect(remainingForms.some(item => item.kind === 'character' && item.form.type === 'object')).toBe(false)
+    expect(remainingForms.some(item => item.form.type === 'object')).toBe(false)
     expect(getFreeCanvasMeta(result.threeStage).edges).toEqual([])
   })
 
@@ -218,29 +218,31 @@ describe('free canvas domain', () => {
     const base = createThreeStageProject(100)
     const page = normalizeThreeStagePages(base)[0]
     const withObject = addObjectFormToPage(base, page.id)
-    const selected = normalizeThreeStagePages(withObject)[0].items.find(item => item.kind === 'storyVideoPair')
-    if (!selected || selected.kind !== 'storyVideoPair') throw new Error('Expected story pair')
-    const selectedProject = { ...withObject, selectedFormId: selected.storyboardForm.id }
+    const selected = normalizeThreeStagePages(withObject)[0].items.find(item => item.form.type === 'storyboard')
+    if (!selected) throw new Error('Expected storyboard form')
+    const selectedProject = { ...withObject, selectedFormId: selected.form.id }
     const objectNode = buildFreeCanvasGraph(selectedProject).nodes.find(node => node.data.formType === 'object')!
 
     const result = removeFreeCanvasNodes(selectedProject, [objectNode.id])
 
-    expect(result.threeStage.selectedFormId).toBe(selected.storyboardForm.id)
+    expect(result.threeStage.selectedFormId).toBe(selected.form.id)
   })
 
-  test('removes a whole story video pair when either bound node is deleted', () => {
+  test('removes only the selected independent storyboard or prompt form', () => {
     const base = createThreeStageProject(100)
     const pageId = normalizeThreeStagePages(base)[0].id
-    const withSecondPair = addStoryVideoPairToPage(base, pageId)
+    const withSecondPair = addThreeStageFormToPage(addThreeStageFormToPage(base, pageId, 'storyboard'), pageId, 'videoPrompt')
     const graph = buildFreeCanvasGraph(withSecondPair)
-    const secondPair = normalizeThreeStagePages(withSecondPair)[0].items.filter(item => item.kind === 'storyVideoPair')[1]
-    if (!secondPair || secondPair.kind !== 'storyVideoPair') throw new Error('Expected second pair')
-    const pairNodes = graph.nodes.filter(node => node.data.pairId === secondPair.pairId)
-    const result = removeFreeCanvasNodes(withSecondPair, [pairNodes[0].id])
+    const storyboardForms = normalizeThreeStagePages(withSecondPair)[0].items.filter(item => item.form.type === 'storyboard')
+    const secondStoryboard = storyboardForms[1]
+    if (!secondStoryboard) throw new Error('Expected second storyboard form')
+    const storyboardNode = graph.nodes.find(node => node.data.formId === secondStoryboard.form.id)!
+    const result = removeFreeCanvasNodes(withSecondPair, [storyboardNode.id])
 
     expect(result.blockedReason).toBeNull()
-    expect(result.removedNodeIds).toEqual(expect.arrayContaining(pairNodes.map(node => node.id)))
-    expect(normalizeThreeStagePages(result.threeStage)[0].items.filter(item => item.kind === 'storyVideoPair')).toHaveLength(1)
+    expect(result.removedNodeIds).toEqual([storyboardNode.id])
+    expect(normalizeThreeStagePages(result.threeStage)[0].items.filter(item => item.form.type === 'storyboard')).toHaveLength(1)
+    expect(normalizeThreeStagePages(result.threeStage)[0].items.filter(item => item.form.type === 'videoPrompt')).toHaveLength(2)
   })
 
   test('atomically blocks a multi-node deletion that would empty a page', () => {
@@ -288,7 +290,7 @@ describe('free canvas domain', () => {
     expect(mediaNode?.data.subtitle).toBe('Hello canvas')
   })
 
-  test('persists user-created edges alongside fixed pair edges', () => {
+  test('persists user-created edges without adding fixed pair edges', () => {
     const threeStage = createThreeStageProject(100)
     const graph = buildFreeCanvasGraph(threeStage)
     const updated = addFreeCanvasEdge(threeStage, {
@@ -306,14 +308,12 @@ describe('free canvas domain', () => {
       label: 'context chain',
       createdAt: 700
     }])
-    expect(updatedGraph.edges.map(edge => edge.id)).toContain('three-stage-pair:100-pair-1')
-    expect(updatedGraph.edges.map(edge => edge.id)).toContain('edge-character-story')
+    expect(updatedGraph.edges.map(edge => edge.id)).toEqual(['edge-character-story'])
   })
 
   test('persists unlock, custom value, relock, and reset on one form only', () => {
     const threeStage = createThreeStageProject(100)
     const item = normalizeThreeStagePages(threeStage)[0].items[0]
-    if (item.kind !== 'character') throw new Error('Expected character form')
 
     const unlocked = updateFreeCanvasFormFixedContent(threeStage, item.form.id, 'character-reference', {
       value: 'Custom reference',
@@ -321,10 +321,8 @@ describe('free canvas domain', () => {
     })
     const relocked = updateFreeCanvasFormFixedContent(unlocked, item.form.id, 'character-reference', { unlocked: false })
     const relockedItem = normalizeThreeStagePages(relocked)[0].items[0]
-    if (relockedItem.kind !== 'character') throw new Error('Expected character form')
     const reset = updateFreeCanvasFormFixedContent(relocked, item.form.id, 'character-reference', null)
     const resetItem = normalizeThreeStagePages(reset)[0].items[0]
-    if (resetItem.kind !== 'character') throw new Error('Expected character form')
 
     expect(getFormFixedContentOverrides(relockedItem.form)['character-reference']).toEqual({
       value: 'Custom reference',
@@ -337,7 +335,6 @@ describe('free canvas domain', () => {
   test('filters malformed fixed content stored on a canvas form', () => {
     const threeStage = createThreeStageProject(100)
     const item = normalizeThreeStagePages(threeStage)[0].items[0]
-    if (item.kind !== 'character') throw new Error('Expected character form')
     const form = {
       ...item.form,
       meta: {
@@ -354,21 +351,21 @@ describe('free canvas domain', () => {
     expect(getFormFixedContentOverrides(form)).toEqual({})
   })
 
-  test('new forms do not inherit fixed content overrides from their source', () => {
+  test('new blank forms do not inherit fixed content overrides from existing forms', () => {
     const threeStage = createThreeStageProject(100)
-    const pair = normalizeThreeStagePages(threeStage)[0].items.find(item => item.kind === 'storyVideoPair')
-    if (!pair || pair.kind !== 'storyVideoPair') throw new Error('Expected story/video pair')
-    const customized = updateFreeCanvasFormFixedContent(threeStage, pair.videoPromptForm.id, 'duration', {
+    const promptItem = normalizeThreeStagePages(threeStage)[0].items.find(item => item.form.type === 'videoPrompt')
+    if (!promptItem) throw new Error('Expected video prompt form')
+    const customized = updateFreeCanvasFormFixedContent(threeStage, promptItem.form.id, 'duration', {
       value: 'Custom duration',
       unlocked: false
     })
     const pageId = normalizeThreeStagePages(customized)[0].id
-    const next = addStoryVideoPairToPage(customized, pageId, pair.pairId)
-    const pairs = normalizeThreeStagePages(next)[0].items.filter(item => item.kind === 'storyVideoPair')
-    const newPair = pairs[1]
-    if (!newPair || newPair.kind !== 'storyVideoPair') throw new Error('Expected copied pair')
+    const next = addThreeStageFormToPage(customized, pageId, 'videoPrompt')
+    const prompts = normalizeThreeStagePages(next)[0].items.filter(item => item.form.type === 'videoPrompt')
+    const newPrompt = prompts[1]
+    if (!newPrompt) throw new Error('Expected new prompt form')
 
-    expect(getFormFixedContentOverrides(newPair.videoPromptForm)).toEqual({})
+    expect(getFormFixedContentOverrides(newPrompt.form)).toEqual({})
   })
 
   test('collects the full connected chain for a selected edge', () => {
@@ -381,7 +378,8 @@ describe('free canvas domain', () => {
 
     const chain = getFreeCanvasConnectedChain(graph, 'edge-character-story')
 
-    expect(chain.nodeIds).toEqual(expect.arrayContaining([graph.nodes[0].id, graph.nodes[1].id, graph.nodes[2].id, mediaNodeFlowId(image.id)]))
-    expect(chain.edges.map(edge => edge.id)).toEqual(expect.arrayContaining(['edge-character-story', 'edge-image-character', 'three-stage-pair:100-pair-1']))
+    expect(chain.nodeIds).toEqual(expect.arrayContaining([graph.nodes[0].id, graph.nodes[1].id, mediaNodeFlowId(image.id)]))
+    expect(chain.nodeIds).not.toContain(graph.nodes[2].id)
+    expect(chain.edges.map(edge => edge.id)).toEqual(expect.arrayContaining(['edge-character-story', 'edge-image-character']))
   })
 })

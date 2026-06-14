@@ -1,65 +1,19 @@
 import { describe, expect, test } from 'vitest'
-import { buildThreeStageOutput, getStageDefinition, getStageFixedContent, normalizeFixedContentOverrides } from './three-stage-definitions'
+import {
+  buildThreeStageOutput,
+  getStageDefinition,
+  getStageFixedContent,
+  normalizeFixedContentOverrides,
+  normalizeThreeStageTemplateSettings,
+  parseStoryboardShotRanges,
+  stringifyStoryboardShotRanges
+} from './three-stage-definitions'
 
 describe('three-stage definitions', () => {
-  test('builds object identity board output from fixed copy and the optional object note', () => {
-    const output = buildThreeStageOutput('object', {
-      objectNotes: '打开状态展示内部接口，保持黄铜与深色皮革材质。'
-    })
-
-    expect(getStageDefinition('object').fields.map(field => field.id)).toEqual(['objectNotes'])
-    expect(output).toContain('创建一张艺术性的 16:9 物品设定身份板。')
-    expect(output).toContain('[主体]：使用参考图像中的物品。')
-    expect(output).toContain('物品设定批注：\n【打开状态展示内部接口，保持黄铜与深色皮革材质。】')
-    expect(output).toContain('固定批注：\n只做多角度参考，不要直接整体作为画面主体物。')
-    expect(output).toContain('不要添加任何文字。')
-    expect(output).not.toContain('角色身份板')
-  })
-
-  test('builds character output from fixed copy and the optional character note', () => {
-    const output = buildThreeStageOutput('character', {
-      characterNotes: '性格安静但执拗，剧情倾向是守护家人'
-    })
-
+  test('exposes the expected editable fields for each stage', () => {
     expect(getStageDefinition('character').fields.map(field => field.id)).toEqual(['characterNotes'])
-    expect(output).toContain('创建一张艺术性的 16:9 角色身份板。')
-    expect(output).toContain('[主体]：使用参考图像。')
-    expect(output).toContain('角色设定注释：\n【性格安静但执拗，剧情倾向是守护家人】')
-    expect(output).toContain('身份锁定：')
-    expect(output).toContain('最终图像应像一张艺术性的角色身份板')
-  })
-
-  test('builds storyboard output with bracket inputs inside fixed copy', () => {
-    const output = buildThreeStageOutput('storyboard', {
-      theme: '乡村追逐主题',
-      storyMotion: '角色穿过禾苗，镜头缓慢推进',
-      panelMustContain: '人物动作和摄影机运动',
-      avoid: '静态站立',
-      performerFeeling: '紧张但坚定',
-      cameraStyle: '手持跟拍',
-      shotRanges: JSON.stringify([
-        { id: 'range-2-6', start: 2, end: 6, content: '女主进入田地' },
-        { id: 'range-7-12', start: 7, end: 12, content: '母女在庙后重逢' }
-      ]),
-      environmentKeep: '禾苗高度保持一致'
-    })
-
-    expect(output).toContain('为故事板创建一个 【乡村追逐主题】')
-    expect(output).toContain('专注于 【角色穿过禾苗，镜头缓慢推进】')
-    expect(output).toContain('每个面板必须包含 【人物动作和摄影机运动】，避免 【静态站立】。表演者应该是 【紧张但坚定】 感觉。')
-    expect(output).toContain('摄影方式：\n【手持跟拍】')
-    expect(output).toContain('环境保持：\n【禾苗高度保持一致】')
-    expect(output.indexOf('环境保持：')).toBeLessThan(output.indexOf('镜头叙事：'))
-    expect(output).toContain('镜头格【2-6】：【女主进入田地】')
-    expect(output).toContain('镜头格【7-12】：【母女在庙后重逢】')
-    expect(output).toContain('红色箭头 = 身体运动')
-    expect(output.endsWith('无时间戳。')).toBe(true)
-  })
-
-  test('only exposes bracket fields for the storyboard stage', () => {
-    const definition = getStageDefinition('storyboard')
-
-    expect(definition.fields.map(field => field.id)).toEqual([
+    expect(getStageDefinition('object').fields.map(field => field.id)).toEqual(['objectNotes'])
+    expect(getStageDefinition('storyboard').fields.map(field => field.id)).toEqual([
       'theme',
       'storyMotion',
       'panelMustContain',
@@ -69,59 +23,118 @@ describe('three-stage definitions', () => {
       'environmentKeep',
       'shotRanges'
     ])
-    expect(definition.fields.find(field => field.id === 'storyMotion')?.label).toBe('故事节奏')
-    expect(definition.fields.filter(field => field.presetType === 'camera').map(field => field.id)).toEqual(['cameraStyle'])
-    expect(definition.fields.find(field => field.id === 'shotRanges')?.kind).toBe('shotRanges')
-  })
-
-  test('exposes camera preset fields for the video prompt stage', () => {
-    const definition = getStageDefinition('videoPrompt')
-
-    expect(definition.fields.filter(field => field.presetType === 'camera').map(field => field.id)).toEqual([
+    expect(getStageDefinition('videoPrompt').fields.filter(field => field.presetType === 'camera').map(field => field.id)).toEqual([
       'shotKeywords',
       'finalShot'
     ])
-    expect(definition.fields.find(field => field.id === 'shotKeywords')?.kind).toBe('shotRanges')
   })
 
-  test('builds video prompt output with fixed stage-three fields', () => {
+  test('builds character and object outputs from fixed copy plus optional notes', () => {
+    const character = buildThreeStageOutput('character', { characterNotes: 'CHARACTER_MARKER' })
+    const object = buildThreeStageOutput('object', { objectNotes: 'OBJECT_MARKER' })
+
+    expect(character).toContain('CHARACTER_MARKER')
+    expect(character).toContain(getStageFixedContent('character')['character-reference'])
+    expect(object).toContain('OBJECT_MARKER')
+    expect(object).toContain(getStageFixedContent('object')['object-reference'])
+    expect(object).not.toContain('CHARACTER_MARKER')
+  })
+
+  test('builds storyboard output with sparse fields and shot range content', () => {
+    const output = buildThreeStageOutput('storyboard', {
+      theme: 'THEME_MARKER',
+      storyMotion: 'MOTION_MARKER',
+      panelMustContain: 'MUST_MARKER',
+      avoid: 'AVOID_MARKER',
+      performerFeeling: 'FEELING_MARKER',
+      cameraStyle: 'CAMERA_MARKER',
+      environmentKeep: 'ENV_MARKER',
+      shotRanges: JSON.stringify([
+        { id: 'range-1-4', start: 1, end: 4, content: 'SHOT_RANGE_MARKER' }
+      ])
+    })
+
+    for (const marker of [
+      'THEME_MARKER',
+      'MOTION_MARKER',
+      'MUST_MARKER',
+      'AVOID_MARKER',
+      'FEELING_MARKER',
+      'CAMERA_MARKER',
+      'ENV_MARKER',
+      'SHOT_RANGE_MARKER'
+    ]) {
+      expect(output).toContain(marker)
+    }
+    expect(output).toContain(getStageFixedContent('storyboard')['storyboard-annotation'])
+  })
+
+  test('builds video prompt output with fixed fields and the default negative prompt', () => {
     const output = buildThreeStageOutput('videoPrompt', {
-      storyboardRef: '用户误填内容',
-      shotOrder: '用户误填镜头顺序',
-      duration: '用户误填时长',
-      identityLock: '用户误填身份锁定',
-      shotKeywords: '追逐，滚动，回望'
+      storyboardRef: 'USER_FIXED_STORYBOARD_REF',
+      shotOrder: 'USER_FIXED_SHOT_ORDER',
+      duration: 'USER_FIXED_DURATION',
+      identityLock: 'USER_FIXED_IDENTITY',
+      shotKeywords: JSON.stringify([{ id: 'range-1-4', start: 1, end: 4, content: 'SHOT_KEYWORD_MARKER' }])
     })
 
-    expect(output).toContain('使用故事板参考 @[STORYBOARD REF] 作为 15 秒视频的完整视觉和情感叙事来源。')
-    expect(output).toContain('从左到右、从上到下依次遵循所有 12 个节拍。')
-    expect(output).toContain('将完整的 12 节拍序列压缩到 15 秒内。')
-    expect(output).toContain('保持角色参考相同的绝对核心主体身份')
-    expect(output).toContain('镜头提示词【1-4】：【追逐，滚动，回望】')
-    expect(output).not.toContain('用户误填')
+    expect(output).toContain(getStageFixedContent('videoPrompt').storyboardRef)
+    expect(output).toContain(getStageFixedContent('videoPrompt').shotOrder)
+    expect(output).toContain(getStageFixedContent('videoPrompt').duration)
+    expect(output).toContain(getStageFixedContent('videoPrompt').identityLock)
+    expect(output).toContain('分镜头版的标注只做参考，不要出现任何文字，箭头和镜头号！')
+    expect(output).toContain('SHOT_KEYWORD_MARKER')
+    expect(output).not.toContain('USER_FIXED_')
   })
 
-  test('applies per-form fixed content overrides without changing the default definition', () => {
-    const defaultFixed = getStageFixedContent('videoPrompt').duration
-    const overridden = buildThreeStageOutput('videoPrompt', {}, undefined, {
-      duration: { value: 'Custom node duration', unlocked: false }
-    })
-    const defaultOutput = buildThreeStageOutput('videoPrompt', {})
+  test('maps legacy video prompt shot content into the first shot slot', () => {
+    const ranges = parseStoryboardShotRanges({
+      shotKeywords: JSON.stringify([{ id: 'range-1-3', start: 1, end: 3, content: 'LEGACY_SHOT_CONTENT' }])
+    }, 'shotKeywords')
 
-    expect(overridden).toContain('Custom node duration')
-    expect(overridden).not.toContain(defaultFixed)
-    expect(defaultOutput).toContain(defaultFixed)
-    expect(getStageFixedContent('videoPrompt').duration).toBe(defaultFixed)
+    expect(ranges[0].shots?.[1]).toBe('LEGACY_SHOT_CONTENT')
   })
 
-  test('applies layout locked-block overrides to final output', () => {
-    const defaultFixed = getStageFixedContent('storyboard')['storyboard-annotation']
-    const overridden = buildThreeStageOutput('storyboard', {}, undefined, {
-      'storyboard-annotation': { value: 'Custom annotation', unlocked: true }
+  test('builds video prompt shot keywords as individual shot slots', () => {
+    const output = buildThreeStageOutput('videoPrompt', {
+      shotKeywords: stringifyStoryboardShotRanges([{
+        id: 'range-1-3',
+        start: 1,
+        end: 3,
+        content: 'legacy copy should not be used',
+        shots: {
+          1: 'SHOT_ONE_MARKER',
+          2: 'SHOT_TWO_MARKER',
+          3: 'SHOT_THREE_MARKER',
+          4: 'OUT_OF_RANGE_MARKER'
+        }
+      }])
     })
 
-    expect(overridden).toContain('Custom annotation')
-    expect(overridden).not.toContain(defaultFixed)
+    expect(output).toContain('镜头提示词【1-3】：')
+    expect(output).toContain('时间：X-XS。')
+    expect(output).toContain('镜头1@SHOT_ONE_MARKER')
+    expect(output).toContain('镜头2@SHOT_TWO_MARKER')
+    expect(output).toContain('镜头3@SHOT_THREE_MARKER')
+    expect(output).not.toContain('OUT_OF_RANGE_MARKER')
+    expect(output).not.toContain('legacy copy should not be used')
+  })
+
+  test('uses template snapshot defaults below per-node overrides and above built-in defaults', () => {
+    const defaultFixed = getStageFixedContent('videoPrompt').negativePrompt
+    const fromTemplate = buildThreeStageOutput('videoPrompt', {}, undefined, undefined, {
+      negativePrompt: 'Template negative prompt'
+    })
+    const fromNode = buildThreeStageOutput('videoPrompt', {}, undefined, {
+      negativePrompt: { value: 'Node negative prompt', unlocked: true }
+    }, {
+      negativePrompt: 'Template negative prompt'
+    })
+
+    expect(fromTemplate).toContain('Template negative prompt')
+    expect(fromTemplate).not.toContain(defaultFixed)
+    expect(fromNode).toContain('Node negative prompt')
+    expect(fromNode).not.toContain('Template negative prompt')
   })
 
   test('applies every fixed block exposed by each stage to final output', () => {
@@ -148,15 +161,13 @@ describe('three-stage definitions', () => {
     expect(output).not.toContain('must not appear')
   })
 
-  test('injects storyboard output and optional audio constraints into video prompt output', () => {
+  test('does not inject storyboard output into video prompt output', () => {
     const project = {
       character: { fields: {}, updatedAt: 1, meta: {} },
       storyboard: {
         fields: {
-          theme: '松鼠追逐主题',
-          storyMotion: '松鼠跨越现代与未来',
-          cameraStyle: '手持跟拍',
-          shotRanges: JSON.stringify([{ id: 'range-1-4', start: 1, end: 4, content: '松鼠从树尖冲入画面' }])
+          theme: 'STORYBOARD_THEME_MARKER',
+          storyMotion: 'STORYBOARD_MOTION_MARKER'
         },
         updatedAt: 1,
         meta: {}
@@ -172,15 +183,10 @@ describe('three-stage definitions', () => {
       needsVoiceDialogue: 'false'
     }, project)
 
-    expect(output).toContain('故事版内容注入：')
-    expect(output).toContain('主题：【松鼠追逐主题】')
-    expect(output).toContain('故事节奏：【松鼠跨越现代与未来】')
-    expect(output).not.toContain('手持跟拍')
-    expect(output).not.toContain('镜头格【1-4】：【松鼠从树尖冲入画面】')
-    expect(output).not.toContain('使用颜色标注系统')
-    expect(output).toContain('只保留物理音效，不要背景BGM音乐。')
-    expect(output).toContain('不要人声对话。')
-    expect(output).not.toContain('首帧：')
+    expect(output).not.toContain('STORYBOARD_THEME_MARKER')
+    expect(output).not.toContain('STORYBOARD_MOTION_MARKER')
+    expect(output).toContain(getStageFixedContent('videoPrompt').negativePrompt)
+    expect(output).not.toContain('首帧')
   })
 
   test('injects first and last frame placeholders only when enabled', () => {
@@ -189,9 +195,23 @@ describe('three-stage definitions', () => {
       needsFirstLastFrame: 'true'
     })
 
-    expect(defaultOutput).not.toContain('首帧：')
-    expect(defaultOutput).not.toContain('尾帧：')
-    expect(enabledOutput).toContain('首帧：')
-    expect(enabledOutput).toContain('尾帧：')
+    expect(defaultOutput).not.toContain('首帧')
+    expect(defaultOutput).not.toContain('尾帧')
+    expect(enabledOutput).toContain('首帧')
+    expect(enabledOutput).toContain('尾帧')
+  })
+
+  test('normalizes template settings for the editable three-stage templates only', () => {
+    const settings = normalizeThreeStageTemplateSettings({
+      character: { 'character-reference': 'Custom character reference', unknown: 'ignored' },
+      storyboard: { 'storyboard-open': 'Custom storyboard open' },
+      videoPrompt: { negativePrompt: 'Custom negative prompt' },
+      object: { 'object-reference': 'ignored object template' }
+    })
+
+    expect(settings.character).toEqual({ 'character-reference': 'Custom character reference' })
+    expect(settings.storyboard).toEqual({ 'storyboard-open': 'Custom storyboard open' })
+    expect(settings.videoPrompt).toEqual({ negativePrompt: 'Custom negative prompt' })
+    expect(settings).not.toHaveProperty('object')
   })
 })

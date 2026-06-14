@@ -1,4 +1,4 @@
-import type { IThreeStageProject, ThreeStageKey } from '@/models/PromptHistory.model'
+import type { IThreeStageForm, IThreeStageProject, ThreeStageKey } from '@/models/PromptHistory.model'
 
 export type FieldDefinition = {
   id: string
@@ -20,6 +20,7 @@ export type StoryboardShotRange = {
   start: number
   end: number
   content: string
+  shots?: Record<number, string>
 }
 
 export type StageDefinition = {
@@ -40,6 +41,11 @@ export type StageLayoutItem =
   | { type: 'field'; fieldId: string }
 
 export type FixedContentOverrides = Record<string, { value: string; unlocked?: boolean }>
+export type FixedContentDefaults = Record<string, string>
+export type EditableThreeStageTemplateKey = Extract<ThreeStageKey, 'character' | 'storyboard' | 'videoPrompt'>
+export type ThreeStageTemplateSettings = Partial<Record<EditableThreeStageTemplateKey, FixedContentDefaults>>
+
+export const editableThreeStageTemplateKeys: EditableThreeStageTemplateKey[] = ['character', 'storyboard', 'videoPrompt']
 
 export const valueOf = (fields: Record<string, string>, key: string) => fields[key]?.trim() || ''
 
@@ -59,6 +65,22 @@ const clampShotNumber = (value: unknown, fallback: number): number => {
   return Math.min(12, Math.max(1, Math.floor(number)))
 }
 
+export const shotNumbersForRange = (range: Pick<StoryboardShotRange, 'start' | 'end'>): number[] => {
+  const start = Math.min(range.start, range.end)
+  const end = Math.max(range.start, range.end)
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+}
+
+const normalizeShotSlotContent = (candidate: unknown): Record<number, string> | undefined => {
+  if (!candidate || typeof candidate !== 'object') return undefined
+  const shots = Object.fromEntries(Object.entries(candidate as Record<string, unknown>).flatMap(([shotNumber, content]) => {
+    const normalizedShotNumber = clampShotNumber(shotNumber, 0)
+    if (!normalizedShotNumber || typeof content !== 'string') return []
+    return [[normalizedShotNumber, content]]
+  })) as Record<number, string>
+  return Object.keys(shots).length > 0 ? shots : undefined
+}
+
 export const createStoryboardShotRange = (index = Date.now()): StoryboardShotRange => ({
   id: `shot-range-${index}`,
   start: 1,
@@ -74,7 +96,11 @@ export const parseStoryboardShotRanges = (fields: Record<string, string>, fieldI
         id: typeof range.id === 'string' && range.id ? range.id : `shot-range-${index + 1}`,
         start: clampShotNumber(range.start, 1),
         end: clampShotNumber(range.end, 4),
-        content: typeof range.content === 'string' ? range.content : ''
+        content: typeof range.content === 'string' ? range.content : '',
+        ...(normalizeShotSlotContent(range.shots) ? { shots: normalizeShotSlotContent(range.shots) } : {}),
+        ...(fieldId === 'shotKeywords' && !normalizeShotSlotContent(range.shots) && typeof range.content === 'string' && range.content.trim()
+          ? { shots: { [clampShotNumber(range.start, 1)]: range.content } }
+          : {})
       }))
     }
   } catch {
@@ -97,18 +123,24 @@ export const parseStoryboardShotRanges = (fields: Record<string, string>, fieldI
 export const stringifyStoryboardShotRanges = (ranges: StoryboardShotRange[]): string =>
   JSON.stringify(ranges)
 
+const buildShotSlotRangeOutput = (fields: Record<string, string>, fieldId: string, label: string, _fallback: string): string =>
+  parseStoryboardShotRanges(fields, fieldId)
+    .map(range => {
+      const shotLines = shotNumbersForRange(range)
+        .map(shotNumber => `镜头${shotNumber}@${range.shots?.[shotNumber]?.trim() || ''}`)
+        .join('\n')
+      const start = Math.min(range.start, range.end)
+      const end = Math.max(range.start, range.end)
+      return `${label}【${start}-${end}】：\n时间：X-XS。\n${shotLines}`
+    })
+    .join('\n')
+
 export const buildStoryboardShotRangeOutput = (fields: Record<string, string>, fieldId = 'shotRanges', label = '镜头格', fallback = '这里填写镜头叙事，一个大概的剧情'): string => {
+  if (fieldId === 'shotKeywords') return buildShotSlotRangeOutput(fields, fieldId, label, fallback)
   const ranges = parseStoryboardShotRanges(fields, fieldId)
   return ranges
     .map(range => `${label}【${range.start}-${range.end}】：【${range.content.trim() || fallback}】`)
     .join('\n')
-}
-
-export const buildStoryboardInjectionForVideo = (fields: Record<string, string>): string => {
-  return joinBlocks([
-    valueOf(fields, 'theme') && `主题：${bracketValue(fields, 'theme')}`,
-    valueOf(fields, 'storyMotion') && `故事节奏：${bracketValue(fields, 'storyMotion')}`
-  ])
 }
 
 const objectBoardReference = `创建一张艺术性的 16:9 物品设定身份板。
@@ -438,6 +470,13 @@ ${buildStoryboardShotRangeOutput(fields)}`,
         rows: 5
       },
       {
+        id: 'negativePrompt',
+        label: '负面提示词',
+        placeholder: '分镜头版的标注只做参考，不要出现任何文字，箭头和镜头号！',
+        fixedValue: '分镜头版的标注只做参考，不要出现任何文字，箭头和镜头号！',
+        rows: 3
+      },
+      {
         id: 'actionKeywords',
         label: '动作关键词',
         placeholder: '[动作关键词]',
@@ -493,13 +532,13 @@ ${buildStoryboardShotRangeOutput(fields)}`,
         }
       }
     ],
-    buildOutput: (fields, project, fixedContent) => joinBlocks([
+    buildOutput: (fields, _project, fixedContent) => joinBlocks([
       fixedContentValue('videoPrompt', 'storyboardRef', fixedContent),
       fixedContentValue('videoPrompt', 'shotOrder', fixedContent),
       fixedContentValue('videoPrompt', 'duration', fixedContent),
-      project?.storyboard && buildStoryboardInjectionForVideo(project.storyboard.fields) && `故事版内容注入：\n${buildStoryboardInjectionForVideo(project.storyboard.fields)}`,
       valueOf(fields, 'actionSnapshot'),
       fixedContentValue('videoPrompt', 'identityLock', fixedContent),
+      fixedContentValue('videoPrompt', 'negativePrompt', fixedContent),
       valueOf(fields, 'actionKeywords'),
       valueOf(fields, 'emotionKeywords'),
       buildStoryboardShotRangeOutput(fields, 'shotKeywords', '镜头提示词', '这里填写每段镜头提示词'),
@@ -519,7 +558,7 @@ export const stageByKey = Object.fromEntries(stageDefinitions.map(stage => [stag
 
 export const getStageDefinition = (stage: ThreeStageKey): StageDefinition => stageByKey[stage] || stageByKey.character
 
-export const getStageFixedContent = (stage: ThreeStageKey): Record<string, string> => {
+export const getStageFixedContent = (stage: ThreeStageKey): FixedContentDefaults => {
   const definition = getStageDefinition(stage)
   return Object.fromEntries([
     ...(definition.layout || [])
@@ -529,6 +568,35 @@ export const getStageFixedContent = (stage: ThreeStageKey): Record<string, strin
       .filter(field => Boolean(field.fixedValue))
       .map(field => [field.id, field.fixedValue || ''])
   ])
+}
+
+export const normalizeFixedContentDefaults = (
+  stage: ThreeStageKey,
+  candidate: unknown
+): FixedContentDefaults => {
+  if (!candidate || typeof candidate !== 'object') return {}
+  const validIds = new Set(Object.keys(getStageFixedContent(stage)))
+  return Object.fromEntries(Object.entries(candidate as Record<string, unknown>).flatMap(([contentId, value]) => {
+    if (!validIds.has(contentId) || typeof value !== 'string') return []
+    return [[contentId, value]]
+  }))
+}
+
+export const normalizeThreeStageTemplateSettings = (candidate: unknown): ThreeStageTemplateSettings => {
+  if (!candidate || typeof candidate !== 'object') return {}
+  const record = candidate as Record<string, unknown>
+  return Object.fromEntries(editableThreeStageTemplateKeys.flatMap(stage => {
+    const fixedContent = normalizeFixedContentDefaults(stage, record[stage])
+    return Object.keys(fixedContent).length > 0 ? [[stage, fixedContent]] : []
+  })) as ThreeStageTemplateSettings
+}
+
+export const getTemplateFixedContentForStage = (
+  stage: ThreeStageKey,
+  settings?: ThreeStageTemplateSettings
+): FixedContentDefaults => {
+  if (!editableThreeStageTemplateKeys.includes(stage as EditableThreeStageTemplateKey)) return {}
+  return normalizeFixedContentDefaults(stage, settings?.[stage as EditableThreeStageTemplateKey])
 }
 
 export const normalizeFixedContentOverrides = (
@@ -549,6 +617,16 @@ export const normalizeFixedContentOverrides = (
   }))
 }
 
+export const getFormFixedContentOverrides = (form: IThreeStageForm): FixedContentOverrides => {
+  const canvas = form.meta.canvas as { fixedContent?: unknown } | undefined
+  return normalizeFixedContentOverrides(form.type, canvas?.fixedContent)
+}
+
+export const getFormTemplateFixedContent = (form: IThreeStageForm): FixedContentDefaults => {
+  const template = form.meta.template as { fixedContent?: unknown } | undefined
+  return normalizeFixedContentDefaults(form.type, template?.fixedContent)
+}
+
 const fixedContentValue = (
   stage: ThreeStageKey,
   contentId: string,
@@ -559,12 +637,25 @@ export const buildThreeStageOutput = (
   stage: ThreeStageKey,
   fields: Record<string, string>,
   project?: IThreeStageProject,
-  fixedContent?: FixedContentOverrides
+  fixedContent?: FixedContentOverrides,
+  templateFixedContent?: FixedContentDefaults
 ): string => {
   const overrides = normalizeFixedContentOverrides(stage, fixedContent)
+  const templateDefaults = normalizeFixedContentDefaults(stage, templateFixedContent)
   const resolvedFixedContent = Object.fromEntries(Object.entries(getStageFixedContent(stage)).map(([contentId, defaultValue]) => [
     contentId,
-    overrides[contentId]?.value ?? defaultValue
+    overrides[contentId]?.value ?? templateDefaults[contentId] ?? defaultValue
   ]))
   return getStageDefinition(stage).buildOutput(fields, project, resolvedFixedContent)
 }
+
+export const buildThreeStageFormOutput = (
+  form: IThreeStageForm,
+  project?: IThreeStageProject
+): string => buildThreeStageOutput(
+  form.type,
+  form.section.fields,
+  project,
+  getFormFixedContentOverrides(form),
+  getFormTemplateFixedContent(form)
+)

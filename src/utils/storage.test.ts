@@ -211,6 +211,22 @@ describe('storage service facade', () => {
     expect(history).toHaveLength(2)
     expect(history[0].content).toBe('Another prompt')
   })
+
+  test('persists three-stage template settings in user settings meta', async () => {
+    const saved = await storage.settings.save({
+      meta: {
+        threeStageTemplates: {
+          videoPrompt: {
+            negativePrompt: 'No text or arrows.'
+          }
+        }
+      }
+    })
+    const loaded = await storage.settings.get()
+
+    expect(saved.meta.threeStageTemplates.videoPrompt.negativePrompt).toBe('No text or arrows.')
+    expect(loaded.meta.threeStageTemplates.videoPrompt.negativePrompt).toBe('No text or arrows.')
+  })
 })
 
 function jsonResponse(payload: unknown, status = 200): Response {

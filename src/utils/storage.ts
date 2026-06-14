@@ -14,6 +14,7 @@ import { storageServiceClient } from '@/storage/storage-service-client'
 import type { IPromptTemplate } from '@/models/PromptTemplate.model'
 import type { IUserSettings } from '@/models/UserSettings.model'
 import type { IPage } from '@/stores/card-initial-state'
+import type { ThreeStageTemplateSettings } from '@/domain/three-stage/three-stage-definitions'
 
 export interface IPersistedWorkspace {
   pages: IPage[]
@@ -117,6 +118,7 @@ export const storage = {
     createThreeStageDraft(project: {
       title: string
       threeStage?: IThreeStageProject
+      templateSettings?: ThreeStageTemplateSettings
       meta?: Record<string, unknown>
     }): IPromptProject {
       const now = Date.now()
@@ -127,7 +129,7 @@ export const storage = {
         revision: 1,
         pages: [],
         currentPage: 0,
-        threeStage: project.threeStage || createThreeStageProject(now),
+        threeStage: project.threeStage || createThreeStageProject(now, project.templateSettings),
         createdAt: now,
         updatedAt: now,
         lastOpenedAt: now,

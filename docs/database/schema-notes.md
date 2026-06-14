@@ -36,15 +36,15 @@ Compatibility fields:
 
 The compatibility fields are synchronized from the selected page/form by `syncThreeStageLegacyFields()`. New code should not treat them as the source of truth for multi-page or multi-form behavior.
 
-`IThreeStagePage.items` supports two item kinds:
+`IThreeStagePage.items` stores independent form items:
 
-- `character`: contains one independent `IThreeStageForm`.
-- `storyVideoPair`: contains `pairId`, `storyboardForm`, and `videoPromptForm`.
+- `form`: contains one independent `IThreeStageForm` with `type` set to `character`, `object`, `storyboard`, or `videoPrompt`.
 
-Story/video pairs are indivisible for create, copy, delete, numbering, and stage-three injection. A video prompt form should always read the storyboard form with the same `pairId`.
+Legacy readers may still encounter `character` and `storyVideoPair` item shapes. `normalizeThreeStagePages()` converts them into adjacent independent `form` items. New code must not create or depend on `storyVideoPair`.
 
 Normalization behavior:
 
-- Old fixed three-stage projects migrate into one page with one character form and one story/video pair.
-- Missing first-page character or pair data is repaired during normalization.
-- Form and pair numbering is monotonic and is not compacted after deletion.
+- Old fixed three-stage projects migrate into one page with independent character, storyboard, and video-prompt forms.
+- Legacy `storyVideoPair` items split into adjacent independent storyboard and video-prompt forms.
+- Form numbering is monotonic per form type and is not compacted after deletion.
+- `selectedPairId` is retained only for input compatibility and is synchronized to `null`.

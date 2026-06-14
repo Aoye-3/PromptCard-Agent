@@ -1,14 +1,14 @@
 import type { Edge, Node, XYPosition } from '@xyflow/react'
 import type {
   IThreeStageForm,
-  IThreeStageItem,
+  IThreeStageFormItem,
   IThreeStagePage,
   IThreeStageProject,
   ThreeStageKey
 } from '@/models/PromptHistory.model'
 import { normalizeThreeStagePages, selectThreeStageFormAfterRemoval, syncThreeStageLegacyFields } from '@/domain/three-stage/three-stage-pages'
 import {
-  buildThreeStageOutput,
+  buildThreeStageFormOutput,
   normalizeFixedContentOverrides,
   type FixedContentOverrides
 } from '@/domain/three-stage/three-stage-definitions'
@@ -405,23 +405,7 @@ export const buildFreeCanvasGraph = (threeStage: IThreeStageProject): {
 
   pages.forEach((page, pageIndex) => {
     page.items.forEach((item, itemIndex) => {
-      if (item.kind === 'character') {
-        nodes.push(formNode(page, item, item.form, defaultFormPosition(pageIndex, itemIndex, 0)))
-        return
-      }
-
-      const storyboardNode = formNode(page, item, item.storyboardForm, defaultFormPosition(pageIndex, itemIndex, 1), item.pairId)
-      const videoNode = formNode(page, item, item.videoPromptForm, defaultFormPosition(pageIndex, itemIndex, 2), item.pairId)
-      nodes.push(storyboardNode, videoNode)
-      edges.push({
-        id: `three-stage-pair:${item.pairId}`,
-        source: storyboardNode.id,
-        target: videoNode.id,
-        label: `绑定组 #${item.number}`,
-        type: 'smoothstep',
-        animated: false,
-        style: { stroke: '#c7ccd5', strokeWidth: 1.5 }
-      })
+      nodes.push(formNode(page, item, item.form, defaultFormPosition(pageIndex, itemIndex, formLane(item.form.type))))
     })
   })
 
@@ -494,23 +478,15 @@ export const updateFreeCanvasFormFixedContent = (
 export const buildFreeCanvasFormOutput = (
   form: IThreeStageForm,
   project?: IThreeStageProject
-): string => buildThreeStageOutput(form.type, form.section.fields, project, getFormFixedContentOverrides(form))
+): string => buildThreeStageFormOutput(form, project)
 
 const updateItemFormPosition = (
-  item: IThreeStageItem,
+  item: IThreeStageFormItem,
   formId: string,
   position: FreeCanvasPosition
-): IThreeStageItem => {
-  if (item.kind === 'character' && item.form.id === formId) {
+): IThreeStageFormItem => {
+  if (item.form.id === formId) {
     return { ...item, form: updateFormCanvasPosition(item.form, position), updatedAt: Date.now() }
-  }
-  if (item.kind === 'storyVideoPair') {
-    if (item.storyboardForm.id === formId) {
-      return { ...item, storyboardForm: updateFormCanvasPosition(item.storyboardForm, position), updatedAt: Date.now() }
-    }
-    if (item.videoPromptForm.id === formId) {
-      return { ...item, videoPromptForm: updateFormCanvasPosition(item.videoPromptForm, position), updatedAt: Date.now() }
-    }
   }
   return item
 }
@@ -528,11 +504,11 @@ const updateFormCanvasPosition = (form: IThreeStageForm, position: FreeCanvasPos
 })
 
 const updateItemFormFixedContent = (
-  item: IThreeStageItem,
+  item: IThreeStageFormItem,
   formId: string,
   contentId: string,
   update: { value?: string; unlocked?: boolean } | null
-): IThreeStageItem => {
+): IThreeStageFormItem => {
   const updateForm = (form: IThreeStageForm): IThreeStageForm => {
     if (form.id !== formId) return form
     const canvas = typeof form.meta.canvas === 'object' && form.meta.canvas
@@ -551,20 +527,13 @@ const updateItemFormFixedContent = (
     }
   }
 
-  if (item.kind === 'character') {
-    const form = updateForm(item.form)
-    return form === item.form ? item : { ...item, form, updatedAt: form.updatedAt }
-  }
-  const storyboardForm = updateForm(item.storyboardForm)
-  const videoPromptForm = updateForm(item.videoPromptForm)
-  return storyboardForm === item.storyboardForm && videoPromptForm === item.videoPromptForm
-    ? item
-    : { ...item, storyboardForm, videoPromptForm, updatedAt: Date.now() }
+  const form = updateForm(item.form)
+  return form === item.form ? item : { ...item, form, updatedAt: form.updatedAt }
 }
 
 const formNode = (
   page: IThreeStagePage,
-  item: IThreeStageItem,
+  item: IThreeStageFormItem,
   form: IThreeStageForm,
   fallbackPosition: FreeCanvasPosition,
   pairId: string | null = null
@@ -595,6 +564,13 @@ const defaultFormPosition = (pageIndex: number, itemIndex: number, lane: number)
   x: 80 + lane * 380,
   y: 80 + pageIndex * 420 + itemIndex * 190
 })
+
+const formLane = (type: ThreeStageKey): number => {
+  if (type === 'storyboard') return 1
+  if (type === 'videoPrompt') return 2
+  if (type === 'object') return 3
+  return 0
+}
 
 const normalizeMediaNode = (node: Partial<FreeCanvasMediaNode>): FreeCanvasMediaNode => ({
   id: node.id || `${Date.now()}-media`,
@@ -648,9 +624,13 @@ const mediaSubtitle = (node: FreeCanvasMediaNode): string => {
   return '图片/文字/箭头组合'
 }
 
-const formSubtitle = (type: ThreeStageKey): string => {
-  if (type === 'character') return '人物板节点'
+const readableFormSubtitle = (type: ThreeStageKey): string => {
+  if (type === 'character') return '人物版节点'
   if (type === 'object') return '物品版节点'
-  if (type === 'storyboard') return '故事板节点'
-  return '视频提示词节点'
+  if (type === 'storyboard') return '故事版节点'
+  return '提示词版节点'
+}
+
+const formSubtitle = (type: ThreeStageKey): string => {
+  return readableFormSubtitle(type)
 }

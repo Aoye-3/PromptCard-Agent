@@ -171,9 +171,6 @@ export function buildThreeStageWorkspaceContext({
   const selectedFieldId = syncedThreeStage.selectedFieldId
   const pages = normalizeThreeStagePages(syncedThreeStage)
   const selectedContext = getSelectedThreeStageFormContext(syncedThreeStage)
-  const pairedStoryboardSummary = selectedContext.form.type === 'videoPrompt' && selectedContext.pairedStoryboardForm
-    ? compactThreeStageSection(selectedContext.pairedStoryboardForm.section)
-    : null
 
   return {
     contextId: `three-stage:${activeProject.id}:${selectedContext.page.id}:${selectedContext.form.id}:${selectedFieldId}`,
@@ -187,10 +184,9 @@ export function buildThreeStageWorkspaceContext({
       selectedPageId: selectedContext.page.id,
       selectedItemId: selectedContext.item.id,
       selectedFormId: selectedContext.form.id,
-      selectedPairId: selectedContext.item.kind === 'storyVideoPair' ? selectedContext.item.pairId : null,
+      selectedPairId: null,
       selectedFormType: selectedContext.form.type,
       selectedFormTitle: selectedContext.form.title,
-      pairedStoryboardSummary,
       selectedOutput: compactText(selectedOutput),
       sections: {
         character: compactThreeStageSection(syncedThreeStage.character),
@@ -201,22 +197,14 @@ export function buildThreeStageWorkspaceContext({
         id: page.id,
         title: compactText(page.title),
         selectedItemId: page.selectedItemId,
-        items: page.items.map(item => item.kind === 'character'
-          ? {
-              id: item.id,
-              kind: item.kind,
-              formId: item.form.id,
-              title: item.form.title,
-              number: item.form.number
-            }
-          : {
-              id: item.id,
-              kind: item.kind,
-              pairId: item.pairId,
-              storyboardFormId: item.storyboardForm.id,
-              videoPromptFormId: item.videoPromptForm.id,
-              number: item.storyboardForm.number
-            })
+        items: page.items.map(item => ({
+          id: item.id,
+          kind: 'form',
+          formId: item.form.id,
+          formType: item.form.type,
+          title: item.form.title,
+          number: item.form.number
+        }))
       })),
       freeCanvas: freeCanvas ? {
         selectedNodeId: freeCanvas.selectedNodeId || null,

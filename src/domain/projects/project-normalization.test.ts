@@ -38,7 +38,8 @@ describe('project normalization', () => {
     } as IPromptProject)
 
     expect(project.threeStage?.pages).toHaveLength(1)
-    expect(project.threeStage?.pages?.[0].items.map(item => item.kind)).toEqual(['character', 'storyVideoPair'])
+    expect(project.threeStage?.pages?.[0].items.map(item => item.kind)).toEqual(['form', 'form', 'form'])
+    expect(project.threeStage?.pages?.[0].items.map(item => item.form.type)).toEqual(['character', 'storyboard', 'videoPrompt'])
     expect(project.threeStage?.selectedStage).toBe('character')
     expect(project.threeStage?.selectedFieldId).toBe('characterNotes')
   })

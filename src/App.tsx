@@ -23,6 +23,7 @@ import type { BuilderTemplateId } from './domain/builder-templates/builder-templ
 import { sortProjects } from './domain/projects/project-normalization'
 import { mergeStoredProjectMetadata } from './domain/projects/project-storage-merge'
 import { createProjectSaveCoordinator, type ProjectSaveResult } from './domain/projects/project-save-coordinator'
+import { normalizeThreeStageTemplateSettings, type ThreeStageTemplateSettings } from './domain/three-stage/three-stage-definitions'
 import type { IPreset, CardType } from './models/Card.model'
 import type { IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
@@ -98,6 +99,10 @@ function App() {
   const [activeEditMode, setActiveEditMode] = useState<'learn' | 'creative'>('creative')
   const [showSettings, setShowSettings] = useState(false)
   const [userSettings, setUserSettings] = useState<IUserSettings>(DEFAULT_USER_SETTINGS)
+  const threeStageTemplateSettings = useMemo(
+    () => normalizeThreeStageTemplateSettings(userSettings.meta?.threeStageTemplates),
+    [userSettings.meta]
+  )
   const lastHistoryContentRef = useRef('')
   const projectEditSeqRef = useRef<Record<string, number>>({})
   const lastCardWorkspaceSnapshotRef = useRef('')
@@ -445,6 +450,7 @@ function App() {
 
   const handleCreateThreeStageProject = async () => {
     const newProject = storage.projects.createThreeStageDraft({
+      templateSettings: threeStageTemplateSettings,
       title: `三段式项目 ${projects.filter(project => project.type === 'three-stage').length + 1}`
     })
     await createProjectOptimistically(newProject)
@@ -457,7 +463,7 @@ function App() {
     const newProject = template.projectType === 'storyboard'
       ? storage.projects.createStoryboardDraft({ title, storyboard: snapshot?.storyboard, meta })
       : template.projectType === 'three-stage'
-        ? storage.projects.createThreeStageDraft({ title, threeStage: snapshot?.threeStage, meta })
+        ? storage.projects.createThreeStageDraft({ title, threeStage: snapshot?.threeStage, templateSettings: threeStageTemplateSettings, meta })
         : storage.projects.createDraft({
             title,
             pages: snapshot?.pages?.length ? snapshot.pages : [createInitialPage()],
@@ -697,6 +703,15 @@ function App() {
     setUserSettings(updated)
   }
 
+  const handleUpdateThreeStageTemplateSettings = async (settings: ThreeStageTemplateSettings) => {
+    await handleUpdateUserSettings({
+      meta: {
+        ...userSettings.meta,
+        threeStageTemplates: settings
+      }
+    })
+  }
+
   const handleCopyPrompt = async () => {
     if (!currentPrompt.trim()) {
       alert(t('noPromptToCopy'))
@@ -929,6 +944,7 @@ function App() {
       onRenameProject={() => handleRenameProject(activeProject)}
       onSave={handleSave}
       onChange={handleUpdateThreeStage}
+      threeStageTemplateSettings={threeStageTemplateSettings}
     />
   ) : projectMode === 'builder' && activeProject?.type === 'three-stage' && activeProject.threeStage ? (
     <ThreeStageBuilderScreen
@@ -940,6 +956,8 @@ function App() {
       onSave={handleSave}
       onChange={handleUpdateThreeStage}
       onIncrementPresetUsage={incrementUsage}
+      threeStageTemplateSettings={threeStageTemplateSettings}
+      onThreeStageTemplateSettingsChange={handleUpdateThreeStageTemplateSettings}
     />
   ) : projectMode === 'builder' && activeProject?.type === 'card' ? (
     <CardBuilderScreen

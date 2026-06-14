@@ -50,7 +50,7 @@ export interface IThreeStageSection {
   meta: Record<string, unknown>
 }
 
-export type ThreeStageItemKind = 'character' | 'storyVideoPair'
+export type ThreeStageItemKind = 'form' | 'character' | 'storyVideoPair'
 
 export interface IThreeStageForm {
   id: string
@@ -64,6 +64,16 @@ export interface IThreeStageForm {
   meta: Record<string, unknown>
 }
 
+export interface IThreeStageFormItem {
+  id: string
+  kind: 'form'
+  form: IThreeStageForm
+  createdAt: number
+  updatedAt: number
+  meta: Record<string, unknown>
+}
+
+/** @deprecated Legacy independent form item kept for old persisted projects. */
 export interface IThreeStageCharacterItem {
   id: string
   kind: 'character'
@@ -73,6 +83,7 @@ export interface IThreeStageCharacterItem {
   meta: Record<string, unknown>
 }
 
+/** @deprecated Legacy bound pair item normalized into adjacent independent form items. */
 export interface IThreeStageStoryVideoPairItem {
   id: string
   kind: 'storyVideoPair'
@@ -85,12 +96,12 @@ export interface IThreeStageStoryVideoPairItem {
   meta: Record<string, unknown>
 }
 
-export type IThreeStageItem = IThreeStageCharacterItem | IThreeStageStoryVideoPairItem
+export type IThreeStageItem = IThreeStageFormItem | IThreeStageCharacterItem | IThreeStageStoryVideoPairItem
 
 export interface IThreeStagePage {
   id: string
   title: string
-  items: IThreeStageItem[]
+  items: IThreeStageFormItem[]
   selectedItemId?: string | null
   createdAt: number
   updatedAt: number

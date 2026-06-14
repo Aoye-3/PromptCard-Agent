@@ -4,13 +4,13 @@
 
 Project data is represented by `IPromptProject`. Card projects mainly use `pages`; storyboard projects use the normalized `storyboard` shape; three-stage projects use the `threeStage` shape.
 
-Three-stage projects now use a page-based form model under `threeStage.pages`. Each page contains independent character forms and bound story/video pairs. The legacy top-level `threeStage.character`, `threeStage.storyboard`, `threeStage.videoPrompt`, `selectedStage`, and `selectedFieldId` fields remain compatibility mirrors and are synchronized from the selected page/form during normalization and UI updates.
+Three-stage projects use a page-based form model under `threeStage.pages`. Each page contains ordered independent `form` items for character, storyboard, video-prompt, and optional object boards. The legacy top-level `threeStage.character`, `threeStage.storyboard`, `threeStage.videoPrompt`, `selectedStage`, and `selectedFieldId` fields remain compatibility mirrors and are synchronized from the selected page/form during normalization and UI updates.
 
 Loading now goes through the local `promptcard_storage` service. Active and Trash project rows live in `data/promptcard.sqlite3`; the old project JSON files are read-only migration sources. Browser project cache is imported once through an idempotent migration endpoint and is not used as an ongoing project source.
 
 Project normalization is pure domain logic in `src/domain/projects/project-normalization.ts`. It is responsible for defaulting legacy card projects, migrating legacy flat storyboard rows into the sequence model, creating missing three-stage payloads, repairing known display-text mojibake, and sorting by recent activity. UI components and stores should call the storage facade instead of duplicating this logic.
 
-Three-stage page normalization and mutations are pure helpers in `src/domain/three-stage/three-stage-pages.ts`. UI handlers should use those helpers for page duplication, form creation, pair creation, deletion, selected-form changes, and legacy-field synchronization.
+Three-stage page normalization and mutations are pure helpers in `src/domain/three-stage/three-stage-pages.ts`. UI handlers should use those helpers for page duplication, independent form creation, deletion, ordering, selected-form changes, and legacy-field synchronization.
 
 ## Prompt Library Data
 
@@ -33,4 +33,4 @@ Card workspace proposals can be auto-applied by the collaboration panel. Prompt 
 
 Storyboard workspace changes use pure row/sequence helpers from `src/domain/storyboard/storyboard-operations.ts` so UI handlers remain focused on user events and rendering.
 
-Three-stage workspace snapshots include selected page, selected item, selected form, selected pair, and paired storyboard summary. Video prompt context must be built from the selected form's `pairId`, not from whichever storyboard happens to be mirrored in the legacy top-level field.
+Three-stage workspace snapshots include selected page, selected item, selected form, and selected form type. `selectedPairId` is retained as `null` for compatibility. Video prompt context must be built from the selected form itself and must not include a paired storyboard summary.

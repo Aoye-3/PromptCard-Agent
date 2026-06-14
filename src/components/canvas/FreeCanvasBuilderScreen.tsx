@@ -29,9 +29,8 @@ import { FreeCanvasMediaNode } from '@/components/canvas/FreeCanvasMediaNode'
 import { ImageCropEditor } from '@/components/canvas/ImageCropEditor'
 import { useCanvasImageInteractions } from '@/components/canvas/useCanvasImageInteractions'
 import {
-  addCharacterFormToPage,
   addObjectFormToPage,
-  addStoryVideoPairToPage,
+  addThreeStageFormToPage,
   addThreeStagePage,
   getSelectedThreeStageFormContext,
   normalizeThreeStagePages,
@@ -66,6 +65,7 @@ import {
   valueOf
 } from '@/domain/three-stage/three-stage-definitions'
 import type { FieldDefinition, StoryboardShotRange } from '@/domain/three-stage/three-stage-definitions'
+import type { ThreeStageTemplateSettings } from '@/domain/three-stage/three-stage-definitions'
 import { buildThreeStageWorkspaceContext } from '@/utils/agent-workspace'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPromptProject, IThreeStageForm, IThreeStageProject, IThreeStageSection } from '@/models/PromptHistory.model'
@@ -77,6 +77,7 @@ interface FreeCanvasBuilderScreenProps {
   onRenameProject?: () => void
   onSave: () => void
   onChange: (threeStage: IThreeStageProject) => void
+  threeStageTemplateSettings?: ThreeStageTemplateSettings
   previewMode?: boolean
 }
 
@@ -93,6 +94,7 @@ const FreeCanvasBuilderInner = ({
   onRenameProject,
   onSave,
   onChange,
+  threeStageTemplateSettings,
   previewMode = false
 }: FreeCanvasBuilderScreenProps) => {
   const reactFlow = useReactFlow<FreeCanvasFlowNode>()
@@ -103,7 +105,7 @@ const FreeCanvasBuilderInner = ({
   const selectedField = selectedStageDefinition.fields.find(field => field.id === normalizedThreeStage.selectedFieldId && !field.fixedValue) ||
     selectedStageDefinition.fields.find(field => !field.fixedValue) ||
     selectedStageDefinition.fields[0]
-  const selectedOutput = buildFreeCanvasFormOutput(selectedForm, getOutputProjectForForm(normalizedThreeStage, selectedForm))
+  const selectedOutput = buildFreeCanvasFormOutput(selectedForm, normalizedThreeStage)
   const graph = useMemo(() => buildFreeCanvasGraph(normalizedThreeStage), [normalizedThreeStage])
   const pages = useMemo(() => normalizeThreeStagePages(normalizedThreeStage), [normalizedThreeStage])
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
@@ -165,7 +167,7 @@ const FreeCanvasBuilderInner = ({
   }, [normalizedThreeStage, onChange])
 
   const copyFormOutput = useCallback(async (form: IThreeStageForm): Promise<void> => {
-    const output = buildFreeCanvasFormOutput(form, getOutputProjectForForm(normalizedThreeStage, form))
+    const output = buildFreeCanvasFormOutput(form, normalizedThreeStage)
     if (!output.trim()) {
       window.alert(`${form.title}还没有可复制内容。`)
       return
@@ -253,7 +255,7 @@ const FreeCanvasBuilderInner = ({
         formType: node.data.formType,
         mediaAssetId: node.data.mediaNode?.assetId || null,
         text: node.data.mediaNode?.text || node.data.subtitle,
-        output: node.data.form ? buildFreeCanvasFormOutput(node.data.form, getOutputProjectForForm(normalizedThreeStage, node.data.form)) : undefined
+        output: node.data.form ? buildFreeCanvasFormOutput(node.data.form, normalizedThreeStage) : undefined
       })),
       selectedChainEdges: selectedChain.edges.map(edge => ({
         id: edge.id,
@@ -309,19 +311,19 @@ const FreeCanvasBuilderInner = ({
 
   const createCharacter = (position = nextNodePosition()): void => {
     const currentNodeIds = new Set(graph.nodes.map(node => node.id))
-    const withCharacter = addCharacterFormToPage(normalizedThreeStage, selectedContext.page.id)
+    const withCharacter = addThreeStageFormToPage(normalizedThreeStage, selectedContext.page.id, 'character', undefined, threeStageTemplateSettings)
     const newNode = buildFreeCanvasGraph(withCharacter).nodes.find(node => !currentNodeIds.has(node.id) && node.data.nodeKind === 'threeStageForm')
     const positioned = newNode ? updateFreeCanvasNodePosition(withCharacter, newNode.id, position) : withCharacter
     onChange(positioned)
     setContextMenu(null)
   }
 
-  const createPair = (position = nextNodePosition()): void => {
-    const withPair = addStoryVideoPairToPage(normalizedThreeStage, selectedContext.page.id)
-    const graphWithPair = buildFreeCanvasGraph(withPair)
-    const newPairNodes = graphWithPair.nodes.slice(-2)
-    const positioned = newPairNodes.reduce((current, node, index) =>
-      updateFreeCanvasNodePosition(current, node.id, { x: position.x + index * 360, y: position.y }), withPair)
+  const createStoryboardAndPrompt = (position = nextNodePosition()): void => {
+    const withForms = addThreeStageFormToPage(addThreeStageFormToPage(normalizedThreeStage, selectedContext.page.id, 'storyboard', undefined, threeStageTemplateSettings), selectedContext.page.id, 'videoPrompt', undefined, threeStageTemplateSettings)
+    const graphWithForms = buildFreeCanvasGraph(withForms)
+    const newIndependentNodes = graphWithForms.nodes.slice(-2)
+    const positioned = newIndependentNodes.reduce((current, node, index) =>
+      updateFreeCanvasNodePosition(current, node.id, { x: position.x + index * 360, y: position.y }), withForms)
     onChange(positioned)
     setContextMenu(null)
   }
@@ -341,7 +343,7 @@ const FreeCanvasBuilderInner = ({
   }
 
   const createPage = (): void => {
-    onChange(addThreeStagePage(normalizedThreeStage))
+    onChange(addThreeStagePage(normalizedThreeStage, threeStageTemplateSettings))
   }
 
   const deletePage = (pageId: string): void => {
@@ -406,7 +408,7 @@ const FreeCanvasBuilderInner = ({
   const selectPage = (pageId: string): void => {
     const page = pages.find(candidate => candidate.id === pageId) || pages[0]
     const firstItem = page.items[0]
-    const firstForm = firstItem?.kind === 'character' ? firstItem.form : firstItem?.storyboardForm
+    const firstForm = firstItem?.form
     if (firstForm) {
       onChange(selectThreeStageForm(normalizedThreeStage, page.id, firstForm.id))
     }
@@ -528,7 +530,7 @@ const FreeCanvasBuilderInner = ({
           y={contextMenu.y}
           onCreateCharacter={() => createCharacter({ x: contextMenu.flowX, y: contextMenu.flowY })}
           onCreateObject={() => createObject({ x: contextMenu.flowX, y: contextMenu.flowY })}
-          onCreatePair={() => createPair({ x: contextMenu.flowX, y: contextMenu.flowY })}
+          onCreateStoryboardAndPrompt={() => createStoryboardAndPrompt({ x: contextMenu.flowX, y: contextMenu.flowY })}
           onCreateMedia={(kind) => createMedia(kind, { x: contextMenu.flowX, y: contextMenu.flowY })}
         />
       )}
@@ -536,7 +538,7 @@ const FreeCanvasBuilderInner = ({
       <CanvasBottomToolbar
         onCreateCharacter={() => createCharacter()}
         onCreateObject={() => createObject()}
-        onCreatePair={() => createPair()}
+        onCreateStoryboardAndPrompt={() => createStoryboardAndPrompt()}
         onCreateMedia={(kind) => createMedia(kind)}
       />
 
@@ -1042,20 +1044,20 @@ const CanvasCreateMenu = ({
   y,
   onCreateCharacter,
   onCreateObject,
-  onCreatePair,
+  onCreateStoryboardAndPrompt,
   onCreateMedia
 }: {
   x: number
   y: number
   onCreateCharacter: () => void
   onCreateObject: () => void
-  onCreatePair: () => void
+  onCreateStoryboardAndPrompt: () => void
   onCreateMedia: (kind: FreeCanvasMediaNodeKind) => void
 }) => (
   <div className="fixed z-40 w-64 rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl" style={{ left: x, top: y }}>
     <CreateMenuButton label="新建人物板" onClick={onCreateCharacter} />
     <CreateMenuButton label="新建物品版" onClick={onCreateObject} />
-    <CreateMenuButton label="新建故事+提示词组" onClick={onCreatePair} />
+    <CreateMenuButton label="新建独立故事版和提示词版" onClick={onCreateStoryboardAndPrompt} />
     <CreateMenuButton label="新建文字标注" onClick={() => onCreateMedia('textOverlay')} />
     <CreateMenuButton label="新建箭头标注" onClick={() => onCreateMedia('arrowAnnotation')} />
   </div>
@@ -1070,18 +1072,18 @@ const CreateMenuButton = ({ label, onClick }: { label: string; onClick: () => vo
 const CanvasBottomToolbar = ({
   onCreateCharacter,
   onCreateObject,
-  onCreatePair,
+  onCreateStoryboardAndPrompt,
   onCreateMedia
 }: {
   onCreateCharacter: () => void
   onCreateObject: () => void
-  onCreatePair: () => void
+  onCreateStoryboardAndPrompt: () => void
   onCreateMedia: (kind: FreeCanvasMediaNodeKind) => void
 }) => (
   <div className="absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1 rounded-full border border-gray-200 bg-white/95 px-3 py-2 shadow-[0_18px_60px_rgba(15,23,42,0.18)] backdrop-blur" data-free-canvas-toolbar>
     <ToolbarButton title="人物板" onClick={onCreateCharacter}><Plus className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="物品版" onClick={onCreateObject}><Package className="h-4 w-4" /></ToolbarButton>
-    <ToolbarButton title="故事+提示词组" onClick={onCreatePair}><Workflow className="h-4 w-4" /></ToolbarButton>
+    <ToolbarButton title="独立故事版和提示词版" onClick={onCreateStoryboardAndPrompt}><Workflow className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="文字标注" onClick={() => onCreateMedia('textOverlay')}><Type className="h-4 w-4" /></ToolbarButton>
     <ToolbarButton title="箭头标注" onClick={() => onCreateMedia('arrowAnnotation')}><MousePointer2 className="h-4 w-4" /></ToolbarButton>
   </div>
@@ -1096,11 +1098,7 @@ const ToolbarButton = ({ title, onClick, children }: { title: string; onClick: (
 const findThreeStageForm = (threeStage: IThreeStageProject, formId: string): IThreeStageForm | undefined => {
   for (const page of normalizeThreeStagePages(threeStage)) {
     for (const item of page.items) {
-      if (item.kind === 'character' && item.form.id === formId) return item.form
-      if (item.kind === 'storyVideoPair') {
-        if (item.storyboardForm.id === formId) return item.storyboardForm
-        if (item.videoPromptForm.id === formId) return item.videoPromptForm
-      }
+      if (item.form.id === formId) return item.form
     }
   }
   return undefined
@@ -1113,23 +1111,10 @@ const getFixedContentDefault = (form: IThreeStageForm, contentId: string): strin
   return stage.fields.find(field => field.id === contentId)?.fixedValue || ''
 }
 
-const getOutputProjectForForm = (threeStage: IThreeStageProject, form: IThreeStageForm): IThreeStageProject => {
-  if (form.type !== 'videoPrompt') return threeStage
-  for (const page of normalizeThreeStagePages(threeStage)) {
-    for (const item of page.items) {
-      if (item.kind === 'storyVideoPair' && item.videoPromptForm.id === form.id) {
-        return { ...threeStage, storyboard: item.storyboardForm.section }
-      }
-    }
-  }
-  return threeStage
-}
-
 const getFormPageId = (threeStage: IThreeStageProject, formId: string): string | null => {
   for (const page of normalizeThreeStagePages(threeStage)) {
     for (const item of page.items) {
-      if (item.kind === 'character' && item.form.id === formId) return page.id
-      if (item.kind === 'storyVideoPair' && (item.storyboardForm.id === formId || item.videoPromptForm.id === formId)) return page.id
+      if (item.form.id === formId) return page.id
     }
   }
   return null

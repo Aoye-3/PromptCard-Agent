@@ -14,6 +14,7 @@ import {
   normalizeThreeStagePages,
   syncThreeStageLegacyFields
 } from '@/domain/three-stage/three-stage-pages'
+import type { ThreeStageTemplateSettings } from '@/domain/three-stage/three-stage-definitions'
 
 const DEFAULT_SEQUENCE_NAME = '单个镜头序列'
 const DEFAULT_SEQUENCE_DESCRIPTION = '先确定整段共用的视觉风格和生成约束，再编辑序列内每个镜头。'
@@ -123,8 +124,11 @@ const createThreeStageSection = (timestamp = Date.now()): IThreeStageSection => 
   meta: {}
 })
 
-export const createThreeStageProject = (timestamp = Date.now()): IThreeStageProject => {
-  const page = createDefaultThreeStagePage(timestamp)
+export const createThreeStageProject = (
+  timestamp = Date.now(),
+  templateSettings?: ThreeStageTemplateSettings
+): IThreeStageProject => {
+  const page = createDefaultThreeStagePage(timestamp, templateSettings)
   return syncThreeStageLegacyFields({
     character: createThreeStageSection(timestamp),
     storyboard: createThreeStageSection(timestamp),
@@ -214,7 +218,7 @@ const normalizeThreeStage = (threeStage: IThreeStageProject | undefined): IThree
     pages: normalizeThreeStagePages(threeStage, timestamp),
     selectedPageId: threeStage.selectedPageId || null,
     selectedFormId: threeStage.selectedFormId || null,
-    selectedPairId: threeStage.selectedPairId || null,
+    selectedPairId: null,
     meta: threeStage.meta || {}
   }
 

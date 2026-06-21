@@ -4,6 +4,7 @@ import { useCardStore } from '../stores/card.store'
 import PresetSelector from './PresetSelector'
 import type { CardType, IPreset } from '../models/Card.model'
 import { useI18n } from '@/i18n'
+import { PromptPresetPreviewDialog } from './prompt-media/PromptPresetPreviewDialog'
 
 interface CreativeModeProps {
   onPresetSelect: (preset: IPreset) => void
@@ -20,6 +21,7 @@ const CreativeMode: React.FC<CreativeModeProps> = ({ onPresetSelect, initialType
   const [selectedType, setSelectedType] = useState<CardType>((initialType as CardType) || 'subject')
   const [showPresetSelector, setShowPresetSelector] = useState(false)
   const [quickSearch, setQuickSearch] = useState('')
+  const [previewPreset, setPreviewPreset] = useState<IPreset | null>(null)
 
   const currentCards = pages[currentPage]?.cards || []
   const selectedCard = currentSelectedCardId
@@ -187,6 +189,14 @@ const CreativeMode: React.FC<CreativeModeProps> = ({ onPresetSelect, initialType
                   </p>
                   <div className="flex flex-wrap gap-2 mt-2">
                     <button
+                      className="quick-action-btn px-2 py-1 text-xs rounded transition-colors"
+                      onClick={() => setPreviewPreset(preset)}
+                      title="预览"
+                    >
+                      <i className="fas fa-eye"></i> 预览
+                    </button>
+
+                    <button
                       className="quick-action-btn quick-action-copy px-2 py-1 text-xs rounded transition-colors"
                       onClick={() => handleCopyPreset(preset)}
                       title={t('copyAllPrompt')}
@@ -231,6 +241,7 @@ const CreativeMode: React.FC<CreativeModeProps> = ({ onPresetSelect, initialType
         </div>
       </div>
 
+      {previewPreset && <PromptPresetPreviewDialog preset={previewPreset} onClose={() => setPreviewPreset(null)} />}
     </div>
   )
 }

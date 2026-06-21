@@ -77,6 +77,38 @@ describe('prompt library agent proposals', () => {
     expect(markProposalStatus).not.toHaveBeenCalledWith('selected-update', 'approved')
   })
 
+  it('preserves media metadata from approved proposal drafts', () => {
+    const draft = buildPresetDraftFromProposal(proposal({
+      presetDraft: {
+        type: 'custom',
+        category: 'reference',
+        label: 'Video reference',
+        content: 'Use this motion reference.',
+        meta: {
+          media: [{
+            id: 'media-clip',
+            kind: 'video',
+            source: 'asset',
+            assetId: 'clip.mp4',
+            filename: 'clip.mp4',
+            contentType: 'video/mp4',
+            size: 1000
+          }]
+        }
+      }
+    }))
+
+    expect(draft.meta.media).toEqual([{
+      id: 'media-clip',
+      kind: 'video',
+      source: 'asset',
+      assetId: 'clip.mp4',
+      filename: 'clip.mp4',
+      contentType: 'video/mp4',
+      size: 1000
+    }])
+  })
+
   it('batch rejects selected pending proposals without writing presets', () => {
     const markProposalStatus = vi.fn()
     const proposals = [

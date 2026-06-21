@@ -6,7 +6,7 @@ import { StoryboardBuilderScreen } from './StoryboardBuilderScreen'
 import { useCardStore } from '@/stores/card.store'
 import { usePresetStore } from '@/stores/preset.store'
 import { createInitialPage } from '@/stores/card-initial-state'
-import { createStoryboardProject, createThreeStageProject } from '@/domain/projects/project-normalization'
+import { createStandaloneFreeCanvasProject, createStoryboardProject, createThreeStageProject } from '@/domain/projects/project-normalization'
 import { assemblePrompt, getCardDefaultTitle } from '@/utils/promptParser'
 import { findDuplicatePhrases, parsePromptToCardUpdates } from '@/utils/promptComposer'
 import { useI18n } from '@/i18n'
@@ -14,7 +14,7 @@ import type { BuilderTemplate } from '@/domain/builder-templates/builder-templat
 import type { BuilderModePreviewSnapshot } from './builder-preview-contract'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { CardType, IPreset } from '@/models/Card.model'
-import type { IPromptProject, IStoryboardProject, IThreeStageProject } from '@/models/PromptHistory.model'
+import type { IFreeCanvasProject, IPromptProject, IStoryboardProject, IThreeStageProject } from '@/models/PromptHistory.model'
 
 type CardWorkspaceSnapshot = Pick<ReturnType<typeof useCardStore.getState>, 'pages' | 'currentPage'>
 
@@ -51,6 +51,7 @@ const createPreviewProject = (template: BuilderTemplate): IPromptProject => {
     currentPage: 0,
     storyboard: template.projectType === 'storyboard' ? createStoryboardProject(now) : undefined,
     threeStage: template.projectType === 'three-stage' ? createThreeStageProject(now) : undefined,
+    freeCanvas: template.projectType === 'free-canvas' ? createStandaloneFreeCanvasProject(now) : undefined,
     createdAt: now,
     updatedAt: now,
     lastOpenedAt: now,
@@ -316,7 +317,7 @@ const FreeCanvasPreviewHost = ({
     ...baseProject,
     title: previewTitle
   }), [baseProject, previewTitle])
-  const [threeStage, setThreeStage] = useState<IThreeStageProject>(() => snapshot.threeStage || activeProject.threeStage || createThreeStageProject())
+  const [freeCanvas, setFreeCanvas] = useState<IFreeCanvasProject>(() => snapshot.freeCanvas || activeProject.freeCanvas || createStandaloneFreeCanvasProject())
 
   const handleRenamePreviewProject = () => {
     const nextTitle = window.prompt('重命名项目', previewTitle)?.trim()
@@ -324,19 +325,19 @@ const FreeCanvasPreviewHost = ({
   }
 
   useEffect(() => {
-    onSnapshotChange({ threeStage })
-  }, [onSnapshotChange, threeStage])
+    onSnapshotChange({ freeCanvas })
+  }, [freeCanvas, onSnapshotChange])
 
   return (
     <>
       <PreviewNotice />
       <FreeCanvasBuilderScreen
         activeProject={activeProject}
-        threeStage={threeStage}
+        freeCanvas={freeCanvas}
         onBack={() => undefined}
         onRenameProject={handleRenamePreviewProject}
         onSave={() => window.alert('预览模式不会保存项目或历史。')}
-        onChange={setThreeStage}
+        onChange={setFreeCanvas}
         previewMode
       />
     </>

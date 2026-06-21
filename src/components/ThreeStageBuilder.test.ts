@@ -20,7 +20,7 @@ describe('three-stage rail zoom', () => {
     expect(threeStageBuilderSource).toContain('shotNumbersForRange(range).map')
     expect(threeStageBuilderSource).toContain('range.shots?.[shotNumber]')
     expect(threeStageBuilderSource).toContain('setPreviewPreset(preset)')
-    expect(threeStageBuilderSource).toContain('JSON.stringify(previewPreset.meta || {}, null, 2)')
+    expect(threeStageBuilderSource).toContain('PromptPresetPreviewDialog')
   })
 
   it('limits form reordering drag to the explicit drag handle', () => {

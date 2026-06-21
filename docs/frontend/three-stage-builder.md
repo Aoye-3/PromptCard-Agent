@@ -56,17 +56,6 @@ Three-stage Agent context is built by `buildThreeStageWorkspaceContext()` in `sr
 
 Agent context must not expose a paired storyboard summary for selected video-prompt forms.
 
-## Free Canvas Projection
-
-The free canvas builder is a three-stage project variant selected by `meta.builderTemplateId: "free-canvas"`. It does not introduce a new durable project type.
-
-- `character`, `object`, `storyboard`, and `videoPrompt` forms become independent canvas nodes.
-- Free canvas no longer creates fixed storyboard-to-video-prompt pair edges.
-- Form node positions are stored in `form.meta.canvas.position`.
-- Project-local media nodes live in `threeStage.meta.freeCanvas.mediaNodes`.
-
-Free-canvas fixed content uses the same per-node override rules as the standard builder.
-
 ## Tests
 
 When changing stage definitions, update `src/domain/three-stage/three-stage-definitions.test.ts`.
@@ -75,4 +64,4 @@ When changing page, copy, delete, numbering, or ordering behavior, update `src/d
 
 When changing Agent context fields, update `src/utils/agent-workspace.test.ts`.
 
-When changing free canvas graph projection or media node persistence, update `src/domain/free-canvas/free-canvas.test.ts`.
+Free Canvas is no longer a three-stage projection. When changing standalone Free Canvas behavior, update `src/domain/free-canvas/free-canvas-project.test.ts`.

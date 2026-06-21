@@ -88,7 +88,7 @@ export interface PromptLibraryWriteProposal {
   createdAt: number
 }
 
-export type AgentWorkspaceMode = 'card-workspace' | 'storyboard-workspace' | 'three-stage-workspace'
+export type AgentWorkspaceMode = 'card-workspace' | 'storyboard-workspace' | 'three-stage-workspace' | 'free-canvas-workspace'
 
 export type AgentPermissionScope = 'workspace-chatbot-agent' | 'prompt-library-agent'
 
@@ -168,12 +168,28 @@ export interface AgentThreeStageFieldUpdateProposal {
   createdAt: number
 }
 
+export interface AgentFreeCanvasTextUpdateProposal {
+  kind: 'free_canvas_text_update'
+  contextId?: string
+  id: string
+  threadId?: string | null
+  runId?: string | null
+  agentName: string
+  nodeId: string
+  mode: 'replace' | 'append'
+  userText: string
+  rationale: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: number
+}
+
 export type AgentWorkspaceProposal =
   | PromptLibraryWriteProposal
   | AgentCardCreateProposal
   | AgentCardUpdateProposal
   | AgentStoryboardUpdateProposal
   | AgentThreeStageFieldUpdateProposal
+  | AgentFreeCanvasTextUpdateProposal
 
 export type PromptLibrarySnapshotPreset = Pick<
   IPreset,

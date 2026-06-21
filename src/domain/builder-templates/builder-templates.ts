@@ -33,7 +33,7 @@ export interface BuilderTemplatePage {
 export const BUILDER_TEMPLATES: readonly BuilderTemplate[] = [
   {
     id: 'free-canvas',
-    projectType: 'three-stage',
+    projectType: 'free-canvas',
     title: '自由画布式构建',
     shortTitle: '自由画布',
     description: '在自由画布中节点化组织三段式提示词，并预留图片、文字、箭头和媒体组合节点。',
@@ -42,7 +42,7 @@ export const BUILDER_TEMPLATES: readonly BuilderTemplate[] = [
     capabilities: ['自由画布', '媒体节点', 'Agent 植入'],
     modules: [
       {
-        id: 'free-canvas-three-stage-nodes',
+        id: 'free-canvas-nodes',
         label: '三段式节点画布',
         description: '把人物板、故事板和视频提示词映射为可拖拽节点，保持三段式数据为真源。',
         children: [

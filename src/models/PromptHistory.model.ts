@@ -16,16 +16,97 @@ export interface IPromptHistory {
 export interface IPromptProject {
   id: string
   title: string
-  type: 'card' | 'storyboard' | 'three-stage'
+  type: 'card' | 'storyboard' | 'three-stage' | 'free-canvas'
   revision: number
   pages: IPage[]
   currentPage: number
   storyboard?: IStoryboardProject
   threeStage?: IThreeStageProject
+  freeCanvas?: IFreeCanvasProject
   createdAt: number
   updatedAt: number
   lastOpenedAt: number
   meta: Record<string, any>
+}
+
+export type FreeCanvasProjectNodeKind = 'text' | 'image' | 'arrow'
+export type FreeCanvasTextSegmentSource = 'preset' | 'user'
+export type FreeCanvasTextSize = 'small' | 'medium' | 'large' | 'extra-large' | 'huge'
+
+export interface IFreeCanvasPosition {
+  x: number
+  y: number
+}
+
+export interface IFreeCanvasCropRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export interface IFreeCanvasTextSegment {
+  id: string
+  source: FreeCanvasTextSegmentSource
+  text: string
+  color: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface IFreeCanvasBaseNode {
+  id: string
+  kind: FreeCanvasProjectNodeKind
+  title: string
+  position: IFreeCanvasPosition
+  width: number
+  height: number
+  meta: Record<string, unknown>
+}
+
+export interface IFreeCanvasTextNode extends IFreeCanvasBaseNode {
+  kind: 'text'
+  fontSize: FreeCanvasTextSize
+  segments: IFreeCanvasTextSegment[]
+}
+
+export interface IFreeCanvasImageNode extends IFreeCanvasBaseNode {
+  kind: 'image'
+  assetId?: string | null
+  imageUrl?: string
+  imagePrompt?: string
+  sourceNodeId?: string | null
+  crop?: IFreeCanvasCropRect | null
+}
+
+export interface IFreeCanvasArrowNode extends IFreeCanvasBaseNode {
+  kind: 'arrow'
+  text: string
+  color: string
+}
+
+export type IFreeCanvasNode = IFreeCanvasTextNode | IFreeCanvasImageNode | IFreeCanvasArrowNode
+
+export interface IFreeCanvasEdge {
+  id: string
+  source: string
+  target: string
+  label?: string
+  createdAt: number
+}
+
+export interface IFreeCanvasViewport {
+  x: number
+  y: number
+  zoom: number
+}
+
+export interface IFreeCanvasProject {
+  nodes: IFreeCanvasNode[]
+  edges: IFreeCanvasEdge[]
+  viewport?: IFreeCanvasViewport | null
+  selectedNodeId?: string | null
+  meta: Record<string, unknown>
 }
 
 export type ThreeStageKey = 'character' | 'object' | 'storyboard' | 'videoPrompt'

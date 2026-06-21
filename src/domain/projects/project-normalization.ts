@@ -15,6 +15,7 @@ import {
   syncThreeStageLegacyFields
 } from '@/domain/three-stage/three-stage-pages'
 import type { ThreeStageTemplateSettings } from '@/domain/three-stage/three-stage-definitions'
+import { createFreeCanvasProject, migrateLegacyThreeStageFreeCanvasProject, normalizeFreeCanvasProject } from '@/domain/free-canvas/free-canvas-project'
 
 const DEFAULT_SEQUENCE_NAME = '单个镜头序列'
 const DEFAULT_SEQUENCE_DESCRIPTION = '先确定整段共用的视觉风格和生成约束，再编辑序列内每个镜头。'
@@ -143,6 +144,10 @@ export const createThreeStageProject = (
   })
 }
 
+export const createStandaloneFreeCanvasProject = (
+  timestamp = Date.now()
+) => createFreeCanvasProject(timestamp)
+
 const normalizeStoryboardSequence = (sequence: Partial<IStoryboardSequence>, index = 0, timestamp = Date.now()): IStoryboardSequence => {
   const rows = Array.isArray(sequence.rows) && sequence.rows.length > 0
     ? sequence.rows
@@ -225,19 +230,26 @@ const normalizeThreeStage = (threeStage: IThreeStageProject | undefined): IThree
   return syncThreeStageLegacyFields(base)
 }
 
-export const normalizeProject = (project: IPromptProject): IPromptProject => ({
-  ...project,
-  title: repairDisplayText(project.title) || project.title,
-  type: project.type || 'card',
-  revision: project.revision || 1,
-  pages: Array.isArray(project.pages) ? project.pages.map(normalizePage) : [],
-  currentPage: project.currentPage || 0,
-  storyboard: normalizeStoryboard(project.storyboard),
-  threeStage: project.type === 'three-stage'
-    ? normalizeThreeStage(project.threeStage) || createThreeStageProject(project.createdAt || Date.now())
-    : normalizeThreeStage(project.threeStage),
-  meta: project.meta || {}
-})
+export const normalizeProject = (project: IPromptProject): IPromptProject => {
+  const migrated = migrateLegacyThreeStageFreeCanvasProject(project)
+  const type = migrated.type || 'card'
+  return {
+    ...migrated,
+    title: repairDisplayText(migrated.title) || migrated.title,
+    type,
+    revision: migrated.revision || 1,
+    pages: Array.isArray(migrated.pages) ? migrated.pages.map(normalizePage) : [],
+    currentPage: migrated.currentPage || 0,
+    storyboard: normalizeStoryboard(migrated.storyboard),
+    threeStage: type === 'three-stage'
+      ? normalizeThreeStage(migrated.threeStage) || createThreeStageProject(migrated.createdAt || Date.now())
+      : undefined,
+    freeCanvas: type === 'free-canvas'
+      ? normalizeFreeCanvasProject(migrated.freeCanvas, migrated.createdAt || Date.now())
+      : migrated.freeCanvas,
+    meta: migrated.meta || {}
+  }
+}
 
 export const sortProjects = (projects: IPromptProject[]): IPromptProject[] =>
   [...projects].sort((a, b) => b.lastOpenedAt - a.lastOpenedAt || b.updatedAt - a.updatedAt)

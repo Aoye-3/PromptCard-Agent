@@ -5,6 +5,7 @@ import {
   createStoryboardProject,
   createStoryboardRow,
   createStoryboardSequence,
+  createStandaloneFreeCanvasProject,
   createThreeStageProject,
   normalizeProject,
   sortProjects
@@ -65,6 +66,15 @@ async function migrateBrowserCacheOnce(): Promise<void> {
 }
 
 export const storage = {
+  assets: {
+    upload(file: File): Promise<{ id: string; filename: string; contentType: string; size: number }> {
+      return storageServiceClient.assets.upload(file)
+    },
+    url(assetId: string): string {
+      return storageServiceClient.assets.url(assetId)
+    }
+  },
+
   projects: {
     async getAll(): Promise<IPromptProject[]> {
       await migrateBrowserCacheOnce()
@@ -130,6 +140,26 @@ export const storage = {
         pages: [],
         currentPage: 0,
         threeStage: project.threeStage || createThreeStageProject(now, project.templateSettings),
+        createdAt: now,
+        updatedAt: now,
+        lastOpenedAt: now,
+        meta: project.meta || {}
+      })
+    },
+    createFreeCanvasDraft(project: {
+      title: string
+      freeCanvas?: IPromptProject['freeCanvas']
+      meta?: Record<string, unknown>
+    }): IPromptProject {
+      const now = Date.now()
+      return normalizeProject({
+        id: now.toString(),
+        title: project.title,
+        type: 'free-canvas',
+        revision: 1,
+        pages: [],
+        currentPage: 0,
+        freeCanvas: project.freeCanvas || createStandaloneFreeCanvasProject(now),
         createdAt: now,
         updatedAt: now,
         lastOpenedAt: now,

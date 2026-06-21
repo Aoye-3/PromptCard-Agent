@@ -25,7 +25,7 @@ import { mergeStoredProjectMetadata } from './domain/projects/project-storage-me
 import { createProjectSaveCoordinator, type ProjectSaveResult } from './domain/projects/project-save-coordinator'
 import { normalizeThreeStageTemplateSettings, type ThreeStageTemplateSettings } from './domain/three-stage/three-stage-definitions'
 import type { IPreset, CardType } from './models/Card.model'
-import type { IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
+import type { IFreeCanvasProject, IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
 import type { IUserSettings } from './models/UserSettings.model'
 import type { MainTab, ProjectMode, SaveStatus } from './features/app/app-types'
@@ -134,6 +134,10 @@ function App() {
   )
   const threeStageSnapshot = useMemo(
     () => activeProject?.type === 'three-stage' ? JSON.stringify(activeProject.threeStage || null) : '',
+    [activeProject]
+  )
+  const freeCanvasSnapshot = useMemo(
+    () => activeProject?.type === 'free-canvas' ? JSON.stringify(activeProject.freeCanvas || null) : '',
     [activeProject]
   )
   const activePresetCard = activePresetCardId ? currentCards.find(card => card.id === activePresetCardId) : null
@@ -428,6 +432,35 @@ function App() {
     return () => window.clearTimeout(timeoutId)
   }, [activeProjectId, canConfirmProjectSaved, getProjectEditSeq, handleProjectSaveError, isHydrated, persistProjectChanges, projectMode, setProjectSaveStatus, threeStageSnapshot, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
 
+  useEffect(() => {
+    if (!isHydrated || !userSettings.autoSave || !activeProjectId || projectMode !== 'builder' || !freeCanvasSnapshot) return
+
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const project = activeProjectRef.current
+        if (!project || project.id !== activeProjectId || project.type !== 'free-canvas' || !project.freeCanvas) return
+        setProjectSaveStatus(activeProjectId, 'saving')
+        const savedAt = Date.now()
+        const editSeq = getProjectEditSeq(activeProjectId)
+        const result = await persistProjectChanges(project, {
+          freeCanvas: project.freeCanvas,
+          updatedAt: savedAt,
+          lastOpenedAt: savedAt
+        }, editSeq, savedAt, 'Free canvas auto-save failed:')
+        if (result.status === 'failed') return
+
+        const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
+        if (result.status === 'saved' && saveIsCurrent) {
+          setProjectSaveStatus(activeProjectId, 'saved', savedAt)
+        }
+      } catch (error) {
+        handleProjectSaveError(activeProjectId, error, 'Free canvas auto-save failed:')
+      }
+    }, userSettings.autoSaveIdleSeconds * 1000)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [activeProjectId, canConfirmProjectSaved, freeCanvasSnapshot, getProjectEditSeq, handleProjectSaveError, isHydrated, persistProjectChanges, projectMode, setProjectSaveStatus, userSettings.autoSave, userSettings.autoSaveIdleSeconds])
+
   const handleCreateProject = () => {
     setShowCreateProjectModal(true)
   }
@@ -464,12 +497,14 @@ function App() {
       ? storage.projects.createStoryboardDraft({ title, storyboard: snapshot?.storyboard, meta })
       : template.projectType === 'three-stage'
         ? storage.projects.createThreeStageDraft({ title, threeStage: snapshot?.threeStage, templateSettings: threeStageTemplateSettings, meta })
-        : storage.projects.createDraft({
-            title,
-            pages: snapshot?.pages?.length ? snapshot.pages : [createInitialPage()],
-            currentPage: snapshot?.currentPage || 0,
-            meta
-          })
+        : template.projectType === 'free-canvas'
+          ? storage.projects.createFreeCanvasDraft({ title, freeCanvas: snapshot?.freeCanvas, meta })
+          : storage.projects.createDraft({
+              title,
+              pages: snapshot?.pages?.length ? snapshot.pages : [createInitialPage()],
+              currentPage: snapshot?.currentPage || 0,
+              meta
+            })
 
     setShowTemplateLibrary(false)
     await createProjectOptimistically(newProject)
@@ -698,6 +733,16 @@ function App() {
     ))
   }
 
+  const handleUpdateFreeCanvas = (freeCanvas: IFreeCanvasProject) => {
+    if (!activeProjectId) return
+    markProjectEdited(activeProjectId)
+    setProjects(currentProjects => currentProjects.map(project =>
+      project.id === activeProjectId
+        ? { ...project, freeCanvas, updatedAt: Date.now() }
+        : project
+    ))
+  }
+
   const handleUpdateUserSettings = async (settings: Partial<IUserSettings>) => {
     const updated = await storage.settings.save(settings)
     setUserSettings(updated)
@@ -763,6 +808,24 @@ function App() {
       if (activeProject?.type === 'three-stage') {
         const result = await persistProjectChanges(activeProject, {
           threeStage: activeProject.threeStage,
+          updatedAt: savedAt,
+          lastOpenedAt: savedAt
+        }, editSeq, savedAt, 'Save failed:')
+        if (result.status === 'failed') {
+          alert(t('saveFailed'))
+          return
+        }
+        const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
+        if (result.status === 'saved' && saveIsCurrent) {
+          setProjectSaveStatus(activeProjectId, 'saved', savedAt)
+          alert(t('saveSuccess'))
+        }
+        return
+      }
+
+      if (activeProject?.type === 'free-canvas') {
+        const result = await persistProjectChanges(activeProject, {
+          freeCanvas: activeProject.freeCanvas,
           updatedAt: savedAt,
           lastOpenedAt: savedAt
         }, editSeq, savedAt, 'Save failed:')
@@ -936,15 +999,14 @@ function App() {
       onSave={handleSave}
       onChange={handleUpdateStoryboard}
     />
-  ) : projectMode === 'builder' && activeProject?.type === 'three-stage' && activeProject.threeStage && activeProject.meta?.builderTemplateId === 'free-canvas' ? (
+  ) : projectMode === 'builder' && activeProject?.type === 'free-canvas' && activeProject.freeCanvas ? (
     <FreeCanvasBuilderScreen
       activeProject={activeProject}
-      threeStage={activeProject.threeStage}
+      freeCanvas={activeProject.freeCanvas}
       onBack={handleBackToProjects}
       onRenameProject={() => handleRenameProject(activeProject)}
       onSave={handleSave}
-      onChange={handleUpdateThreeStage}
-      threeStageTemplateSettings={threeStageTemplateSettings}
+      onChange={handleUpdateFreeCanvas}
     />
   ) : projectMode === 'builder' && activeProject?.type === 'three-stage' && activeProject.threeStage ? (
     <ThreeStageBuilderScreen

@@ -1,7 +1,7 @@
 import { Image, PlaySquare, X } from 'lucide-react'
 import type { IPreset } from '@/models/Card.model'
 import { getPresetMedia, formatMediaSize } from '@/domain/prompt-media/prompt-media'
-import { storageServiceClient } from '@/storage/storage-service-client'
+import { storage } from '@/utils/storage'
 
 export const PromptPresetPreviewDialog = ({
   preset,
@@ -45,13 +45,13 @@ export const PromptPresetPreviewDialog = ({
                 </div>
                 {item.kind === 'image' ? (
                   <img
-                    src={storageServiceClient.assets.url(item.assetId)}
+                    src={storage.assets.url(item.assetId)}
                     alt={item.title || item.filename || preset.label}
                     className="max-h-[52vh] w-full object-contain bg-gray-950"
                   />
                 ) : (
                   <video
-                    src={storageServiceClient.assets.url(item.assetId)}
+                    src={storage.assets.url(item.assetId)}
                     controls
                     className="max-h-[52vh] w-full bg-gray-950"
                   />

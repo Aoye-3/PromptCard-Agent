@@ -40,6 +40,29 @@ Three-stage structured fields reuse this same store. Shot-related fields bind to
 
 Three-stage field metadata must not require a new preset shape. If a field needs reusable options, bind it to an existing preset `type` such as `camera` and keep field-specific behavior in UI configuration instead of changing `IPreset`.
 
+## Preview Surfaces
+
+Prompt Library preview UI is shared by the full Prompt Library page and the Free Canvas side panel.
+
+- `PromptLibraryPreviewMode` / `PromptLibraryPreviewPanel` render the reusable preview list.
+- The compact panel variant is safe for narrow sidebars and keeps the same category, search, stats, media count, and preset card behavior.
+- Preview cards expose a copy control that copies only `preset.content`.
+- Selecting a preset opens the shared `PromptPresetPreviewDialog`.
+- Preview mode must not expose management-only actions such as edit mode, add-to-library, Trash, or Agent ingestion.
+- Embedded preview surfaces must not mutate the canvas or auto-fill an Agent input unless a separate explicit insertion workflow is designed later.
+
+## Preset Preview Dialog
+
+`PromptPresetPreviewDialog` is the single preview dialog used by Prompt Library and embedded preview panels.
+
+- Desktop layout is fixed-size and two-column: media preview on the left, prompt text on the right.
+- Mobile layout may stack the same sections.
+- The left column always renders a media region. If a preset has no media, it shows the empty state `暂无媒体`.
+- Images use contained rendering; videos keep native controls.
+- The right column shows `preset.content` in a scrollable prompt area and preserves line breaks.
+- The dialog copy button copies only the full prompt body, not title, type, category, or media metadata.
+- The dialog does not update usage count by itself; usage count should be incremented only by flows that actually apply a preset.
+
 ## Development File Endpoint
 
 The primary durable API is `/storage-api/presets`. In development, Vite still exposes legacy helpers:
@@ -81,3 +104,14 @@ When approved, generated preset metadata should retain source information such a
 - Direct Agent archive/update behavior depends on UI approval and preset store support; model output alone is not a write.
 - Skill-generated Prompt library changes should use the same proposal pattern before becoming durable.
 - A durable proposal audit log is not implemented yet.
+
+## Verification
+
+```powershell
+npm.cmd test -- BuilderModePreviewFrame.test.tsx --run
+npm.cmd test -- PromptPresetPreviewDialog.test.tsx --run
+npm.cmd run test:e2e -- free-canvas-image-crop.spec.ts
+npm.cmd run build
+```
+
+Manual checks should cover the full Prompt Library preview dialog, Free Canvas side-panel Prompt Library preview, prompt copy buttons in both list and dialog surfaces, and confirming that embedded preview mode does not expose management controls.

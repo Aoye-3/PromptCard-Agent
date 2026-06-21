@@ -5,6 +5,43 @@ const onePixelPng = Buffer.from(
   'base64'
 )
 
+test('creates an image node from the bottom toolbar file picker', async ({ page }) => {
+  await routeStorage(page)
+  await routeImageAssets(page)
+  await openFreeCanvasProject(page)
+
+  await expect(page.getByTitle('Arrow')).toHaveCount(0)
+  await expect(page.getByTitle('Image')).toHaveCount(1)
+
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByTitle('Image').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles({ name: 'toolbar.png', mimeType: 'image/png', buffer: onePixelPng })
+
+  const imageNodes = page.locator('[data-image-node]')
+  await expect(imageNodes).toHaveCount(1)
+  await expect(imageNodes.first().locator('img')).toBeVisible()
+})
+
+test('creates multiple image nodes from the bottom toolbar file picker', async ({ page }) => {
+  await routeStorage(page)
+  await routeImageAssets(page)
+  await openFreeCanvasProject(page)
+
+  const chooserPromise = page.waitForEvent('filechooser')
+  await page.getByTitle('Image').click()
+  const chooser = await chooserPromise
+  await chooser.setFiles([
+    { name: 'toolbar-a.png', mimeType: 'image/png', buffer: onePixelPng },
+    { name: 'toolbar-b.png', mimeType: 'image/png', buffer: onePixelPng }
+  ])
+
+  const imageNodes = page.locator('[data-image-node]')
+  await expect(imageNodes).toHaveCount(2)
+  await expect(imageNodes.first().locator('img')).toBeVisible()
+  await expect(imageNodes.nth(1).locator('img')).toBeVisible()
+})
+
 test('drops an image and creates cropped nodes from manual grid lines', async ({ page }) => {
   await routeStorage(page)
   await page.route('**/storage-api/assets', async route => {
@@ -135,6 +172,30 @@ async function dropImage(page: Page) {
     target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))
     target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer, clientX: 700, clientY: 420 }))
   }, [...onePixelPng])
+}
+
+async function openFreeCanvasProject(page: Page) {
+  await page.goto('/')
+  await page.getByText('Create project').click()
+  await page.locator('[data-builder-template-id]').first().click()
+}
+
+async function routeImageAssets(page: Page) {
+  let uploadIndex = 0
+  await page.route('**/storage-api/assets', async route => {
+    uploadIndex += 1
+    await route.fulfill({
+      json: {
+        id: `toolbar-asset-${uploadIndex}.png`,
+        filename: `toolbar-asset-${uploadIndex}.png`,
+        contentType: 'image/png',
+        size: onePixelPng.length
+      }
+    })
+  })
+  await page.route('**/storage-api/assets/*', async route => {
+    await route.fulfill({ body: onePixelPng, contentType: 'image/png' })
+  })
 }
 
 async function routeStorage(page: Page) {

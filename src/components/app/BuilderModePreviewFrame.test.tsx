@@ -7,6 +7,7 @@ import { BuilderModePreviewFrame } from './BuilderModePreviewFrame'
 import { builderPreviewIds } from './builder-preview-contract'
 import { TemplateLibraryScreen } from './TemplateLibraryScreen'
 import { CreateProjectModal } from './ProjectModals'
+import { PromptLibraryPreviewMode } from '@/components/PromptLibraryPreviewMode'
 
 const renderWithI18n = (node: ReactElement) => renderToStaticMarkup(
   <I18nProvider>
@@ -48,6 +49,50 @@ describe('BuilderModePreviewFrame', () => {
     expect(markup).not.toContain('max-w-[1320px]')
     expect(markup).not.toContain('minmax(0,940px)')
     expect(markup).not.toContain('fixed inset-0')
+  })
+
+  it('renders the free canvas panel switcher for Agent and Prompt library preview', () => {
+    const markup = renderWithI18n(
+      <BuilderModePreviewFrame
+        template={getBuilderTemplateById('free-canvas')}
+        snapshot={{}}
+        onSnapshotChange={() => undefined}
+      />
+    )
+
+    expect(markup).toContain('data-free-canvas-panel-switcher')
+    expect(markup).toContain('Agent')
+    expect(markup).toContain('Prompt库')
+  })
+
+  it('renders copy controls in prompt library preview cards', () => {
+    const markup = renderWithI18n(
+      <PromptLibraryPreviewMode
+        presets={[{
+          id: 'preset-copy-test',
+          type: 'subject',
+          category: 'subject',
+          label: 'Copyable preset',
+          content: 'Copy this prompt',
+          usageCount: 0,
+          meta: {},
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        }]}
+        activeCategory="all"
+        visibleCount={1}
+        mediaCount={0}
+        searchTerm=""
+        cardTypes={[{ type: 'subject', label: 'Subject' }]}
+        categoryCounts={{ subject: 1 }}
+        onCategoryChange={() => undefined}
+        onSearchChange={() => undefined}
+        onPreview={() => undefined}
+      />
+    )
+
+    expect(markup).toContain('data-prompt-library-preview-mode')
+    expect(markup).toContain('aria-label="复制"')
   })
 
   it('keeps the template library and create-project modal in lockstep with builder module registry', () => {

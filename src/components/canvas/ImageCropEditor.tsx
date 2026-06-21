@@ -98,9 +98,9 @@ export const ImageCropEditor = ({ media, imageUrl, onCancel, onConfirm }: ImageC
         <div className="min-h-0 flex-1 overflow-auto p-8">
           <div className="mx-auto grid w-fit grid-cols-[18px_minmax(320px,820px)_18px] grid-rows-[18px_minmax(260px,620px)_18px]">
             <div />
-            <CropRuler axis="vertical" onPointerDown={startNewLine} />
-            <div />
             <CropRuler axis="horizontal" onPointerDown={startNewLine} />
+            <div />
+            <CropRuler axis="vertical" onPointerDown={startNewLine} />
             <div
               ref={imageFrameRef}
               className="relative flex max-h-[620px] max-w-[820px] items-center justify-center overflow-hidden bg-white shadow-[0_10px_35px_rgba(15,23,42,0.14)]"
@@ -130,9 +130,9 @@ export const ImageCropEditor = ({ media, imageUrl, onCancel, onConfirm }: ImageC
                 />
               ))}
             </div>
-            <CropRuler axis="horizontal" onPointerDown={startNewLine} />
-            <div />
             <CropRuler axis="vertical" onPointerDown={startNewLine} />
+            <div />
+            <CropRuler axis="horizontal" onPointerDown={startNewLine} />
             <div />
           </div>
         </div>

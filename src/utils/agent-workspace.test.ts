@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 import type { IPage } from '@/stores/card-initial-state'
-import { buildCardWorkspaceContext, buildStoryboardWorkspaceContext, buildThreeStageWorkspaceContext } from './agent-workspace'
+import { buildCardWorkspaceContext, buildFreeCanvasWorkspaceContext, buildStoryboardWorkspaceContext, buildThreeStageWorkspaceContext } from './agent-workspace'
 
 describe('agent workspace context', () => {
   it('builds a bounded card workspace snapshot', () => {
@@ -275,5 +275,59 @@ describe('agent workspace context', () => {
     expect(JSON.stringify(context.snapshot.freeCanvas)).toContain('A lone pilot')
     expect(JSON.stringify(context.snapshot.freeCanvas)).toContain('Rocket rises through fog')
     expect(JSON.stringify(context.snapshot.freeCanvas)).toContain('Use dusk lighting')
+  })
+
+  it('builds standalone free-canvas context with preset and user text separated', () => {
+    const freeCanvas = {
+      nodes: [
+        {
+          id: 'text-1',
+          kind: 'text' as const,
+          title: 'Text',
+          position: { x: 20, y: 40 },
+          width: 360,
+          height: 180,
+          fontSize: 'large' as const,
+          segments: [
+            { id: 'segment-preset', source: 'preset' as const, text: 'Template text', color: '#ef4423', createdAt: 1, updatedAt: 1 },
+            { id: 'segment-user', source: 'user' as const, text: 'User text', color: '#111827', createdAt: 2, updatedAt: 2 }
+          ],
+          meta: {}
+        }
+      ],
+      edges: [],
+      viewport: null,
+      selectedNodeId: 'text-1',
+      meta: {}
+    }
+    const project: IPromptProject = {
+      id: 'project-free',
+      title: 'Standalone canvas',
+      type: 'free-canvas',
+      revision: 1,
+      pages: [],
+      currentPage: 0,
+      freeCanvas,
+      createdAt: 1,
+      updatedAt: 1,
+      lastOpenedAt: 1,
+      meta: {}
+    }
+
+    const context = buildFreeCanvasWorkspaceContext({ activeProject: project, freeCanvas })
+
+    expect(context.mode).toBe('free-canvas-workspace')
+    expect(context.snapshot).toMatchObject({
+      selectedNodeId: 'text-1',
+      nodes: [
+        {
+          id: 'text-1',
+          kind: 'text',
+          displayText: 'Template text\nUser text',
+          presetText: 'Template text',
+          userText: 'User text'
+        }
+      ]
+    })
   })
 })

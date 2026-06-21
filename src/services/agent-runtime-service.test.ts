@@ -127,6 +127,41 @@ describe('agent runtime proposal parsing', () => {
     expect(proposals[0].kind).toBe('workspace_card_create')
   })
 
+  it('parses free-canvas text updates in workspace chatbot scope', () => {
+    const text = `\`\`\`json
+{
+  "kind": "agent_workspace_proposals",
+  "proposals": [
+    {
+      "kind": "free_canvas_text_update",
+      "id": "proposal-free-text",
+      "contextId": "free-canvas:project-free:text-1",
+      "agentName": "DeepSeek Agent",
+      "nodeId": "text-1",
+      "mode": "replace",
+      "userText": "Agent rewritten user text",
+      "rationale": "Only user-authored text is editable",
+      "status": "pending",
+      "createdAt": 3
+    }
+  ]
+}
+\`\`\``
+
+    const proposals = parseAgentWorkspaceProposals(text, {
+      permissionScope: 'workspace-chatbot-agent'
+    })
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        kind: 'free_canvas_text_update',
+        nodeId: 'text-1',
+        mode: 'replace',
+        userText: 'Agent rewritten user text'
+      })
+    ])
+  })
+
   it('keeps Prompt Library writes available in Prompt Library agent scope', () => {
     const text = `\`\`\`json
 {

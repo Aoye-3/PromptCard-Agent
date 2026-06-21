@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, DragEvent, PointerEvent, WheelEvent } from 'react'
 import { Bot, ChevronDown, ChevronLeft, ChevronRight, Copy, Database, GripVertical, Home, Lock, MoreHorizontal, Pencil, Plus, RotateCcw, Search, Settings, Trash2, Unlock } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
+import { PromptPresetPreviewDialog } from '@/components/prompt-media/PromptPresetPreviewDialog'
 import { buildThreeStageWorkspaceContext } from '@/utils/agent-workspace'
 import type { IPreset } from '@/models/Card.model'
 import type {
@@ -1106,26 +1107,7 @@ const PresetPicker = ({
         </div>
       )}
     </div>
-    {previewPreset && (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/25 px-4" onClick={() => setPreviewPreset(null)}>
-        <div className="max-h-[78vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide text-gray-400">{previewPreset.category}</div>
-              <h3 className="mt-1 text-lg font-black text-gray-950">{previewPreset.label}</h3>
-            </div>
-            <button type="button" className="rounded-full bg-gray-100 px-3 py-1.5 text-sm font-bold text-gray-600 hover:bg-gray-200" onClick={() => setPreviewPreset(null)}>
-              关闭
-            </button>
-          </div>
-          <div className="whitespace-pre-wrap rounded-xl bg-gray-50 p-3 text-sm leading-7 text-gray-800">{previewPreset.content}</div>
-          <div className="mt-4">
-            <div className="mb-1 text-xs font-bold uppercase tracking-wide text-gray-400">Meta</div>
-            <pre className="max-h-44 overflow-auto rounded-xl bg-gray-950 p-3 text-xs leading-5 text-white">{JSON.stringify(previewPreset.meta || {}, null, 2)}</pre>
-          </div>
-        </div>
-      </div>
-    )}
+    {previewPreset && <PromptPresetPreviewDialog preset={previewPreset} onClose={() => setPreviewPreset(null)} />}
   </div>
   )
 }

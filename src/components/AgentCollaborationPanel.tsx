@@ -276,7 +276,8 @@ function isWorkspaceExecutableProposal(proposal: AgentWorkspaceProposal) {
   return proposal.kind === 'workspace_card_create' ||
     proposal.kind === 'workspace_card_update' ||
     proposal.kind === 'storyboard_update' ||
-    proposal.kind === 'three_stage_field_update'
+    proposal.kind === 'three_stage_field_update' ||
+    proposal.kind === 'free_canvas_text_update'
 }
 
 function summarizeAppliedChanges(proposals: AgentWorkspaceProposal[]) {
@@ -296,6 +297,7 @@ function proposalTitle(proposal: AgentWorkspaceProposal) {
   if (proposal.kind === 'workspace_card_update') return `Update ${proposal.updates.length} card${proposal.updates.length > 1 ? 's' : ''}`
   if (proposal.kind === 'storyboard_update') return `Update storyboard ${proposal.rowId ? 'row' : 'sequence'}`
   if (proposal.kind === 'three_stage_field_update') return `Update ${proposal.stageKey}.${proposal.fieldId}`
+  if (proposal.kind === 'free_canvas_text_update') return `Update canvas text ${proposal.nodeId}`
   return 'Unsupported workspace proposal'
 }
 
@@ -304,6 +306,7 @@ function proposalSummary(proposal: AgentWorkspaceProposal) {
   if (proposal.kind === 'workspace_card_update') return proposal.updates.map(update => `${update.cardId}: ${update.title || ''} ${update.content || ''}`).join('\n')
   if (proposal.kind === 'storyboard_update') return JSON.stringify({ sequenceUpdates: proposal.sequenceUpdates, rowUpdates: proposal.rowUpdates }, null, 2)
   if (proposal.kind === 'three_stage_field_update') return proposal.content
+  if (proposal.kind === 'free_canvas_text_update') return proposal.userText
   return ''
 }
 

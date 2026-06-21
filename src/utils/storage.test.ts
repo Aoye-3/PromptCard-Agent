@@ -90,6 +90,9 @@ beforeEach(async () => {
     if (url === '/storage-api/migrations/browser-cache') {
       return jsonResponse({ projects: 0, presets: 0 })
     }
+    if (url === '/storage-api/assets') {
+      return jsonResponse({ id: 'clip.mp4', filename: 'clip.mp4', contentType: 'video/mp4', size: 12 })
+    }
     return jsonResponse({}, 404)
   })
 })
@@ -200,6 +203,33 @@ describe('storage service facade', () => {
     })
   })
 
+  test('uploads supported video assets through the storage API', async () => {
+    const file = { name: 'clip.mp4', type: '' } as File
+
+    await expect(storage.assets.upload(file)).resolves.toMatchObject({
+      id: 'clip.mp4',
+      contentType: 'video/mp4'
+    })
+
+    expect(fetch).toHaveBeenCalledWith('/storage-api/assets', expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({
+        'Content-Type': 'video/mp4',
+        'X-File-Name': 'clip.mp4'
+      })
+    }))
+  })
+
+  test('rejects unsupported asset uploads before calling the storage API', async () => {
+    vi.mocked(fetch).mockClear()
+
+    await expect(storage.assets.upload({ name: 'notes.txt', type: 'text/plain' } as File)).rejects.toMatchObject({
+      code: 'invalid_asset'
+    })
+
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   test('keeps prompt history snapshots unique in browser UI cache', async () => {
     const pages = [{ id: 'page-1', cards: [] }]
     await storage.history.addSnapshot({ content: 'A prompt', pages, cards: [] })
@@ -226,6 +256,27 @@ describe('storage service facade', () => {
 
     expect(saved.meta.threeStageTemplates.videoPrompt.negativePrompt).toBe('No text or arrows.')
     expect(loaded.meta.threeStageTemplates.videoPrompt.negativePrompt).toBe('No text or arrows.')
+  })
+
+  test('creates an empty standalone free-canvas project draft', () => {
+    vi.spyOn(Date, 'now').mockReturnValue(500)
+
+    const project = storage.projects.createFreeCanvasDraft({
+      title: 'Free Canvas'
+    })
+
+    expect(project).toMatchObject({
+      id: '500',
+      title: 'Free Canvas',
+      type: 'free-canvas',
+      pages: [],
+      currentPage: 0,
+      freeCanvas: {
+        nodes: [],
+        edges: [],
+        selectedNodeId: null
+      }
+    })
   })
 })
 

@@ -60,7 +60,7 @@ export const ProjectHome = ({
           </div>
           <h1 className="text-4xl font-bold tracking-tight text-gray-950">Create your first project</h1>
           <p className="mt-4 max-w-lg text-base leading-7 text-gray-500">
-            Create card, storyboard, or three-stage projects. Local auto-save is handled by the storage service.
+          Create card, storyboard, three-stage, or free-canvas projects. Local auto-save is handled by the storage service.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-3">
             <button className="rounded-full bg-black px-8 py-4 text-base font-semibold text-white transition hover:bg-gray-800" onClick={onCreateProject}>
@@ -75,7 +75,7 @@ export const ProjectHome = ({
             <div>
               <h1 className="text-3xl font-bold">{showProjectTrash ? 'Project trash' : 'Projects'}</h1>
               <p className="mt-2 text-sm text-gray-500">
-                {showProjectTrash ? 'Restore projects or permanently delete them from local storage.' : 'Manage card, storyboard, and three-stage projects.'}
+        {showProjectTrash ? 'Restore projects or permanently delete them from local storage.' : 'Manage card, storyboard, three-stage, and free-canvas projects.'}
               </p>
             </div>
             <div className="flex flex-wrap gap-3 lg:justify-end">
@@ -128,12 +128,14 @@ export const ProjectHome = ({
                   ? selectedProjectTrashIds.includes(project.id)
                   : selectedProjectIds.includes(project.id)
                 const cardCount = project.pages.reduce((sum, page) => sum + page.cards.length, 0)
-                const meta = project.type === 'storyboard'
-                  ? `${project.storyboard?.sequences.length || 0} sequences`
-                  : project.type === 'three-stage'
-                    ? '3 structured stages'
-                    : `${project.pages.length} pages / ${cardCount} cards`
-                const modeLabel = project.type === 'storyboard' ? 'Storyboard' : project.type === 'three-stage' ? 'Three-stage' : 'Card'
+  const meta = project.type === 'storyboard'
+    ? `${project.storyboard?.sequences.length || 0} sequences`
+    : project.type === 'three-stage'
+      ? '3 structured stages'
+      : project.type === 'free-canvas'
+        ? `${project.freeCanvas?.nodes.length || 0} canvas nodes`
+      : `${project.pages.length} pages / ${cardCount} cards`
+  const modeLabel = project.type === 'storyboard' ? 'Storyboard' : project.type === 'three-stage' ? 'Three-stage' : project.type === 'free-canvas' ? 'Free Canvas' : 'Card'
 
                 return (
                   <article

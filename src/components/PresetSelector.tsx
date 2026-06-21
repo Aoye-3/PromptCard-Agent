@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { usePresetStore } from '../stores/preset.store'
 import type { IPreset } from '../models/Card.model'
 import { useI18n } from '@/i18n'
+import { PromptPresetPreviewDialog } from './prompt-media/PromptPresetPreviewDialog'
 
 interface PresetSelectorProps {
   type: string
@@ -17,6 +18,7 @@ const PresetSelector: React.FC<PresetSelectorProps> = ({
   const { t } = useI18n()
   const presets = usePresetStore(state => state.presets)
   const [isOpen, setIsOpen] = useState(false)
+  const [previewPreset, setPreviewPreset] = useState<IPreset | null>(null)
   const presetsForType = presets.filter(preset => preset.type === type)
 
   const handlePresetSelect = (preset: IPreset) => {
@@ -45,22 +47,22 @@ const PresetSelector: React.FC<PresetSelectorProps> = ({
             </div>
           ) : (
             presetsForType.map((preset) => (
-              <button
+              <div
                 key={preset.id}
-                onClick={() => handlePresetSelect(preset)}
-                className={`w-full text-left px-3 py-2 text-sm transition-colors duration-200 ${
+                className={`flex items-center gap-2 px-3 py-2 text-sm transition-colors duration-200 ${
                   selectedPreset?.id === preset.id 
                     ? 'bg-blue-100 text-blue-800'
                     : 'text-gray-700 hover:bg-gray-100'
                 }`}
               >
-                {preset.label}
-                {selectedPreset?.id === preset.id && (
-                  <span className="float-right text-xs text-blue-600">
-                    {t('selected')}
-                  </span>
-                )}
-              </button>
+                <button className="min-w-0 flex-1 truncate text-left" onClick={() => handlePresetSelect(preset)}>
+                  {preset.label}
+                </button>
+                <button className="shrink-0 rounded-full bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-200" onClick={() => setPreviewPreset(preset)}>
+                  预览
+                </button>
+                {selectedPreset?.id === preset.id && <span className="shrink-0 text-xs text-blue-600">{t('selected')}</span>}
+              </div>
             ))
           )}
         </div>
@@ -72,6 +74,7 @@ const PresetSelector: React.FC<PresetSelectorProps> = ({
           onClick={() => setIsOpen(false)}
         />
       )}
+      {previewPreset && <PromptPresetPreviewDialog preset={previewPreset} onClose={() => setPreviewPreset(null)} />}
     </div>
   )
 }

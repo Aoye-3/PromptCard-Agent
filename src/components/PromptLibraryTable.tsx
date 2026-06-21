@@ -1,18 +1,21 @@
 import { useState } from 'react'
 import type { IPreset } from '@/models/Card.model'
 import { useI18n } from '@/i18n'
+import { getPresetMedia } from '@/domain/prompt-media/prompt-media'
+import { Image, PlaySquare } from 'lucide-react'
 
 interface PromptLibraryTableProps {
   presets: IPreset[]
   selectedIds?: string[]
   onEdit: (preset: IPreset) => void
   onDelete: (id: string) => void
+  onPreview: (preset: IPreset) => void
   onToggleSelect?: (id: string) => void
   onReorder?: (orderedIds: string[]) => void
   sortable?: boolean
 }
 
-const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onToggleSelect, onReorder, sortable = false }: PromptLibraryTableProps) => {
+const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onPreview, onToggleSelect, onReorder, sortable = false }: PromptLibraryTableProps) => {
   const { t, cardTypeLabel } = useI18n()
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
@@ -70,7 +73,7 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
           <col className="w-20" />
           <col className="w-28" />
           <col />
-          <col className="w-16" />
+          <col className="w-20" />
           <col className="w-28" />
         </colgroup>
         <thead className="bg-gray-50">
@@ -91,7 +94,7 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
               {t('content')}
             </th>
             <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              {t('usageTimes')}
+              媒体
             </th>
             <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {t('actions')}
@@ -99,7 +102,11 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
           </tr>
         </thead>
         <tbody className="bg-white divide-y divide-gray-200">
-          {presets.map((preset) => (
+          {presets.map((preset) => {
+            const media = getPresetMedia(preset)
+            const imageCount = media.filter(item => item.kind === 'image').length
+            const videoCount = media.filter(item => item.kind === 'video').length
+            return (
             <tr
               key={preset.id}
               draggable={canSort}
@@ -161,11 +168,27 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                 </div>
               </td>
               <td className="px-3 py-4">
-                <div className="truncate text-sm text-gray-500" title={String(preset.usageCount)}>
-                  <i className="fa fa-eye mr-1"></i>{preset.usageCount}
+                <div className="flex flex-wrap gap-1 text-xs text-gray-500">
+                  {imageCount > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <Image className="h-3 w-3" />{imageCount}
+                    </span>
+                  )}
+                  {videoCount > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1">
+                      <PlaySquare className="h-3 w-3" />{videoCount}
+                    </span>
+                  )}
+                  {media.length === 0 && <span className="text-gray-300">-</span>}
                 </div>
               </td>
               <td className="whitespace-nowrap px-3 py-4 text-sm font-medium">
+                <button
+                  className="mr-3 text-gray-600 hover:text-gray-900"
+                  onClick={() => onPreview(preset)}
+                >
+                  预览
+                </button>
                 <button
                   className="mr-3 text-blue-600 hover:text-blue-900"
                   onClick={() => onEdit(preset)}
@@ -180,7 +203,7 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onTog
                 </button>
               </td>
             </tr>
-          ))}
+          )})}
         </tbody>
       </table>
 

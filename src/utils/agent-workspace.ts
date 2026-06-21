@@ -1,12 +1,13 @@
 import type { ICard } from '@/models/Card.model'
 import type { AgentWorkspaceContext } from '@/models/Agent.model'
-import type { IPromptProject, IStoryboardProject, IThreeStageProject } from '@/models/PromptHistory.model'
+import type { IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject, IStoryboardProject, IThreeStageProject } from '@/models/PromptHistory.model'
 import type { IPage } from '@/stores/card-initial-state'
 import {
   getSelectedThreeStageFormContext,
   normalizeThreeStagePages,
   syncThreeStageLegacyFields
 } from '@/domain/three-stage/three-stage-pages'
+import { freeCanvasPresetText, freeCanvasTextDisplay, freeCanvasUserText } from '@/domain/free-canvas/free-canvas-project'
 
 const MAX_TEXT_LENGTH = 1200
 const MAX_CARDS = 60
@@ -14,6 +15,11 @@ const MAX_ROWS = 40
 
 const compactText = (value: string | undefined) => {
   const text = String(value || '').replace(/\s+/g, ' ').trim()
+  return text.length > MAX_TEXT_LENGTH ? `${text.slice(0, MAX_TEXT_LENGTH)}...` : text
+}
+
+const compactMultilineText = (value: string | undefined) => {
+  const text = String(value || '').replace(/[^\S\r\n]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
   return text.length > MAX_TEXT_LENGTH ? `${text.slice(0, MAX_TEXT_LENGTH)}...` : text
 }
 
@@ -240,6 +246,35 @@ export function buildThreeStageWorkspaceContext({
   }
 }
 
+export function buildFreeCanvasWorkspaceContext({
+  activeProject,
+  freeCanvas
+}: {
+  activeProject: IPromptProject
+  freeCanvas: IFreeCanvasProject
+}): AgentWorkspaceContext {
+  const selectedNode = freeCanvas.nodes.find(node => node.id === freeCanvas.selectedNodeId) || null
+
+  return {
+    contextId: `free-canvas:${activeProject.id}:${freeCanvas.selectedNodeId || 'canvas'}`,
+    mode: 'free-canvas-workspace',
+    projectId: activeProject.id,
+    projectTitle: activeProject.title,
+    snapshot: {
+      projectType: activeProject.type,
+      selectedNodeId: freeCanvas.selectedNodeId || null,
+      selectedNode: selectedNode ? compactFreeCanvasNode(selectedNode) : null,
+      nodes: freeCanvas.nodes.slice(0, MAX_CARDS).map(compactFreeCanvasNode),
+      edges: freeCanvas.edges.slice(0, MAX_CARDS).map(edge => ({
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        label: compactText(edge.label)
+      }))
+    }
+  }
+}
+
 function compactThreeStageSection(section: IThreeStageSectionLike) {
   return {
     focusedFieldId: section.focusedFieldId,
@@ -250,3 +285,33 @@ function compactThreeStageSection(section: IThreeStageSectionLike) {
 }
 
 type IThreeStageSectionLike = IThreeStageProject['character']
+
+function compactFreeCanvasNode(node: IFreeCanvasNode) {
+  if (node.kind === 'text') {
+    return compactFreeCanvasTextNode(node)
+  }
+  return {
+    id: node.id,
+    kind: node.kind,
+    title: compactText(node.title),
+    assetId: node.kind === 'image' ? node.assetId || null : undefined,
+    text: node.kind === 'arrow' ? compactText(node.text) : undefined
+  }
+}
+
+function compactFreeCanvasTextNode(node: IFreeCanvasTextNode) {
+  return {
+    id: node.id,
+    kind: node.kind,
+    title: compactText(node.title),
+    displayText: compactMultilineText(freeCanvasTextDisplay(node)),
+    presetText: compactMultilineText(freeCanvasPresetText(node)),
+    userText: compactMultilineText(freeCanvasUserText(node)),
+    segments: node.segments.map(segment => ({
+      id: segment.id,
+      source: segment.source,
+      text: compactMultilineText(segment.text),
+      color: segment.color
+    }))
+  }
+}

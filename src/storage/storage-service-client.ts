@@ -92,8 +92,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const storageServiceClient = {
   assets: {
     async upload(file: File): Promise<{ id: string; filename: string; contentType: string; size: number }> {
-      const contentType = inferImageContentType(file)
-      if (!contentType) throw new StorageHttpError(400, 'invalid_asset', '仅支持 PNG、JPEG 和 WebP 图片。')
+      const contentType = inferAssetContentType(file)
+      if (!contentType) throw new StorageHttpError(400, 'invalid_asset', '仅支持 PNG、JPEG、WebP 图片和 MP4、WebM 视频。')
       return request('/storage-api/assets', {
         method: 'POST',
         headers: {
@@ -209,11 +209,14 @@ export const storageServiceClient = {
   }
 }
 
-const inferImageContentType = (file: File): string | null => {
+const inferAssetContentType = (file: File): string | null => {
   if (['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) return file.type
+  if (['video/mp4', 'video/webm'].includes(file.type)) return file.type
   const extension = file.name.split('.').pop()?.toLowerCase()
   if (extension === 'png') return 'image/png'
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg'
   if (extension === 'webp') return 'image/webp'
+  if (extension === 'mp4') return 'video/mp4'
+  if (extension === 'webm') return 'video/webm'
   return null
 }

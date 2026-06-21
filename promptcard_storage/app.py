@@ -16,6 +16,7 @@ from .store import AssetValidationError, DuplicateItem, MissingItem, RevisionCon
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.environ.get("PROMPTCARD_STORAGE_DATA_DIR", ROOT_DIR / "data"))
 SEED_FILE = ROOT_DIR / "public" / "prompt-library-presets.json"
+MAX_ASSET_UPLOAD_BYTES = 200 * 1024 * 1024
 
 
 def load_seed_presets() -> list[dict[str, Any]]:
@@ -72,8 +73,8 @@ def create_app(storage: SqliteStore) -> FastAPI:
             chunks = bytearray()
             async for chunk in request.stream():
                 chunks.extend(chunk)
-                if len(chunks) > 20 * 1024 * 1024:
-                    raise AssetValidationError("Image must be between 1 byte and 20 MB")
+                if len(chunks) > MAX_ASSET_UPLOAD_BYTES:
+                    raise AssetValidationError("Asset must be between 1 byte and 200 MB")
             return storage.save_asset(
                 unquote(request.headers.get("x-file-name", "image")),
                 request.headers.get("content-type", ""),

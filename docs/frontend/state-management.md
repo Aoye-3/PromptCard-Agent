@@ -115,15 +115,16 @@ Prompt Library is the only UI surface allowed to approve Agent-generated writes 
 
 - `id`
 - `title`
-- `type`: `card`, `storyboard`, or `three-stage`
+- `type`: `card`, `storyboard`, `three-stage`, or `free-canvas`
 - `pages`
 - `currentPage`
 - optional `storyboard`
 - optional `threeStage`
+- optional `freeCanvas`
 - timestamps
 - `meta`
 
-Card projects mainly use `pages`; storyboard projects use `storyboard`; three-stage projects use `threeStage`.
+Card projects mainly use `pages`; storyboard projects use `storyboard`; three-stage projects use `threeStage`; Free Canvas projects use `freeCanvas`.
 
 ### `IStoryboardProject`
 
@@ -147,6 +148,17 @@ Loading normalizes legacy flat storyboard data into the sequence model.
 
 Three-stage fields are stored as sparse string maps. Empty fields remain absent or empty and are not included in copied stage output.
 
+### `IFreeCanvasProject`
+
+`IFreeCanvasProject` contains:
+
+- standalone `nodes` for text, image, and arrow content
+- user-created `edges`
+- optional viewport and selected node IDs
+- `meta`
+
+Text nodes split visible text into `preset` and `user` segments. Prompt/template text remains a red preset segment, while user-authored text defaults to black. Agent updates may only mutate user segments.
+
 ### `PromptLibraryWriteProposal`
 
 `PromptLibraryWriteProposal` captures Agent-suggested Prompt library writes:
@@ -169,6 +181,8 @@ The proposal is not a preset until the user approves it.
 - `workspace_card_update`: update existing card titles and/or content by real `cardId`
 - `workspace_card_create`: add a new card to the current card workspace
 - `storyboard_update`: update storyboard sequence or row fields
+- `three_stage_field_update`: update a focused three-stage field
+- `free_canvas_text_update`: update only user text segments on a Free Canvas text node
 - `prompt_library_write_proposal`: create a new Prompt library preset after approval in Prompt Library scope
 
 In builder AIChatbotBox surfaces, card workspace proposals are applied immediately when `autoApplyWorkspaceChanges` is enabled. Prompt library proposals are filtered out in workspace scope and can only be approved from the Prompt Library page.
@@ -186,6 +200,8 @@ Storyboard loading normalizes missing or legacy fields:
 - selected sequence and row IDs fall back to valid existing records
 
 Three-stage loading normalizes missing project data by creating empty `character`, `storyboard`, and `videoPrompt` sections with the default focused field.
+
+Free Canvas loading normalizes missing project data by creating an empty `freeCanvas` payload. Legacy three-stage projects with `meta.builderTemplateId: "free-canvas"` are migrated into standalone Free Canvas projects; their form outputs become text nodes and their media nodes/valid edges are remapped.
 
 ## Roadmap / Not Yet Implemented
 

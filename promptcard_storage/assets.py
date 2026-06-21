@@ -11,7 +11,13 @@ ASSET_EXTENSIONS = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
     "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
 }
+
+IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+VIDEO_CONTENT_TYPES = {"video/mp4", "video/webm"}
+DEFAULT_MAX_ASSET_BYTES = 200 * 1024 * 1024
 
 
 class AssetValidationError(Exception):
@@ -34,14 +40,17 @@ class AssetStore:
         self._referenced_payloads = referenced_payloads
         self._now_ms = now_ms
 
-    def save(self, filename: str, content_type: str, content: bytes, max_bytes: int = 20 * 1024 * 1024) -> dict[str, Any]:
-        extension = ASSET_EXTENSIONS.get(content_type.lower())
+    def save(self, filename: str, content_type: str, content: bytes, max_bytes: int = DEFAULT_MAX_ASSET_BYTES) -> dict[str, Any]:
+        normalized_content_type = content_type.lower()
+        extension = ASSET_EXTENSIONS.get(normalized_content_type)
         if extension is None:
-            raise AssetValidationError("Only PNG, JPEG, and WebP images are supported")
+            raise AssetValidationError("Only PNG, JPEG, WebP images and MP4/WebM videos are supported")
         if not content or len(content) > max_bytes:
-            raise AssetValidationError("Image must be between 1 byte and 20 MB")
-        if not is_valid_image_signature(content_type.lower(), content):
+            raise AssetValidationError("Asset must be between 1 byte and 200 MB")
+        if normalized_content_type in IMAGE_CONTENT_TYPES and not is_valid_image_signature(normalized_content_type, content):
             raise AssetValidationError("Image bytes do not match the declared type")
+        if normalized_content_type in VIDEO_CONTENT_TYPES and not is_valid_video_signature(normalized_content_type, content):
+            raise AssetValidationError("Video bytes do not match the declared type")
         self.assets_dir.mkdir(parents=True, exist_ok=True)
         asset_id = f"{uuid.uuid4().hex}{extension}"
         final_path = self.assets_dir / asset_id
@@ -55,13 +64,13 @@ class AssetStore:
             with self._transaction() as connection:
                 connection.execute(
                     "INSERT INTO assets(asset_id, original_filename, relative_path, content_type, size, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                    (asset_id, Path(filename).name or asset_id, f"assets/{asset_id}", content_type.lower(), len(content), self._now_ms()),
+                    (asset_id, Path(filename).name or asset_id, f"assets/{asset_id}", normalized_content_type, len(content), self._now_ms()),
                 )
         except Exception:
             Path(temp_name).unlink(missing_ok=True)
             final_path.unlink(missing_ok=True)
             raise
-        return {"id": asset_id, "filename": Path(filename).name or asset_id, "contentType": content_type.lower(), "size": len(content)}
+        return {"id": asset_id, "filename": Path(filename).name or asset_id, "contentType": normalized_content_type, "size": len(content)}
 
     def get(self, asset_id: str) -> tuple[Path, str]:
         candidate = Path(asset_id)
@@ -96,6 +105,14 @@ def is_valid_image_signature(content_type: str, content: bytes) -> bool:
         return content.startswith(b"\xff\xd8\xff")
     if content_type == "image/webp":
         return len(content) >= 12 and content.startswith(b"RIFF") and content[8:12] == b"WEBP"
+    return False
+
+
+def is_valid_video_signature(content_type: str, content: bytes) -> bool:
+    if content_type == "video/mp4":
+        return len(content) >= 12 and content[4:8] == b"ftyp"
+    if content_type == "video/webm":
+        return content.startswith(b"\x1a\x45\xdf\xa3")
     return False
 
 

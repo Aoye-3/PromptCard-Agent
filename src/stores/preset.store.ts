@@ -54,8 +54,10 @@ export const usePresetStore = create<PresetState>((set, get) => ({
       usageCount: 0,
       meta: preset.meta || {}
     }
-    await storage.presets.create(newPreset)
-    await get().refresh()
+    const created = await storage.presets.create(newPreset)
+    const orderedIds = [created.id, ...get().presets.filter(preset => preset.id !== created.id).map(preset => preset.id)]
+    const saved = await storage.presets.reorder(orderedIds)
+    set({ presets: saved })
   },
 
   updatePreset: async (id, updates) => {

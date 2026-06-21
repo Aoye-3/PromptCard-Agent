@@ -237,7 +237,7 @@ export function parseAgentWorkspaceProposals(
   const seenProposalIds = new Set<string>()
   const jsonCandidates = [
     ...text.matchAll(/```json\s*([\s\S]*?)```/gi),
-    ...text.matchAll(/(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update)"[\s\S]*\})/gi)
+    ...text.matchAll(/(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|free_canvas_text_update)"[\s\S]*\})/gi)
   ].map(match => match[1])
 
   for (const candidate of jsonCandidates) {
@@ -350,6 +350,16 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
       fieldId: String(proposal.fieldId),
       mode: proposal.mode === 'append' ? 'append' : 'replace',
       content: String(proposal.content)
+    }
+  }
+
+  if (kind === 'free_canvas_text_update' && proposal.nodeId && typeof proposal.userText === 'string') {
+    return {
+      ...base,
+      kind: 'free_canvas_text_update',
+      nodeId: String(proposal.nodeId),
+      mode: proposal.mode === 'append' ? 'append' : 'replace',
+      userText: String(proposal.userText)
     }
   }
 

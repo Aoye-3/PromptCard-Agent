@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArchiveRestore, Database, Grid2X2, Image, ListChecks, Plus, Search, Trash2, X, PlaySquare } from 'lucide-react'
+import { useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react'
+import { ArchiveRestore, Check, Copy, Database, Grid2X2, Image, ListChecks, PlaySquare, Plus, Search, Trash2, X } from 'lucide-react'
 import { usePresetStore } from '@/stores/preset.store'
 import PromptLibraryTable from './PromptLibraryTable'
 import PromptLibraryForm, { type PromptLibraryFormSave } from './PromptLibraryForm'
 import { PromptLibraryAgentPanel } from './PromptLibraryAgentPanel'
+import { createCategoryCounts, filterPromptLibraryPresets } from './PromptLibraryPreviewMode'
 import { PromptPresetPreviewDialog } from './prompt-media/PromptPresetPreviewDialog'
 import type { CardType, IPreset } from '@/models/Card.model'
 import { useI18n } from '@/i18n'
 import { storage } from '@/utils/storage'
 import type { TrashEntry } from '@/storage/storage-service-client'
-import { getPresetMedia, getPresetMediaSearchText } from '@/domain/prompt-media/prompt-media'
+import { getPresetMedia } from '@/domain/prompt-media/prompt-media'
 
 interface PromptLibraryProps {
   embedded?: boolean
@@ -66,24 +67,11 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
   ], [cardTypeLabel])
 
   const visiblePresets = showTrash && mode === 'edit' ? trashItems.map(item => item.payload) : presets
-  const filteredPresets = visiblePresets.filter(preset => {
-    const keyword = searchTerm.trim().toLowerCase()
-    const matchesSearch = !keyword ||
-      preset.label.toLowerCase().includes(keyword) ||
-      preset.content.toLowerCase().includes(keyword) ||
-      preset.category.toLowerCase().includes(keyword) ||
-      getPresetMediaSearchText(preset).toLowerCase().includes(keyword)
-    const matchesCategory = activeCategory === 'all' || preset.type === activeCategory
-    return matchesSearch && matchesCategory
-  })
+  const filteredPresets = filterPromptLibraryPresets(visiblePresets, searchTerm, activeCategory)
   const isSearchActive = searchTerm.trim().length > 0
   const canReorder = activeCategory !== 'all' && !isSearchActive && filteredPresets.length > 1
 
-  const categoryCounts = cardTypes.reduce((counts, type) => {
-    counts[type.type] = visiblePresets.filter(preset => preset.type === type.type).length
-    return counts
-  }, {} as Record<string, number>)
-
+  const categoryCounts = createCategoryCounts(cardTypes, visiblePresets)
   const mediaCount = visiblePresets.reduce((count, preset) => count + getPresetMedia(preset).length, 0)
 
   const handleSavePreset = async (presetData: PromptLibraryFormSave) => {
@@ -397,14 +385,29 @@ const PromptLibraryPreviewMode = ({
 
 const PromptPreviewCard = ({ preset, onPreview }: { preset: IPreset; onPreview: () => void }) => {
   const { cardTypeLabel } = useI18n()
+  const [copied, setCopied] = useState(false)
   const media = getPresetMedia(preset)
   const imageCount = media.filter(item => item.kind === 'image').length
   const videoCount = media.filter(item => item.kind === 'video').length
+  const copyPresetContent = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    await navigator.clipboard.writeText(preset.content)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1200)
+  }
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    onPreview()
+  }
+
   return (
-    <button
-      type="button"
-      className="group grid w-full grid-cols-[72px_minmax(150px,220px)_minmax(0,1fr)_110px] items-center gap-4 rounded-xl border border-gray-100 bg-white px-4 py-3 text-left shadow-sm transition hover:border-gray-300 hover:bg-gray-50 hover:shadow-md max-lg:grid-cols-[56px_minmax(120px,180px)_minmax(0,1fr)] max-sm:grid-cols-[48px_minmax(0,1fr)]"
+    <div
+      role="button"
+      tabIndex={0}
+      className="group grid w-full grid-cols-[72px_minmax(150px,220px)_minmax(0,1fr)_110px_40px] items-center gap-4 rounded-xl border border-gray-100 bg-white px-4 py-3 text-left shadow-sm transition hover:border-gray-300 hover:bg-gray-50 hover:shadow-md max-lg:grid-cols-[56px_minmax(120px,180px)_minmax(0,1fr)_40px] max-sm:grid-cols-[48px_minmax(0,1fr)_40px]"
       onClick={onPreview}
+      onKeyDown={handleKeyDown}
     >
       <div className="flex items-center gap-2">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-black leading-4 text-gray-700">
@@ -419,12 +422,21 @@ const PromptPreviewCard = ({ preset, onPreview }: { preset: IPreset; onPreview: 
         <h3 className="mt-1 line-clamp-2 text-base font-black leading-5 text-gray-950">{preset.label}</h3>
       </div>
       <p className="line-clamp-2 text-sm leading-6 text-gray-600 max-sm:hidden">{preset.content}</p>
+      <button
+        type="button"
+        className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-gray-100 text-gray-500 transition hover:bg-gray-950 hover:text-white"
+        title={copied ? '已复制' : '复制'}
+        aria-label={copied ? '已复制' : '复制'}
+        onClick={copyPresetContent}
+      >
+        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      </button>
       <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-gray-500 max-lg:col-start-3 max-lg:row-start-1 max-sm:col-span-2 max-sm:col-start-auto max-sm:row-start-auto max-sm:justify-start">
         {imageCount > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1"><Image className="h-3 w-3" />{imageCount}</span>}
         {videoCount > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2 py-1"><PlaySquare className="h-3 w-3" />{videoCount}</span>}
         {media.length === 0 && <span className="rounded-full bg-gray-50 px-2 py-1 text-gray-400">纯文本</span>}
       </div>
-    </button>
+    </div>
   )
 }
 

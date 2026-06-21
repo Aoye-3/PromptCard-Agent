@@ -1,6 +1,7 @@
-import { Image, PlaySquare, X } from 'lucide-react'
+import { useState } from 'react'
+import { Check, Copy, Image, PlaySquare, X } from 'lucide-react'
 import type { IPreset } from '@/models/Card.model'
-import { getPresetMedia, formatMediaSize } from '@/domain/prompt-media/prompt-media'
+import { formatMediaSize, getPresetMedia } from '@/domain/prompt-media/prompt-media'
 import { storage } from '@/utils/storage'
 
 export const PromptPresetPreviewDialog = ({
@@ -11,55 +12,107 @@ export const PromptPresetPreviewDialog = ({
   onClose: () => void
 }) => {
   const media = getPresetMedia(preset)
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(preset.content)
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 1200)
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/35 px-4" onClick={onClose}>
-      <div className="max-h-[84vh] w-full max-w-3xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}>
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div className="min-w-0">
-            <div className="text-xs font-bold uppercase tracking-wide text-gray-400">{preset.category || preset.type}</div>
-            <h3 className="mt-1 break-words text-xl font-black text-gray-950">{preset.label}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/45 px-4 py-6" onClick={onClose}>
+      <div
+        className="grid grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[8px] bg-white shadow-2xl"
+        style={{
+          width: 'min(1040px, calc(100vw - 32px))',
+          height: 'min(720px, calc(100vh - 48px))'
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="shrink-0 border-b border-gray-100 px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs font-bold uppercase tracking-wide text-gray-400">{preset.category || preset.type}</div>
+              <h3 className="mt-1 break-words text-xl font-black text-gray-950">{preset.label}</h3>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-full bg-gray-100 p-2 text-gray-500 transition hover:bg-gray-200 hover:text-gray-950"
+              onClick={onClose}
+              aria-label="关闭预览"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            className="shrink-0 rounded-full bg-gray-100 p-2 text-gray-500 transition hover:bg-gray-200 hover:text-gray-950"
-            onClick={onClose}
-            aria-label="关闭预览"
-          >
-            <X className="h-4 w-4" />
-          </button>
         </div>
 
-        <div className="whitespace-pre-wrap rounded-xl bg-gray-50 p-4 text-sm leading-7 text-gray-800">{preset.content}</div>
-
-        {media.length > 0 && (
-          <div className="mt-4 space-y-4">
-            {media.map(item => (
-              <figure key={item.id} className="overflow-hidden rounded-2xl border border-gray-100 bg-white">
-                <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 text-sm">
-                  <div className="flex min-w-0 items-center gap-2 font-semibold text-gray-800">
-                    {item.kind === 'image' ? <Image className="h-4 w-4 text-gray-500" /> : <PlaySquare className="h-4 w-4 text-gray-500" />}
-                    <span className="truncate">{item.title || item.filename || item.assetId}</span>
-                  </div>
-                  <span className="shrink-0 text-xs text-gray-400">{formatMediaSize(item.size)}</span>
+        <div className="grid min-h-0 md:grid-cols-[minmax(0,1fr)_380px]">
+          <section className="flex min-h-[260px] min-w-0 flex-col border-b border-gray-100 bg-gray-50 md:border-b-0 md:border-r">
+            <div className="shrink-0 px-5 py-4">
+              <div className="flex items-center gap-2 text-sm font-black text-gray-950">
+                <Image className="h-4 w-4 text-gray-500" />
+                媒体预览
+              </div>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+              {media.length === 0 ? (
+                <div className="flex h-full min-h-[260px] items-center justify-center rounded-[8px] border border-dashed border-gray-200 bg-white text-sm font-semibold text-gray-400">
+                  暂无媒体
                 </div>
-                {item.kind === 'image' ? (
-                  <img
-                    src={storage.assets.url(item.assetId)}
-                    alt={item.title || item.filename || preset.label}
-                    className="max-h-[52vh] w-full object-contain bg-gray-950"
-                  />
-                ) : (
-                  <video
-                    src={storage.assets.url(item.assetId)}
-                    controls
-                    className="max-h-[52vh] w-full bg-gray-950"
-                  />
-                )}
-              </figure>
-            ))}
-          </div>
-        )}
+              ) : (
+                <div className="space-y-4">
+                  {media.map(item => (
+                    <figure key={item.id} className="overflow-hidden rounded-[8px] border border-gray-200 bg-white shadow-sm">
+                      <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 text-sm">
+                        <div className="flex min-w-0 items-center gap-2 font-semibold text-gray-800">
+                          {item.kind === 'image' ? <Image className="h-4 w-4 text-gray-500" /> : <PlaySquare className="h-4 w-4 text-gray-500" />}
+                          <span className="truncate">{item.title || item.filename || item.assetId}</span>
+                        </div>
+                        {formatMediaSize(item.size) && <span className="shrink-0 text-xs text-gray-400">{formatMediaSize(item.size)}</span>}
+                      </div>
+                      {item.kind === 'image' ? (
+                        <img
+                          src={storage.assets.url(item.assetId)}
+                          alt={item.title || item.filename || preset.label}
+                          className="max-h-[48vh] w-full bg-gray-950 object-contain"
+                        />
+                      ) : (
+                        <video
+                          src={storage.assets.url(item.assetId)}
+                          controls
+                          className="max-h-[48vh] w-full bg-gray-950"
+                        />
+                      )}
+                    </figure>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="flex min-h-0 min-w-0 flex-col bg-white">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-gray-100 px-5 py-4">
+              <div>
+                <h4 className="text-sm font-black text-gray-950">提示词</h4>
+                <p className="mt-1 text-xs font-semibold text-gray-400">Prompt content</p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-full bg-gray-950 px-4 py-2 text-xs font-black text-white transition hover:bg-gray-800"
+                onClick={handleCopy}
+              >
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? '已复制' : '复制'}
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden p-5">
+              <div className="h-full overflow-y-auto whitespace-pre-wrap rounded-[8px] bg-gray-50 p-4 text-sm leading-7 text-gray-800">
+                {preset.content}
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   )

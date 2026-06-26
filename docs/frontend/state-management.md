@@ -159,6 +159,16 @@ Three-stage fields are stored as sparse string maps. Empty fields remain absent 
 
 Text nodes split visible text into `preset` and `user` segments. Prompt/template text remains a red preset segment, while user-authored text defaults to black. Agent updates may only mutate user segments.
 
+Image nodes may contain `annotations`, an array of image-local annotation records. These records are part of the image node payload rather than standalone canvas nodes:
+
+- supported `kind` values are `text`, `rect`, `arrow`, `freehand`, and `shotNumber`
+- `x`, `y`, `width`, and `height` are normalized to the image bounds
+- `arrow.points` stores two normalized endpoints when available
+- `freehand.points` stores the normalized path
+- `shotNumber` is rendered as a square black sticker with editable white text
+
+Project normalization must keep old image nodes without `annotations` loadable by defaulting to an empty array. Saving from the annotation editor replaces the full annotation array for that image node in one project update.
+
 ### `PromptLibraryWriteProposal`
 
 `PromptLibraryWriteProposal` captures Agent-suggested Prompt library writes:

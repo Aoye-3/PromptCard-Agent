@@ -10,7 +10,7 @@ import {
 describe('builder templates', () => {
   it('registers one template for every current project type', () => {
     expect(BUILDER_TEMPLATES.map(template => template.projectType)).toEqual([
-      'three-stage',
+      'free-canvas',
       'card',
       'storyboard',
       'three-stage'
@@ -49,10 +49,10 @@ describe('builder templates', () => {
     expect(modules[0].children?.map(module => module.id)).toContain('three-stage-prompt-injection')
   })
 
-  it('keeps the free canvas template first and backed by three-stage projects', () => {
+  it('keeps the free canvas template first and backed by free canvas projects', () => {
     expect(BUILDER_TEMPLATES[0]).toMatchObject({
       id: 'free-canvas',
-      projectType: 'three-stage'
+      projectType: 'free-canvas'
     })
     expect(getBuilderTemplateModules('free-canvas')[0].children?.map(module => module.id)).toContain('free-canvas-media-layer')
   })

@@ -15,7 +15,7 @@ flowchart TD
   Boundary["PromptCard Runtime API<br/>/api/promptcard/runtime/*"]
   Adapter["PromptCard runtime adapter<br/>app/gateway/promptcard_runtime.py"]
   DeerFlow["DeerFlow Gateway internals<br/>threads, runs, auth, config"]
-  Storage["promptcard-storage<br/>127.0.0.1:8002"]
+  Storage["promptcard-storage<br/>manifest-backed local port"]
   Model["DeepSeek"]
 
   UI --> Store --> Client --> Vite --> Boundary --> Adapter
@@ -87,10 +87,10 @@ PromptCard currently supports one model service in the Agent panel: DeepSeek. Th
 
 ## Local Runtime Contract
 
-`npm.cmd run dev:with-agent` starts or reuses:
+`npm.cmd run dev:with-agent` starts or reuses the local stack and writes the selected URLs to `logs/dev-runtime.json`:
 
-- storage service on `127.0.0.1:8002`
-- Agent Runtime on `127.0.0.1:8001`
-- Vite frontend on `localhost:3000` with strict port behavior
+- `frontendUrl`
+- `agentUrl` and `agentHealthUrl`
+- `storageUrl` and `storageHealthUrl`
 
-Background service logs live under `logs/`.
+Background service logs and generated dev runtime config live under `logs/`. The browser and frontend code continue to use `/agent-api`; Vite maps that route to the manifest-backed Agent Runtime URL.

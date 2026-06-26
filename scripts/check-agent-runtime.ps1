@@ -34,7 +34,7 @@ if (!$env:DEER_FLOW_EXTENSIONS_CONFIG_PATH) {
 if (!$env:PROMPTCARD_LIBRARY_FILE) {
   $env:PROMPTCARD_LIBRARY_FILE = Join-Path $RepoRoot "data\prompt-library-presets.json"
 }
-$RuntimeEnvironment = Join-Path $env:LOCALAPPDATA "PromptCardAgentRuntime\.venv"
+$RuntimeEnvironment = if ($env:UV_PROJECT_ENVIRONMENT) { $env:UV_PROJECT_ENVIRONMENT } else { Join-Path $BackendRoot ".venv" }
 $BundledPython = "C:\Users\123\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 if (!$env:AUTH_JWT_SECRET) {
   $env:AUTH_JWT_SECRET = "promptcard-local-agent-runtime-dev-secret"
@@ -57,7 +57,7 @@ try {
     & $RuntimePython -c "from deerflow.config import get_app_config; cfg=get_app_config(); print({'models':[m.name for m in cfg.models], 'agents_api': cfg.agents_api.enabled, 'vision': cfg.models[0].supports_vision, 'tool_search': cfg.tool_search.enabled, 'tools':[t.name for t in cfg.tools]})"
   }
   else {
-    $env:UV_CACHE_DIR = Join-Path $env:TEMP "promptcard-agent-uv-cache"
+    $env:UV_CACHE_DIR = if ($env:UV_CACHE_DIR) { $env:UV_CACHE_DIR } else { Join-Path $RepoRoot ".uv-cache" }
     $env:UV_LINK_MODE = "copy"
     $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
     $env:UV_PYTHON = if (Test-Path $BundledPython) { $BundledPython } else { "C:\Program Files\Python311\python.exe" }

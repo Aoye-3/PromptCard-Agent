@@ -2,14 +2,14 @@
 
 The current self-use desktop dev shell defaults to repository-local data so the complete `data/` directory can be backed up through the private GitHub repository. This currently includes active data, archives, and trash files.
 
-This AppData layout is the optional future distribution profile. Use it only when `PROMPTCARD_DESKTOP_USE_APPDATA_PROFILE=1` is set.
+This alternate desktop profile is optional. Use it only when `PROMPTCARD_DESKTOP_USE_APPDATA_PROFILE=1` is set. The default optional profile root stays inside ignored repository-local `logs/` so development state remains on the current workspace drive; set `PROMPTCARD_DESKTOP_PROFILE_ROOT` explicitly for distribution experiments.
 
 ## Desktop Dev Profile
 
 Optional profile root:
 
 ```text
-%APPDATA%\PromptCard-Manager\dev-profile
+logs/desktop-profile
 ```
 
 Directory contract:

@@ -7,6 +7,10 @@ import {
   promptLibraryFilePlugin
 } from './vite/plugins/promptcard-dev-storage'
 
+const frontendPort = Number(process.env.PROMPTCARD_FRONTEND_PORT || 3000)
+const agentUrl = (process.env.PROMPTCARD_AGENT_URL || 'http://127.0.0.1:8001').replace(/\/$/, '')
+const storageUrl = (process.env.PROMPTCARD_STORAGE_URL || 'http://127.0.0.1:8002').replace(/\/$/, '')
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), promptLibraryFilePlugin(), projectFilePlugin(), devServerControlPlugin()],
@@ -16,21 +20,21 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000,
+    port: frontendPort,
     open: process.env.PROMPTCARD_DESKTOP_DEV === '1' ? false : true,
     proxy: {
       '/agent-health': {
-        target: 'http://127.0.0.1:8001',
+        target: agentUrl,
         changeOrigin: true,
         rewrite: (proxyPath) => proxyPath.replace(/^\/agent-health/, '/health')
       },
       '/agent-api': {
-        target: 'http://127.0.0.1:8001/api',
+        target: `${agentUrl}/api`,
         changeOrigin: true,
         rewrite: (proxyPath) => proxyPath.replace(/^\/agent-api/, '')
       },
       '/storage-api': {
-        target: 'http://127.0.0.1:8002/api',
+        target: `${storageUrl}/api`,
         changeOrigin: true,
         rewrite: (proxyPath) => proxyPath.replace(/^\/storage-api/, '')
       },

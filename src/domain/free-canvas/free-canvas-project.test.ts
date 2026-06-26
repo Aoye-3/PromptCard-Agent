@@ -2,12 +2,18 @@ import { describe, expect, test, vi } from 'vitest'
 import { createThreeStageProject } from '@/domain/projects/project-normalization'
 import { updateFreeCanvasNodePosition, threeStageFormNodeId, createFreeCanvasMediaNode, addFreeCanvasMediaNode, addFreeCanvasEdge, mediaNodeFlowId } from './free-canvas'
 import {
+  addFreeCanvasImageAnnotation,
   appendFreeCanvasUserText,
+  createFreeCanvasImageNodeFromMedia,
   createFreeCanvasProject,
   createQuickTextNode,
   migrateLegacyThreeStageFreeCanvasProject,
   replaceFreeCanvasTextRange,
+  replaceFreeCanvasImageAnnotations,
+  removeFreeCanvasImageAnnotation,
   removeFreeCanvasProjectNodes,
+  updateFreeCanvasImageAnnotation,
+  updateFreeCanvasImageNodeFrame,
   updateFreeCanvasTextNodeStyle,
   updateFreeCanvasTextNodeUserText
 } from './free-canvas-project'
@@ -31,6 +37,155 @@ describe('free canvas project domain', () => {
     expect(updated.nodes).toEqual([])
     expect(updated.edges).toEqual([])
     expect(updated.selectedNodeId).toBeNull()
+  })
+
+  test('normalizes image nodes with an empty annotations array', () => {
+    const image = createFreeCanvasImageNodeFromMedia(createFreeCanvasMediaNode('imageAsset', { x: 20, y: 40 }, 100), 101)
+    const project = createFreeCanvasProject(100, { nodes: [{ ...image, annotations: undefined } as never] })
+
+    expect(project.nodes[0]).toMatchObject({
+      kind: 'image',
+      annotations: []
+    })
+  })
+
+  test('adds annotations to legacy image nodes that do not have annotations yet', () => {
+    const image = createFreeCanvasImageNodeFromMedia(createFreeCanvasMediaNode('imageAsset', { x: 20, y: 40 }, 100), 101)
+    const project = createFreeCanvasProject(100, { nodes: [{ ...image, annotations: undefined } as never] })
+
+    const updated = addFreeCanvasImageAnnotation({
+      ...project,
+      nodes: project.nodes.map(node => node.kind === 'image' ? ({ ...node, annotations: undefined } as never) : node)
+    }, image.id, 'rect', 102)
+
+    if (updated.nodes[0].kind !== 'image') throw new Error('Expected image node')
+    expect(updated.nodes[0].annotations).toEqual([
+      expect.objectContaining({ kind: 'rect', fill: '#ffffff' })
+    ])
+  })
+
+  test('adds, updates, and removes image annotations', () => {
+    const image = createFreeCanvasImageNodeFromMedia(createFreeCanvasMediaNode('imageAsset', { x: 20, y: 40 }, 100), 101)
+    const project = createFreeCanvasProject(100, { nodes: [image] })
+
+    const withAnnotation = addFreeCanvasImageAnnotation(project, image.id, 'shotNumber', 102)
+    const annotation = withAnnotation.nodes[0].kind === 'image' ? withAnnotation.nodes[0].annotations[0] : null
+    if (!annotation) throw new Error('Expected image annotation')
+
+    expect(annotation).toMatchObject({
+      kind: 'shotNumber',
+      text: '1',
+      width: 0.065,
+      height: 0.065,
+      color: '#ffffff',
+      fill: '#111827'
+    })
+
+    const updated = updateFreeCanvasImageAnnotation(withAnnotation, image.id, annotation.id, {
+      x: 0.25,
+      y: 0.2,
+      text: '12'
+    })
+
+    if (updated.nodes[0].kind !== 'image') throw new Error('Expected image node')
+    expect(updated.nodes[0].annotations[0]).toMatchObject({ x: 0.25, y: 0.2, text: '12' })
+
+    const removed = removeFreeCanvasImageAnnotation(updated, image.id, annotation.id)
+
+    if (removed.nodes[0].kind !== 'image') throw new Error('Expected image node')
+    expect(removed.nodes[0].annotations).toEqual([])
+  })
+
+  test('bulk replaces image annotations for isolated editor saves', () => {
+    const image = createFreeCanvasImageNodeFromMedia(createFreeCanvasMediaNode('imageAsset', { x: 20, y: 40 }, 100), 101)
+    const project = createFreeCanvasProject(100, { nodes: [{ ...image, annotations: undefined } as never] })
+
+    const updated = replaceFreeCanvasImageAnnotations(project, image.id, [{
+      id: 'draft-rect',
+      kind: 'rect',
+      x: 0.2,
+      y: 0.15,
+      width: 0.3,
+      height: 0.2,
+      color: '#111827',
+      fill: '#ffffff',
+      createdAt: 101,
+      updatedAt: 102,
+      meta: {}
+    }], 103)
+
+    if (updated.nodes[0].kind !== 'image') throw new Error('Expected image node')
+    expect(updated.nodes[0].annotations).toEqual([
+      expect.objectContaining({ id: 'draft-rect', kind: 'rect', x: 0.2, y: 0.15, fill: '#ffffff' })
+    ])
+  })
+
+  test('preserves arrow endpoints and freehand paths when saving image annotations', () => {
+    const image = createFreeCanvasImageNodeFromMedia(createFreeCanvasMediaNode('imageAsset', { x: 20, y: 40 }, 100), 101)
+    const project = createFreeCanvasProject(100, { nodes: [image] })
+
+    const updated = replaceFreeCanvasImageAnnotations(project, image.id, [
+      {
+        id: 'draft-arrow',
+        kind: 'arrow',
+        x: 0.1,
+        y: 0.2,
+        width: 0.5,
+        height: 0.3,
+        color: '#ef4423',
+        points: [{ x: 0.1, y: 0.2 }, { x: 0.6, y: 0.5 }],
+        createdAt: 101,
+        updatedAt: 102,
+        meta: {}
+      },
+      {
+        id: 'draft-freehand',
+        kind: 'freehand',
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        color: '#ef4423',
+        strokeWidth: 4,
+        points: [{ x: 0.2, y: 0.7 }, { x: 0.3, y: 0.65 }, { x: 0.4, y: 0.68 }],
+        createdAt: 101,
+        updatedAt: 102,
+        meta: {}
+      }
+    ], 103)
+
+    if (updated.nodes[0].kind !== 'image') throw new Error('Expected image node')
+    expect(updated.nodes[0].annotations).toEqual([
+      expect.objectContaining({
+        id: 'draft-arrow',
+        kind: 'arrow',
+        points: [{ x: 0.1, y: 0.2 }, { x: 0.6, y: 0.5 }]
+      }),
+      expect.objectContaining({
+        id: 'draft-freehand',
+        kind: 'freehand',
+        points: [{ x: 0.2, y: 0.7 }, { x: 0.3, y: 0.65 }, { x: 0.4, y: 0.68 }]
+      })
+    ])
+  })
+
+  test('resizes image nodes without changing normalized annotation placement', () => {
+    const image = createFreeCanvasImageNodeFromMedia(createFreeCanvasMediaNode('imageAsset', { x: 20, y: 40 }, 100), 101)
+    const project = addFreeCanvasImageAnnotation(createFreeCanvasProject(100, { nodes: [image] }), image.id, 'rect', 102)
+
+    const resized = updateFreeCanvasImageNodeFrame(project, image.id, {
+      position: { x: 80, y: 120 },
+      width: 640,
+      height: 360
+    })
+
+    if (resized.nodes[0].kind !== 'image') throw new Error('Expected image node')
+    expect(resized.nodes[0]).toMatchObject({
+      position: { x: 80, y: 120 },
+      width: 640,
+      height: 360
+    })
+    expect(resized.nodes[0].annotations[0]).toMatchObject({ x: 0.08, y: 0.08, width: 0.28, height: 0.18 })
   })
 
   test('creates quick text as red preset text and appends black user text', () => {

@@ -1,28 +1,26 @@
 # Troubleshooting
 
-## Port 3000 Is Busy
+## Frontend Port Is Busy
 
 ```powershell
 Get-NetTCPConnection -LocalPort 3000 -State Listen
 ```
 
-Stop only the known development server process, then restart `npm.cmd run dev`.
+For plain `npm.cmd run dev`, stop only the known development server process, then restart `npm.cmd run dev`.
 
-`npm.cmd run dev:with-agent` exits successfully when the existing listener is the healthy Vite frontend at `http://127.0.0.1:3000/`.
+For `npm.cmd run dev:with-agent`, unspecified frontend ports prefer `3000` but fall forward automatically. If `PROMPTCARD_FRONTEND_PORT` is set, that explicit port is strict and startup fails until it is free.
 
 ## Startup Appears to Error but Services Are Healthy
 
 Startup logs under `logs/*err.log` are process stderr streams. They may include normal uvicorn startup lines or Python warnings even when local development is healthy.
 
-Verify the running services directly:
+Verify the running services from the runtime manifest:
 
-```text
-http://127.0.0.1:3000/
-http://127.0.0.1:8001/health
-http://127.0.0.1:8002/health
+```powershell
+Get-Content logs\dev-runtime.json
 ```
 
-If all three return successful responses, the local stack is running.
+Use the `frontendUrl`, `agentHealthUrl`, and `storageHealthUrl` values from that file. If all three return successful responses, the local stack is running.
 
 ## Browser Is Blank but Localhost Returns 200
 
@@ -38,10 +36,9 @@ If it contains a transform error such as `Unterminated string constant`, fix the
 npm.cmd run build
 ```
 
-When the build passes but the browser is still blank, the likely cause is a stale Vite process or browser tab holding an old HMR error state. Stop only the process listening on port 3000, then start again:
+When the build passes but the browser is still blank, the likely cause is a stale Vite process or browser tab holding an old HMR error state. Open the active `frontendUrl` from `logs/dev-runtime.json`, or stop only the known Vite process and start again:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 3000 -State Listen
 npm.cmd run dev:with-agent
 ```
 

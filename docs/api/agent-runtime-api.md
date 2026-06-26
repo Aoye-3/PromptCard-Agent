@@ -3,7 +3,7 @@
 The maintained frontend contract is the PromptCard Runtime Boundary. In development, Vite proxies:
 
 ```text
-/agent-api/* -> http://127.0.0.1:8001/api/*
+/agent-api/* -> ${PROMPTCARD_AGENT_URL}/api/*
 ```
 
 ## PromptCard Runtime Boundary

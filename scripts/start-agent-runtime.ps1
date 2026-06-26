@@ -34,11 +34,23 @@ if (!$env:DEER_FLOW_EXTENSIONS_CONFIG_PATH) {
 if (!$env:PROMPTCARD_LIBRARY_FILE) {
   $env:PROMPTCARD_LIBRARY_FILE = Join-Path $RepoRoot "data\prompt-library-presets.json"
 }
-$RuntimeEnvironment = Join-Path $env:LOCALAPPDATA "PromptCardAgentRuntime\.venv"
+$RuntimeEnvironment = if ($env:UV_PROJECT_ENVIRONMENT) { $env:UV_PROJECT_ENVIRONMENT } else { Join-Path $BackendRoot ".venv" }
 $BundledPython = "C:\Users\123\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
-$env:GATEWAY_HOST = "127.0.0.1"
-$env:GATEWAY_PORT = "8001"
-$env:GATEWAY_CORS_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
+if (!$env:GATEWAY_HOST) {
+  $env:GATEWAY_HOST = "127.0.0.1"
+}
+if (!$env:GATEWAY_PORT) {
+  $env:GATEWAY_PORT = "8001"
+}
+if (!$env:GATEWAY_CORS_ORIGINS) {
+  $frontendOrigin = if ($env:PROMPTCARD_FRONTEND_URL) {
+    $frontendUri = [System.Uri]$env:PROMPTCARD_FRONTEND_URL
+    "$($frontendUri.Scheme)://$($frontendUri.Host):$($frontendUri.Port)"
+  } else {
+    "http://127.0.0.1:3000"
+  }
+  $env:GATEWAY_CORS_ORIGINS = "$frontendOrigin,http://localhost:$(([System.Uri]$frontendOrigin).Port)"
+}
 if (!$env:AUTH_JWT_SECRET) {
   $env:AUTH_JWT_SECRET = "promptcard-local-agent-runtime-dev-secret"
 }
@@ -58,15 +70,15 @@ Push-Location $BackendRoot
 try {
   $RuntimeUvicorn = Join-Path $RuntimeEnvironment "Scripts\uvicorn.exe"
   if (Test-Path $RuntimeUvicorn) {
-    & $RuntimeUvicorn app.gateway.app:app --host 127.0.0.1 --port 8001
+    & $RuntimeUvicorn app.gateway.app:app --host $env:GATEWAY_HOST --port ([int]$env:GATEWAY_PORT)
   }
   else {
-    $env:UV_CACHE_DIR = Join-Path $env:TEMP "promptcard-agent-uv-cache"
+    $env:UV_CACHE_DIR = if ($env:UV_CACHE_DIR) { $env:UV_CACHE_DIR } else { Join-Path $RepoRoot ".uv-cache" }
     $env:UV_LINK_MODE = "copy"
     $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
     $env:UV_PYTHON = if (Test-Path $BundledPython) { $BundledPython } else { "C:\Program Files\Python311\python.exe" }
     New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
-    uv run uvicorn app.gateway.app:app --host 127.0.0.1 --port 8001
+    uv run uvicorn app.gateway.app:app --host $env:GATEWAY_HOST --port ([int]$env:GATEWAY_PORT)
   }
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

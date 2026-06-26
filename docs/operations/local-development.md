@@ -16,11 +16,11 @@ npm.cmd run test -- --run
 
 Command purposes:
 
-- `dev`: start the Vite frontend on port 3000 with strict port behavior.
-- `dev:with-agent`: start or reuse the storage service, Agent Runtime, and Vite frontend.
+- `dev`: start the Vite frontend. It reads `PROMPTCARD_FRONTEND_PORT` when set and otherwise defaults to port `3000`.
+- `dev:with-agent`: allocate local ports, start or reuse the storage service, Agent Runtime, and Vite frontend, then write `logs/dev-runtime.json`.
 - `tauri:dev`: start the desktop dev shell; closing its window also stops the local PromptCard services it uses.
-- `storage:dev`: start only the local storage service on `127.0.0.1:8002`.
-- `agent:dev`: start only the Agent Runtime.
+- `storage:dev`: start only the local storage service. It reads `PROMPTCARD_STORAGE_HOST` and `PROMPTCARD_STORAGE_PORT`, defaulting to `127.0.0.1:8002`.
+- `agent:dev`: start only the Agent Runtime. It reads `GATEWAY_HOST` and `GATEWAY_PORT`, defaulting to `127.0.0.1:8001`.
 - `agent:check`: validate Agent Runtime config loading.
 - `startup:test`: start from `start.bat` and verify the full local startup flow.
 - `build`: run TypeScript and production Vite build.
@@ -47,23 +47,36 @@ These endpoints are read-only legacy migration helpers. Their `PUT` forms return
 
 ## Runtime Process Health
 
-`npm.cmd run dev:with-agent` checks service health before starting background processes:
+`npm.cmd run dev:with-agent` is the source of truth for full-stack local startup. It chooses ports on `127.0.0.1`, writes them to `logs/dev-runtime.json`, exports matching environment variables, and then checks service health before starting background processes.
 
-- storage: `http://127.0.0.1:8002/health`
-- Agent Runtime: `http://127.0.0.1:8001/health`
-- frontend: `http://127.0.0.1:3000/`
+Runtime manifest shape:
 
-Storage reuse requires service version `2.0.0`, schema version `1`, SQLite capability, and the expected data directory. Frontend reuse also fetches the Vite entry module and rejects a server that exposes raw CommonJS React modules instead of optimized dependencies. An incompatible listener is stopped only when its command line or parent proves ownership by this repository; unknown port owners are never killed automatically.
+```json
+{
+  "frontendUrl": "http://127.0.0.1:<frontend-port>/",
+  "agentUrl": "http://127.0.0.1:<agent-port>",
+  "agentHealthUrl": "http://127.0.0.1:<agent-port>/health",
+  "storageUrl": "http://127.0.0.1:<storage-port>",
+  "storageHealthUrl": "http://127.0.0.1:<storage-port>/health"
+}
+```
 
-The health endpoints above are the source of truth for local startup success. Historical `logs/*.log` files may exist from older runs, but the current hidden background startup path does not require redirected stdout/stderr logs.
+Storage reuse requires service version `2.0.0`, schema version `1`, SQLite capability, and the expected data directory. Frontend reuse also fetches the Vite entry module and rejects a server that exposes raw CommonJS React modules instead of optimized dependencies.
 
-When `%LOCALAPPDATA%\PromptCardAgentRuntime\.venv` already exists, the startup scripts run that environment's `python.exe` and `uvicorn.exe` directly. `uv run` remains the fallback for first-time environment creation.
+The manifest health URLs are the source of truth for local startup success. Historical `logs/*.log` files may exist from older runs, but the current hidden background startup path does not require redirected stdout/stderr logs.
 
-The frontend uses `vite --strictPort`; port 3000 conflicts still fail loudly when the existing listener is not the healthy local frontend.
+When `agent-runtime/backend/.venv` already exists, the startup scripts run that environment's `python.exe` and `uvicorn.exe` directly. `uv run` remains the fallback for first-time environment creation and uses the repository-local `.uv-cache`.
+
+Port selection behavior:
+
+- frontend defaults to port `3000`; if that port is busy and `PROMPTCARD_FRONTEND_PORT` is not set, startup automatically tries the next available local port.
+- agent and storage use dynamic local ports during `dev:with-agent`.
+- explicit `PROMPTCARD_FRONTEND_PORT`, `PROMPTCARD_AGENT_PORT`, or `PROMPTCARD_STORAGE_PORT` values are strict; startup fails if the selected port is occupied.
+- Vite proxies `/agent-api` and `/storage-api` using `PROMPTCARD_AGENT_URL` and `PROMPTCARD_STORAGE_URL`, so frontend business code keeps same-origin relative routes.
 
 ### Blank Browser After Startup
 
-A blank browser at `http://localhost:3000/` with successful health checks usually means the HTML shell loaded but the React bundle did not render. Inspect the current Vite transform errors:
+A blank browser at the `frontendUrl` from `logs/dev-runtime.json` with successful health checks usually means the HTML shell loaded but the React bundle did not render. Inspect the current Vite transform errors:
 
 ```powershell
 Get-Content logs\dev-server.err.log -Tail 120
@@ -75,7 +88,7 @@ Recent root cause seen locally: `src/components/ThreeStageBuilder.tsx` had an un
 npm.cmd run build
 ```
 
-If the build passes and health checks pass, close the old browser tab or stop the existing port 3000 listener before rerunning `npm.cmd run dev:with-agent`; the startup script reuses an already healthy frontend listener.
+If the build passes and health checks pass, open the `frontendUrl` from `logs/dev-runtime.json`. A stale browser tab may still point at an older port.
 
 ### Full Startup Test
 
@@ -87,9 +100,9 @@ npm.cmd run startup:test
 
 The test starts from `start.bat`, skips the interactive pause through `PROMPTCARD_START_SKIP_PAUSE=1`, and verifies:
 
-- storage service health: `http://127.0.0.1:8002/health`
-- Agent Runtime health: `http://127.0.0.1:8001/health`
-- Vite frontend health: `http://127.0.0.1:3000/`
+- storage service health from `logs/dev-runtime.json`
+- Agent Runtime health from `logs/dev-runtime.json`
+- Vite frontend health from `logs/dev-runtime.json`
 - frontend HTML includes the Vite React entry module
 - browser render check shows the project screen without console errors
 
@@ -101,10 +114,12 @@ powershell -ExecutionPolicy Bypass -File scripts\test-start-from-bat.ps1 -SkipBr
 
 ## Runtime Hygiene
 
-Keep generated runtime dependencies and caches out of the repository. The Agent scripts are configured to avoid recreating heavy Python environments inside `agent-runtime/`:
+Keep generated runtime dependencies and caches ignored. The Agent scripts keep generated Python/runtime state inside ignored repository-local paths:
 
-- Python virtual environment: `%LOCALAPPDATA%\PromptCardAgentRuntime\.venv`
-- uv cache: system temp under `promptcard-agent-uv-cache`
+- Python virtual environment: `agent-runtime/backend/.venv`
+- uv cache: `.uv-cache`
+- runtime port manifest: `logs/dev-runtime.json`
+- generated Tauri dynamic dev config: `logs/tauri.dev-runtime.conf.json`
 - DeepSeek key source resolution order:
   1. `PROMPTCARD_AGENT_API_KEY_FILE`
   2. `F:\.Agent-PromptCardManager\API-Key.txt`
@@ -114,17 +129,23 @@ Never commit API keys, local runtime caches, virtual environments, or generated 
 
 ## Troubleshooting
 
-### Port 3000 Is Already In Use
+### Frontend Port Is Already In Use
 
-Find the listener:
+For `npm.cmd run dev`, find the listener:
 
 ```powershell
 Get-NetTCPConnection -LocalPort 3000 -State Listen
 ```
 
-Stop only the known development server process, then restart `npm.cmd run dev`. Because Vite uses strict port mode, this conflict must be fixed before the frontend can start.
+Stop only the known development server process, then restart `npm.cmd run dev`, or set `PROMPTCARD_FRONTEND_PORT` to another available port.
 
-When running `npm.cmd run dev:with-agent`, an existing frontend is reused only when both the HTML shell and transformed entry module pass validation. A broken project-owned Vite listener is replaced; an unknown port owner is reported and left untouched.
+When running `npm.cmd run dev:with-agent`, an unspecified frontend port conflict automatically falls forward from `3000`. If `PROMPTCARD_FRONTEND_PORT` is set, that explicit port is strict and must be free.
+
+Read the active URL from:
+
+```powershell
+Get-Content logs\dev-runtime.json
+```
 
 ### Agent Backend Disconnected
 
@@ -145,7 +166,8 @@ Check that one supported key source exists and contains a usable DeepSeek-style 
 For the PromptCard boundary API, check:
 
 ```powershell
-curl.exe --http1.0 http://localhost:3000/agent-api/promptcard/runtime/status
+$runtime = Get-Content logs\dev-runtime.json -Raw | ConvertFrom-Json
+curl.exe --http1.0 "$($runtime.frontendUrl)agent-api/promptcard/runtime/status"
 ```
 
 If the raw Agent process starts but this endpoint fails, run `npm.cmd run agent:check` and inspect the terminal output first.
@@ -168,7 +190,7 @@ The build may report a CSS warning around slash-containing generated width class
 
 ### Agent Runtime Became Too Large
 
-Check for repo-local virtual environments or caches under `agent-runtime/`. The intended lightweight state keeps virtual environments and uv caches outside the repository.
+Check for unexpected generated files outside the ignored runtime paths. The intended local state is `agent-runtime/backend/.venv`, `.uv-cache`, `agent-runtime/.deer-flow`, `data/`, and `logs/`.
 
 ## Roadmap / Not Yet Implemented
 

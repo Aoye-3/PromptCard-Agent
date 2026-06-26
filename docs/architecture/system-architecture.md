@@ -4,7 +4,7 @@
 
 PromptCard-Manager is a local-first prompt building application with an optional Agent Runtime. The frontend is a Vite, React, TypeScript, Tailwind, and Zustand app. Project and Prompt Library durable data is owned by the local `promptcard-storage` service, which writes SQLite records under `data/` and exposes revision-aware HTTP APIs.
 
-The optional Agent Runtime is a Python service mounted under `agent-runtime/`. The frontend does not call it directly. Instead, Vite proxies runtime traffic through stable frontend routes so the browser can keep one origin during development.
+The optional Agent Runtime is a Python service mounted under `agent-runtime/`. The frontend does not call it directly. Instead, Vite proxies runtime traffic through stable frontend routes so the browser can keep one origin during development. Local startup resolves concrete ports at launch time and records them in `logs/dev-runtime.json`; the architecture depends on route boundaries, not fixed port numbers.
 
 ## Runtime Topology
 
@@ -18,12 +18,13 @@ flowchart TD
   Storage["Storage Facade<br/>src/utils/storage.ts"]
   StorageClient["Storage API Client<br/>src/storage/storage-service-client.ts"]
   BrowserDB["localforage<br/>UI state + one-time migration marker"]
-  StorageService["promptcard-storage<br/>127.0.0.1:8002"]
+  RuntimeManifest["Dev Runtime Manifest<br/>logs/dev-runtime.json"]
+  StorageService["promptcard-storage<br/>dynamic 127.0.0.1 port"]
   Vite["Vite Dev Server<br/>vite.config.ts<br/>vite/plugins"]
   Database["SQLite<br/>data/promptcard.sqlite3"]
   Assets["Image Assets<br/>data/assets/"]
   RuntimeBoundary["PromptCard Runtime API<br/>/api/promptcard/runtime/*"]
-  Runtime["DeerFlow Runtime Internals<br/>agent-runtime/backend<br/>127.0.0.1:8001"]
+  Runtime["DeerFlow Runtime Internals<br/>agent-runtime/backend<br/>dynamic 127.0.0.1 port"]
   DeepSeekConfig["DeepSeek Model Config<br/>agent-runtime/.deer-flow/promptcard-model-config.json"]
   DeepSeek["DeepSeek<br/>https://api.deepseek.com"]
 
@@ -36,6 +37,9 @@ flowchart TD
   Storage --> StorageClient
   Storage --> BrowserDB
   StorageClient --> Vite
+  RuntimeManifest --> Vite
+  RuntimeManifest --> StorageService
+  RuntimeManifest --> Runtime
   Vite --> StorageService
   StorageService --> Database
   StorageService --> Assets
@@ -102,6 +106,18 @@ In development, Vite proxies storage traffic to `promptcard-storage`:
 - `/storage-api/health`
 
 The old `GET /__promptcard/presets` and `GET /__promptcard/projects` routes remain as read-only compatibility middleware. Their `PUT` forms return `410`; the dev shutdown endpoint remains local-only.
+
+### Local Port Discovery Flow
+
+The local startup scripts provide one frontend origin and dynamic internal services:
+
+- `scripts/dev-port-runtime.ps1` chooses available local ports and writes `logs/dev-runtime.json`.
+- `scripts/start-dev-with-agent.ps1` exports `PROMPTCARD_FRONTEND_PORT`, `PROMPTCARD_AGENT_URL`, `PROMPTCARD_STORAGE_URL`, and `PROMPTCARD_STORAGE_HEALTH_URL`.
+- `vite.config.ts` uses those variables for the frontend port and proxy targets.
+- `promptcard_storage.__main__` reads `PROMPTCARD_STORAGE_HOST` and `PROMPTCARD_STORAGE_PORT`.
+- the Agent Runtime reads `GATEWAY_HOST`, `GATEWAY_PORT`, `GATEWAY_CORS_ORIGINS`, and `PROMPTCARD_STORAGE_HEALTH_URL`.
+
+The browser continues to use `/agent-api` and `/storage-api`; only local startup and proxy configuration know the concrete ports.
 
 ## Roadmap / Not Yet Implemented
 

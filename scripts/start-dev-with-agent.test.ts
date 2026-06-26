@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { createServer, type Server } from 'node:http'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 
 const repoRoot = path.resolve(__dirname, '..')
 const scriptPath = path.join(repoRoot, 'scripts', 'start-dev-with-agent.ps1')
+const viteConfigPath = path.join(repoRoot, 'vite.config.ts')
 const powershell = 'powershell'
 const servers: Server[] = []
 const tempDirs: string[] = []
@@ -62,9 +62,37 @@ function startHealthyFrontendServer() {
   })
 }
 
-async function makeMarkerCommand(markerName: string) {
-  const dir = await mkdtemp(path.join(tmpdir(), 'promptcard-startup-test-'))
+function startPortBlocker(port: number) {
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/plain' })
+    response.end('occupied')
+  })
+
+  return new Promise<boolean>((resolve, reject) => {
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EADDRINUSE') {
+        resolve(false)
+        return
+      }
+      reject(error)
+    })
+    server.listen(port, '127.0.0.1', () => {
+      servers.push(server)
+      resolve(true)
+    })
+  })
+}
+
+async function makeRuntimeManifestPath(name: string) {
+  const root = path.join(repoRoot, 'logs')
+  await mkdir(root, { recursive: true })
+  const dir = await mkdtemp(path.join(root, 'startup-test-'))
   tempDirs.push(dir)
+  return path.join(dir, name)
+}
+
+async function makeMarkerCommand(markerName: string) {
+  const dir = path.dirname(await makeRuntimeManifestPath(`${markerName}.runtime.json`))
   const markerPath = path.join(dir, markerName)
   const escapedMarkerPath = markerPath.replace(/'/g, "''")
 
@@ -74,9 +102,9 @@ async function makeMarkerCommand(markerName: string) {
   }
 }
 
-function runPowerShell(args: string[]) {
+function runPowerShell(args: string[], env: NodeJS.ProcessEnv = {}) {
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
-    const child = spawn(powershell, args, { cwd: repoRoot, windowsHide: true })
+    const child = spawn(powershell, args, { cwd: repoRoot, windowsHide: true, env: { ...process.env, ...env } })
     let stdout = ''
     let stderr = ''
 
@@ -99,12 +127,12 @@ async function expectScriptSupportsTestParameters() {
   expect(script).toContain('$StorageHealthUrl')
   expect(script).toContain('$AgentHealthUrl')
   expect(script).toContain('$FrontendUrl')
+  expect(script).toContain('$RuntimeManifestPath')
   expect(script).toContain('$FrontendCommand')
+  expect(script).toContain('New-PromptCardDevRuntime')
+  expect(script).toContain('PROMPTCARD_DEV_RUNTIME_MANIFEST')
   expect(script).toContain('$payload.capabilities.sqlite')
-  expect(script).toContain('Stop-StaleStorageListener')
-  expect(script).toContain('Stop-StaleFrontendListener')
   expect(script).toContain('unoptimized CommonJS React modules')
-  expect(script).toContain('refusing to stop it')
 }
 
 describe('start-dev-with-agent.ps1', () => {
@@ -129,6 +157,7 @@ describe('start-dev-with-agent.ps1', () => {
       startHealthyFrontendServer()
     ])
     const marker = await makeMarkerCommand('frontend-started.txt')
+    const runtimeManifestPath = await makeRuntimeManifestPath('all-healthy-runtime.json')
 
     const result = await runPowerShell([
       '-NoProfile',
@@ -142,6 +171,8 @@ describe('start-dev-with-agent.ps1', () => {
       agentUrl,
       '-FrontendUrl',
       frontendUrl,
+      '-RuntimeManifestPath',
+      runtimeManifestPath,
       '-FrontendCommand',
       marker.command,
       '-HealthTimeoutSeconds',
@@ -157,6 +188,7 @@ describe('start-dev-with-agent.ps1', () => {
     await expectScriptSupportsTestParameters()
     const [storageUrl, agentUrl] = await Promise.all([startHealthyServer(), startHealthyServer()])
     const marker = await makeMarkerCommand('frontend-started.txt')
+    const runtimeManifestPath = await makeRuntimeManifestPath('frontend-missing-runtime.json')
 
     const result = await runPowerShell([
       '-NoProfile',
@@ -170,6 +202,8 @@ describe('start-dev-with-agent.ps1', () => {
       agentUrl,
       '-FrontendUrl',
       'http://127.0.0.1:1/',
+      '-RuntimeManifestPath',
+      runtimeManifestPath,
       '-FrontendCommand',
       marker.command,
       '-HealthTimeoutSeconds',
@@ -179,4 +213,77 @@ describe('start-dev-with-agent.ps1', () => {
     await expect(readFile(marker.markerPath, 'utf8')).resolves.toBe('started\r\n')
     expect(result.code).toBe(0)
   }, 15_000)
+
+  test('falls forward from the preferred frontend port when it is already occupied', async () => {
+    await startPortBlocker(3000)
+    const [storageUrl, agentUrl] = await Promise.all([startHealthyServer(), startHealthyServer()])
+    const marker = await makeMarkerCommand('frontend-started.txt')
+    const runtimeManifestPath = await makeRuntimeManifestPath('frontend-fallback-runtime.json')
+
+    const result = await runPowerShell([
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      scriptPath,
+      '-StorageHealthUrl',
+      storageUrl,
+      '-AgentHealthUrl',
+      agentUrl,
+      '-RuntimeManifestPath',
+      runtimeManifestPath,
+      '-FrontendCommand',
+      marker.command,
+      '-HealthTimeoutSeconds',
+      '2'
+    ])
+
+    const runtime = JSON.parse(await readFile(runtimeManifestPath, 'utf8'))
+    expect(result.code).toBe(0)
+    expect(runtime.frontendUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/)
+    expect(runtime.ports.frontend).not.toBe(3000)
+    await expect(readFile(marker.markerPath, 'utf8')).resolves.toBe('started\r\n')
+  }, 15_000)
+
+  test('fails clearly when an explicit frontend port is occupied', async () => {
+    const occupiedFrontendUrl = await startHealthyFrontendServer()
+    const occupiedPort = new URL(occupiedFrontendUrl).port
+    const [storageUrl, agentUrl] = await Promise.all([startHealthyServer(), startHealthyServer()])
+    const marker = await makeMarkerCommand('frontend-started.txt')
+    const runtimeManifestPath = await makeRuntimeManifestPath('explicit-occupied-runtime.json')
+
+    const result = await runPowerShell([
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      scriptPath,
+      '-StorageHealthUrl',
+      storageUrl,
+      '-AgentHealthUrl',
+      agentUrl,
+      '-RuntimeManifestPath',
+      runtimeManifestPath,
+      '-FrontendCommand',
+      marker.command,
+      '-HealthTimeoutSeconds',
+      '2'
+    ], {
+      PROMPTCARD_FRONTEND_PORT: occupiedPort
+    })
+
+    expect(result.code).not.toBe(0)
+    expect(`${result.stdout}\n${result.stderr}`).toContain(`Frontend port ${occupiedPort} is occupied`)
+    await expect(readFile(marker.markerPath, 'utf8')).rejects.toThrow()
+  }, 15_000)
+
+  test('configures Vite proxy targets from runtime environment variables', async () => {
+    const config = await readFile(viteConfigPath, 'utf8')
+
+    expect(config).toContain('PROMPTCARD_FRONTEND_PORT')
+    expect(config).toContain('PROMPTCARD_AGENT_URL')
+    expect(config).toContain('PROMPTCARD_STORAGE_URL')
+    expect(config).toContain('target: `${agentUrl}/api`')
+    expect(config).toContain('target: `${storageUrl}/api`')
+  })
 })

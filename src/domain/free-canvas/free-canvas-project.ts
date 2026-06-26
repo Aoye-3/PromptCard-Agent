@@ -8,6 +8,8 @@ import {
 import { normalizeThreeStagePages } from '@/domain/three-stage/three-stage-pages'
 import type {
   IFreeCanvasEdge,
+  FreeCanvasImageAnnotationKind,
+  IFreeCanvasImageAnnotation,
   IFreeCanvasImageNode,
   IFreeCanvasNode,
   IFreeCanvasPosition,
@@ -73,8 +75,54 @@ export const createFreeCanvasImageNodeFromMedia = (
   imagePrompt: media.imagePrompt || '',
   sourceNodeId: media.sourceNodeId || null,
   crop: media.crop || null,
+  annotations: [],
   meta: { legacyMediaNodeId: media.id }
 })
+
+export const createFreeCanvasImageAnnotation = (
+  kind: FreeCanvasImageAnnotationKind,
+  timestamp = Date.now()
+): IFreeCanvasImageAnnotation => {
+  const base = {
+    id: `image-annotation-${timestamp}-${kind}-${Math.random().toString(36).slice(2, 8)}`,
+    kind,
+    x: 0.08,
+    y: 0.08,
+    width: 0.24,
+    height: 0.12,
+    color: '#111827',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    meta: {}
+  }
+
+  if (kind === 'rect') {
+    return { ...base, width: 0.28, height: 0.18, fill: '#ffffff' }
+  }
+  if (kind === 'arrow') {
+    return { ...base, x: 0.18, y: 0.18, width: 0.36, height: 0.08, color: '#ef4423' }
+  }
+  if (kind === 'freehand') {
+    return {
+      ...base,
+      width: 0.34,
+      height: 0.18,
+      color: '#ef4423',
+      strokeWidth: 4,
+      points: [
+        { x: 0.08, y: 0.7 },
+        { x: 0.28, y: 0.3 },
+        { x: 0.52, y: 0.58 },
+        { x: 0.78, y: 0.24 },
+        { x: 0.94, y: 0.42 }
+      ]
+    }
+  }
+  if (kind === 'shotNumber') {
+    return { ...base, width: 0.065, height: 0.065, text: '1', color: '#ffffff', fill: '#111827' }
+  }
+  return { ...base, text: 'Text', color: '#111827' }
+}
 
 export const appendFreeCanvasUserText = (
   project: IFreeCanvasProject,
@@ -161,6 +209,88 @@ export const updateFreeCanvasNodePosition = (
 ): IFreeCanvasProject => ({
   ...project,
   nodes: project.nodes.map(node => node.id === nodeId ? { ...node, position: normalizePosition(position) } : node)
+})
+
+export const updateFreeCanvasImageNodeFrame = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  frame: { position?: IFreeCanvasPosition; width: number; height: number }
+): IFreeCanvasProject => ({
+  ...project,
+  nodes: project.nodes.map(node => {
+    if (node.id !== nodeId || node.kind !== 'image') return node
+    return {
+      ...node,
+      position: frame.position ? normalizePosition(frame.position) : node.position,
+      width: Math.max(1, Number(frame.width || node.width)),
+      height: Math.max(1, Number(frame.height || node.height))
+    }
+  })
+})
+
+export const addFreeCanvasImageAnnotation = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  kind: FreeCanvasImageAnnotationKind,
+  timestamp = Date.now()
+): IFreeCanvasProject => insertFreeCanvasImageAnnotation(
+  project,
+  nodeId,
+  createFreeCanvasImageAnnotation(kind, timestamp),
+  timestamp
+)
+
+export const insertFreeCanvasImageAnnotation = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  annotation: IFreeCanvasImageAnnotation,
+  timestamp = Date.now()
+): IFreeCanvasProject => ({
+  ...project,
+  nodes: project.nodes.map(node => node.id === nodeId && node.kind === 'image'
+    ? { ...node, annotations: [...(node.annotations || []), normalizeImageAnnotation(annotation, timestamp)] }
+    : node)
+})
+
+export const updateFreeCanvasImageAnnotation = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  annotationId: string,
+  updates: Partial<Omit<IFreeCanvasImageAnnotation, 'id' | 'kind' | 'createdAt'>>
+): IFreeCanvasProject => ({
+  ...project,
+  nodes: project.nodes.map(node => {
+    if (node.id !== nodeId || node.kind !== 'image') return node
+    return {
+      ...node,
+      annotations: (node.annotations || []).map(annotation => annotation.id === annotationId
+        ? normalizeImageAnnotation({ ...annotation, ...updates, updatedAt: Date.now() }, Date.now())
+        : annotation)
+    }
+  })
+})
+
+export const removeFreeCanvasImageAnnotation = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  annotationId: string
+): IFreeCanvasProject => ({
+  ...project,
+  nodes: project.nodes.map(node => node.id === nodeId && node.kind === 'image'
+    ? { ...node, annotations: (node.annotations || []).filter(annotation => annotation.id !== annotationId) }
+    : node)
+})
+
+export const replaceFreeCanvasImageAnnotations = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  annotations: IFreeCanvasImageAnnotation[],
+  timestamp = Date.now()
+): IFreeCanvasProject => ({
+  ...project,
+  nodes: project.nodes.map(node => node.id === nodeId && node.kind === 'image'
+    ? { ...node, annotations: annotations.map(annotation => normalizeImageAnnotation(annotation, timestamp)) }
+    : node)
 })
 
 export const updateFreeCanvasTextNodeStyle = (
@@ -389,6 +519,7 @@ const normalizeNode = (node: Partial<IFreeCanvasNode>, timestamp: number): IFree
       imagePrompt: node.imagePrompt || '',
       sourceNodeId: node.sourceNodeId || null,
       crop: node.crop || null,
+      annotations: normalizeImageAnnotations(node.annotations, timestamp),
       meta: node.meta || {}
     }
   }
@@ -436,6 +567,61 @@ const normalizePosition = (position: Partial<IFreeCanvasPosition> | undefined): 
   x: Number(position?.x || 0),
   y: Number(position?.y || 0)
 })
+
+const normalizeImageAnnotations = (
+  annotations: IFreeCanvasImageAnnotation[] | undefined,
+  timestamp: number
+): IFreeCanvasImageAnnotation[] =>
+  Array.isArray(annotations)
+    ? annotations.map(annotation => normalizeImageAnnotation(annotation, timestamp))
+    : []
+
+const normalizeImageAnnotation = (
+  annotation: Partial<IFreeCanvasImageAnnotation>,
+  timestamp: number
+): IFreeCanvasImageAnnotation => {
+  const kind = normalizeAnnotationKind(annotation.kind)
+  return {
+    id: annotation.id || `image-annotation-${timestamp}`,
+    kind,
+    x: clampNumber(annotation.x ?? 0.08, 0, 1),
+    y: clampNumber(annotation.y ?? 0.08, 0, 1),
+    width: clampNumber(annotation.width ?? defaultAnnotationSize(kind).width, 0.01, 1),
+    height: clampNumber(annotation.height ?? defaultAnnotationSize(kind).height, 0.01, 1),
+    text: typeof annotation.text === 'string' ? annotation.text : defaultAnnotationText(kind),
+    color: annotation.color || (kind === 'arrow' || kind === 'freehand' ? '#ef4423' : kind === 'shotNumber' ? '#ffffff' : '#111827'),
+    fill: annotation.fill || (kind === 'rect' ? '#ffffff' : kind === 'shotNumber' ? '#111827' : undefined),
+    points: Array.isArray(annotation.points)
+      ? annotation.points.map(point => ({
+        x: clampNumber(point.x, 0, 1),
+        y: clampNumber(point.y, 0, 1)
+      }))
+      : kind === 'freehand' ? createFreeCanvasImageAnnotation('freehand', timestamp).points : undefined,
+    strokeWidth: annotation.strokeWidth ? clampNumber(annotation.strokeWidth, 1, 24) : kind === 'freehand' ? 4 : undefined,
+    createdAt: Number(annotation.createdAt || timestamp),
+    updatedAt: Number(annotation.updatedAt || annotation.createdAt || timestamp),
+    meta: annotation.meta || {}
+  }
+}
+
+const normalizeAnnotationKind = (kind: unknown): FreeCanvasImageAnnotationKind => {
+  if (kind === 'rect' || kind === 'arrow' || kind === 'freehand' || kind === 'shotNumber') return kind
+  return 'text'
+}
+
+const defaultAnnotationSize = (kind: FreeCanvasImageAnnotationKind): { width: number; height: number } => {
+  if (kind === 'shotNumber') return { width: 0.065, height: 0.065 }
+  if (kind === 'rect') return { width: 0.28, height: 0.18 }
+  if (kind === 'arrow') return { width: 0.36, height: 0.08 }
+  if (kind === 'freehand') return { width: 0.34, height: 0.18 }
+  return { width: 0.24, height: 0.12 }
+}
+
+const defaultAnnotationText = (kind: FreeCanvasImageAnnotationKind): string | undefined => {
+  if (kind === 'shotNumber') return '1'
+  if (kind === 'text') return 'Text'
+  return undefined
+}
 
 const normalizeViewport = (viewport: Partial<IFreeCanvasViewport> | null | undefined): IFreeCanvasViewport | null => {
   if (!viewport) return null

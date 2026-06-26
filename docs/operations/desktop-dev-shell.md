@@ -6,7 +6,7 @@ The desktop dev shell is a Tauri window for local self-use while the source tree
 
 - Starts or reuses the local storage service, Agent Runtime, and Vite frontend.
 - Opens a desktop window titled `PromptCard Manager Dev Shell`.
-- Loads `http://127.0.0.1:3000/`, so Vite hot reload still reflects source edits.
+- Loads the `frontendUrl` recorded in `logs/dev-runtime.json`, so Vite hot reload still reflects source edits even when port `3000` is already occupied.
 - Stops the local storage service, Agent Runtime, and Vite frontend when the desktop window closes.
 - Shows a desktop-only source update action under the Me screen settings.
 
@@ -28,7 +28,15 @@ Or double-click:
 start-desktop.bat
 ```
 
-The desktop launcher starts or reuses local services, then directly runs the existing debug shell when it is newer than the Rust sources and Tauri configuration. This skips the `tauri dev` compile/watch startup on normal launches. Changes under `src-tauri/src/`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, or `src-tauri/build.rs` automatically use the slower rebuild path once. The launcher remains visible with progress until the application window is detected.
+The desktop launcher starts or reuses local services, waits for `logs/dev-runtime.json`, then directly runs the existing debug shell when it is newer than the Rust sources and Tauri configuration and the frontend still uses port `3000`. This skips the `tauri dev` compile/watch startup on normal launches. Changes under `src-tauri/src/`, `src-tauri/tauri.conf.json`, `src-tauri/capabilities/default.json`, `src-tauri/Cargo.toml`, or `src-tauri/build.rs` automatically use the slower rebuild path once. The launcher remains visible with progress until the application window is detected.
+
+When the selected frontend port is not `3000`, the launcher writes an ignored Tauri runtime config at:
+
+```text
+logs/tauri.dev-runtime.conf.json
+```
+
+It then starts `tauri dev --config <that file>` so the webview points at the actual `frontendUrl`.
 
 To deliberately rebuild the shell while diagnosing native changes, run:
 
@@ -44,7 +52,7 @@ Tauri runs:
 npm.cmd run desktop:dev-services
 ```
 
-That script delegates to `scripts/start-dev-with-agent.ps1`. For self-use development, it defaults to the normal repository-local data and runtime paths so the same data can be backed up through Git.
+That script delegates to `scripts/start-dev-with-agent.ps1`. For self-use development, it defaults to the normal repository-local data and runtime paths so the same data can be backed up through Git. Startup details, including the actual frontend, Agent Runtime, and storage URLs, are recorded in `logs/dev-runtime.json`.
 
 ## Data Profile
 
@@ -67,23 +75,23 @@ $env:PROMPTCARD_DESKTOP_USE_APPDATA_PROFILE = "1"
 That optional mode uses:
 
 ```text
-%APPDATA%\PromptCard-Manager\dev-profile
+logs/desktop-profile
 ```
 
 It passes profile paths to the existing services with environment variables:
 
 ```text
-PROMPTCARD_STORAGE_DATA_DIR=<dev-profile>\data
-DEER_FLOW_HOME=<dev-profile>\agent-runtime\.deer-flow
-PROMPTCARD_LIBRARY_FILE=<dev-profile>\data\prompt-library-presets.json
-PROMPTCARD_LOGS_DIR=<dev-profile>\logs
+PROMPTCARD_STORAGE_DATA_DIR=<desktop-profile>\data
+DEER_FLOW_HOME=<desktop-profile>\agent-runtime\.deer-flow
+PROMPTCARD_LIBRARY_FILE=<desktop-profile>\data\prompt-library-presets.json
+PROMPTCARD_LOGS_DIR=<desktop-profile>\logs
 ```
 
 Plain `npm.cmd run dev:with-agent` keeps the same repository-local development behavior.
 
 ## Shutdown Behavior
 
-Closing the Tauri window stops the local PromptCard services on ports `3000`, `8001`, and `8002` when their process command line matches this source tree or the PromptCard startup commands. This is the default desktop-shell behavior because self-use should feel like closing one local app.
+Closing the Tauri window stops the local PromptCard services resolved through the dev runtime manifest. This is the default desktop-shell behavior because self-use should feel like closing one local app.
 
 Closing only the `start-desktop.bat` launcher terminal does not stop the desktop shell. Use the app window close button when you want the desktop shell and local services to shut down together.
 
@@ -107,7 +115,7 @@ It uses the system Git credentials. The app does not store GitHub tokens or PATs
 - This is a development shell, not an installer.
 - It does not perform dependency installation after pulling source changes.
 - It does not migrate data during `git pull`.
-- AppData profile mode is opt-in for now. If it is enabled and an existing service is already bound to the expected port with a different data directory, startup fails instead of silently reusing it.
+- Desktop profile mode is opt-in for now. If it is enabled and an existing service is already healthy but points at a different data directory, startup fails instead of silently reusing it.
 - Before public distribution, remove personal data from the source tree and switch the default profile to AppData.
 
 ## Application Icon

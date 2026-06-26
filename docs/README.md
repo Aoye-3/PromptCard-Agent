@@ -19,7 +19,7 @@ This is the single entry point for the maintained project documentation. Histori
 
 PromptCard-Manager is a local-first Vite, React, TypeScript application with an optional Python Agent Runtime under `agent-runtime/`. Project and Prompt Library durable data is owned by the local `promptcard-storage` service; the frontend only keeps runtime UI state and compatibility-only browser migration markers.
 
-The Tauri desktop dev shell opens the same Vite app in a native window while keeping the source tree editable. Self-use development defaults to repository-local data so the private GitHub repository can back up the complete `data/` directory. The `%APPDATA%\PromptCard-Manager\dev-profile` layout is an opt-in future distribution profile; see [Desktop Dev Shell](./operations/desktop-dev-shell.md) and [Local App Data Layout](./database/local-app-data-layout.md).
+The Tauri desktop dev shell opens the same Vite app in a native window while keeping the source tree editable. Self-use development defaults to repository-local data so the private GitHub repository can back up the complete `data/` directory. The optional desktop profile currently defaults to ignored repository-local `logs/desktop-profile`; see [Desktop Dev Shell](./operations/desktop-dev-shell.md) and [Local App Data Layout](./database/local-app-data-layout.md).
 
 ## Product Vision
 

@@ -40,13 +40,48 @@ preset content as a red `preset` segment; later typing creates or updates black 
 ## Images and Edges
 
 - Image uploads still go through the image asset service and store durable `assetId` references.
-- Image nodes keep width, height, optional crop rectangles, and source node metadata.
+- Image nodes keep width, height, optional crop rectangles, source node metadata, and image-local annotations.
 - The bottom toolbar exposes `Image`, not `Arrow`. `Image` opens a local file picker for PNG, JPEG, and WebP files.
 - Multiple selected image files are uploaded through the same path as drag/drop images and become multiple image nodes with the existing upload offset behavior.
 - Image nodes render only the image body. The canvas UI may show a selection ring or React Flow handles, but the node does not add a white card background or padding around the image content.
+- Single selected image nodes expose a compact node toolbar with only `Edit image annotations` and `Crop image`.
+- Image resizing uses React Flow `NodeResizer` with aspect-ratio preservation. Resize commits write back the image node frame, while image-local annotations keep their normalized positions.
 - Existing `arrow` nodes remain supported for loading, rendering, and deletion, but the UI no longer has an active arrow creation button.
 - Removing any node removes connected Free Canvas edges.
 - Deleting the final node is valid and leaves an empty canvas.
+
+## Image Annotations
+
+`ImageAnnotationEditor` owns all editable image annotation interactions. The canvas image node itself only displays saved annotations and must not host inline inputs, drawing gestures, or draggable annotation controls.
+
+Supported annotation kinds:
+
+- `text`: movable text box with editable content.
+- `rect`: white rectangle overlay with resize handles.
+- `arrow`: two-point arrow created by press-drag-release.
+- `freehand`: freehand path created by press-drag-release.
+- `shotNumber`: black square with editable white number text.
+
+Annotation coordinates are normalized to the image bounds (`0..1`) and live in `IFreeCanvasImageNode.annotations`. They are not independent React Flow nodes. Moving or resizing the image node must preserve each annotation's relative placement.
+
+The editor uses a type-mode filter:
+
+- Opening the editor starts with no active annotation mode.
+- Toolbar buttons only enter a mode; they do not create annotations directly.
+- In `text`, `rect`, or `shotNumber` mode, clicking empty image space creates that kind of annotation.
+- In `arrow` or `freehand` mode, press-drag-release on empty image space creates the annotation.
+- Only annotations whose `kind` matches the active mode can be selected, moved, resized, edited, or deleted.
+- Other annotation kinds remain visible but are pointer-inert and show no selection frame, delete button, resize handles, or arrow endpoints.
+
+The editor uses local draft history. Undo/redo, creation, move, resize, delete, freehand completion, and arrow completion update only the modal draft until `Save annotations` replaces the image node annotations. `Cancel` discards the draft.
+
+Keyboard and pointer events are isolated while the annotation or crop modal is open:
+
+- React Flow deletion is disabled with `deleteKeyCode={null}` while a modal is open.
+- The modal captures keyboard, pointer, mouse, and click events so they do not reach the canvas.
+- `Delete` / `Backspace` delete only the selected annotation of the current mode.
+- Text and shot-number inputs keep normal text-editing behavior for `Delete` / `Backspace`.
+- Arrow and freehand drawing or movement must end on `pointerup`, `pointercancel`, `lostpointercapture`, `blur`, or when pointer movement reports no pressed buttons.
 
 ## Image Cropping
 
@@ -96,6 +131,8 @@ npm.cmd run build
 
 Manual checks should cover creating an empty Free Canvas project, adding free text, adding a
 quick-message text node, changing text size/color, selecting multiple nodes, deleting the last
-node, adding images by toolbar/drag/paste, cropping an image from each edge direction, connecting
-nodes, switching the side panel between Agent and Prompt library preview, and approving a
-`free_canvas_text_update` proposal.
+node, adding images by toolbar/drag/paste, resizing a single selected image, opening the image
+annotation editor, verifying mode-filtered annotation editing, checking that modal `Delete` never
+deletes the image node, confirming arrow/freehand gestures stop on pointer release, cropping an
+image from each edge direction, connecting nodes, switching the side panel between Agent and
+Prompt library preview, and approving a `free_canvas_text_update` proposal.

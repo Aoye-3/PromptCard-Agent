@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent as ReactChangeEvent, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ChangeEvent as ReactChangeEvent, type ClipboardEvent as ReactClipboardEvent, type DragEvent as ReactDragEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import {
   Background,
   BackgroundVariant,
   Controls,
   Handle,
   MiniMap,
+  NodeResizer,
   NodeToolbar,
   Position,
   ReactFlow,
@@ -24,7 +25,7 @@ import {
   useReactFlow
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ArrowLeft, Bot, BookOpen, ChevronRight, Image as ImageIcon, MessageSquare, MousePointer2, Palette, Pencil, Plus, Save, Trash2, Type, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bot, BookOpen, Brush, ChevronRight, Hash, Image as ImageIcon, MessageSquare, MousePointer2, Palette, Pencil, Plus, Redo2, Save, Scissors, Square, Trash2, Type, Undo2, X } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { PromptLibraryPreviewPanel } from '@/components/PromptLibraryPreviewMode'
 import { PromptPresetPreviewDialog } from '@/components/prompt-media/PromptPresetPreviewDialog'
@@ -33,10 +34,13 @@ import { canvasImageAssetUrl, getClipboardImageFiles, isFileDrag, isSupportedIma
 import { createFreeCanvasCroppedNodes, type FreeCanvasCropLines, type FreeCanvasMediaNode } from '@/domain/free-canvas/free-canvas'
 import {
   createFreeCanvasImageNodeFromMedia,
+  createFreeCanvasImageAnnotation,
   createFreeCanvasTextNode,
   createQuickTextNode,
   replaceFreeCanvasTextRange,
+  replaceFreeCanvasImageAnnotations,
   removeFreeCanvasProjectNodes,
+  updateFreeCanvasImageNodeFrame,
   updateFreeCanvasNodePosition,
   updateFreeCanvasTextNodeStyle,
   updateFreeCanvasTextNodeUserText
@@ -47,7 +51,7 @@ import { useI18n } from '@/i18n'
 import { usePresetStore } from '@/stores/preset.store'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
-import type { IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IFreeCanvasTextSegment, IPromptProject } from '@/models/PromptHistory.model'
+import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IFreeCanvasTextSegment, IPromptProject } from '@/models/PromptHistory.model'
 
 interface FreeCanvasBuilderScreenProps {
   activeProject: IPromptProject
@@ -65,6 +69,9 @@ type FreeCanvasFlowNodeData = {
   onEdit: (nodeId: string | null) => void
   onTextRangeReplace: (nodeId: string, range: { start: number; end: number }, insertedText: string, color: string) => void
   onTextStyleChange: (nodeId: string, updates: Parameters<typeof updateFreeCanvasTextNodeStyle>[2]) => void
+  onImageResize: (nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => void
+  onStartImageAnnotationEdit: (nodeId: string) => void
+  onStartImageCrop: (nodeId: string) => void
 }
 
 type FreeCanvasFlowNode = Node<FreeCanvasFlowNodeData>
@@ -140,11 +147,16 @@ const FreeCanvasBuilderInner = ({
   const [clipboardNotice, setClipboardNotice] = useState<string | null>(null)
   const [fileDragActive, setFileDragActive] = useState(false)
   const [cropNodeId, setCropNodeId] = useState<string | null>(null)
+  const [annotationEditorNodeId, setAnnotationEditorNodeId] = useState<string | null>(null)
   const selectedNode = freeCanvas.nodes.find(node => node.id === freeCanvas.selectedNodeId) || null
   const selectedImageNode = selectedNode?.kind === 'image' ? selectedNode : null
   const cropNode = cropNodeId
     ? freeCanvas.nodes.find((node): node is IFreeCanvasImageNode => node.id === cropNodeId && node.kind === 'image')
     : null
+  const annotationEditorNode = annotationEditorNodeId
+    ? freeCanvas.nodes.find((node): node is IFreeCanvasImageNode => node.id === annotationEditorNodeId && node.kind === 'image')
+    : null
+  const isCanvasKeyboardLocked = Boolean(annotationEditorNode || cropNode)
   const freeCanvasRef = useRef(freeCanvas)
   const selectedImageNodeRef = useRef<IFreeCanvasImageNode | null>(selectedImageNode)
   const copiedImageNodeRef = useRef<IFreeCanvasImageNode | null>(null)
@@ -254,6 +266,7 @@ const FreeCanvasBuilderInner = ({
 
   useEffect(() => {
     const handleCopy = (event: KeyboardEvent) => {
+      if (annotationEditorNodeId || cropNodeId) return
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c' || isTypingTarget(event.target)) return
       const imageNode = selectedImageNodeRef.current
       if (!imageNode) return
@@ -263,6 +276,7 @@ const FreeCanvasBuilderInner = ({
     }
 
     const handlePaste = (event: ClipboardEvent) => {
+      if (annotationEditorNodeId || cropNodeId) return
       if (isTypingTarget(event.target)) return
       const files = getClipboardImageFiles(event.clipboardData)
       if (files.length > 0) {
@@ -280,6 +294,12 @@ const FreeCanvasBuilderInner = ({
         title: `${copied.title} 副本`,
         position: { x: copied.position.x + 28, y: copied.position.y + 28 },
         crop: copied.crop ? { ...copied.crop } : null,
+        annotations: (copied.annotations || []).map(annotation => ({
+          ...annotation,
+          id: `image-annotation-copy-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          points: annotation.points?.map(point => ({ ...point })) || undefined,
+          meta: { ...annotation.meta, duplicatedFromAnnotationId: annotation.id }
+        })),
         meta: { ...copied.meta, duplicatedFromNodeId: copied.id }
       }
       onChange({
@@ -296,7 +316,7 @@ const FreeCanvasBuilderInner = ({
       window.removeEventListener('keydown', handleCopy)
       document.removeEventListener('paste', handlePaste)
     }
-  }, [addImageFiles, onChange, reactFlow])
+  }, [addImageFiles, annotationEditorNodeId, cropNodeId, onChange, reactFlow])
 
   const replaceTextRange = useCallback((nodeId: string, range: { start: number; end: number }, insertedText: string, color: string) => {
     onChange(replaceFreeCanvasTextRange(freeCanvas, nodeId, range, insertedText, color))
@@ -306,19 +326,32 @@ const FreeCanvasBuilderInner = ({
     onChange(updateFreeCanvasTextNodeStyle(freeCanvas, nodeId, updates))
   }, [freeCanvas, onChange])
 
+  const resizeImageNode = useCallback((nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => {
+    onChange(updateFreeCanvasImageNodeFrame(freeCanvas, nodeId, frame))
+  }, [freeCanvas, onChange])
+
+  const saveImageAnnotations = useCallback((nodeId: string, annotations: IFreeCanvasImageAnnotation[]) => {
+    onChange(replaceFreeCanvasImageAnnotations(freeCanvas, nodeId, annotations))
+    setAnnotationEditorNodeId(null)
+  }, [freeCanvas, onChange])
+
   const nodes = useMemo<FreeCanvasFlowNode[]>(() => freeCanvas.nodes.map(node => ({
     id: node.id,
     type: 'freeCanvasNode',
     position: node.position,
     selected: node.id === freeCanvas.selectedNodeId,
+    style: node.kind === 'image' ? { width: node.width, height: node.height } : undefined,
     data: {
       canvasNode: node,
       editing: editingNodeId === node.id,
       onEdit: setEditingNodeId,
       onTextRangeReplace: replaceTextRange,
-      onTextStyleChange: updateTextStyle
+      onTextStyleChange: updateTextStyle,
+      onImageResize: resizeImageNode,
+      onStartImageAnnotationEdit: setAnnotationEditorNodeId,
+      onStartImageCrop: setCropNodeId
     }
-  })), [editingNodeId, freeCanvas.nodes, freeCanvas.selectedNodeId, replaceTextRange, updateTextStyle])
+  })), [editingNodeId, freeCanvas.nodes, freeCanvas.selectedNodeId, replaceTextRange, resizeImageNode, updateTextStyle])
 
   const [flowNodes, setFlowNodes] = useState<FreeCanvasFlowNode[]>(nodes)
   useEffect(() => setFlowNodes(nodes), [nodes])
@@ -346,7 +379,7 @@ const FreeCanvasBuilderInner = ({
       setFlowNodes(current => applyNodeChanges(nonRemovalChanges, current) as FreeCanvasFlowNode[])
     }
     const removedNodeIds = changes.filter(change => change.type === 'remove').map(change => change.id)
-    if (removedNodeIds.length > 0) {
+    if (removedNodeIds.length > 0 && !isCanvasKeyboardLocked) {
       onChange(removeFreeCanvasProjectNodes(freeCanvas, removedNodeIds))
       setEditingNodeId(current => current && removedNodeIds.includes(current) ? null : current)
     }
@@ -517,7 +550,7 @@ const FreeCanvasBuilderInner = ({
           nodes={flowNodes}
           edges={edges}
           nodeTypes={nodeTypes}
-          deleteKeyCode={editingNodeId ? null : ['Backspace', 'Delete']}
+          deleteKeyCode={editingNodeId || isCanvasKeyboardLocked ? null : ['Backspace', 'Delete']}
           onNodesChange={handleNodesChange}
           onNodeClick={handleNodeClick}
           onNodeDoubleClick={handleNodeDoubleClick}
@@ -597,6 +630,14 @@ const FreeCanvasBuilderInner = ({
             imageUrl={cropNode.assetId ? canvasImageAssetUrl(cropNode.assetId) : cropNode.imageUrl || ''}
             onCancel={cancelImageCrop}
             onConfirm={confirmImageCrop}
+          />
+        )}
+        {annotationEditorNode && (
+          <ImageAnnotationEditor
+            node={annotationEditorNode}
+            imageUrl={annotationEditorNode.assetId ? canvasImageAssetUrl(annotationEditorNode.assetId) : annotationEditorNode.imageUrl || ''}
+            onCancel={() => setAnnotationEditorNodeId(null)}
+            onSave={annotations => saveImageAnnotations(annotationEditorNode.id, annotations)}
           />
         )}
       </div>
@@ -679,7 +720,15 @@ const FreeCanvasNode = ({ data, selected }: NodeProps<FreeCanvasFlowNode>) => {
     )
   }
   if (node.kind === 'image') {
-    return <FreeCanvasImageNodeView node={node} selected={selected} />
+    return (
+      <FreeCanvasImageNodeView
+        node={node}
+        selected={selected}
+        onResize={data.onImageResize}
+        onStartAnnotationEdit={data.onStartImageAnnotationEdit}
+        onStartImageCrop={data.onStartImageCrop}
+      />
+    )
   }
   return <FreeCanvasArrowNodeView node={node} selected={selected} />
 }
@@ -818,7 +867,20 @@ const FreeCanvasTextNodeView = ({
   )
 }
 
-const FreeCanvasImageNodeView = ({ node, selected }: { node: IFreeCanvasImageNode; selected: boolean }) => {
+const FreeCanvasImageNodeView = ({
+  node,
+  selected,
+  onResize,
+  onStartAnnotationEdit,
+  onStartImageCrop
+}: {
+  node: IFreeCanvasImageNode
+  selected: boolean
+  onResize: (nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => void
+  onStartAnnotationEdit: (nodeId: string) => void
+  onStartImageCrop: (nodeId: string) => void
+}) => {
+  const selectedNodeCount = useStore(state => state.nodes.filter(candidate => candidate.selected).length)
   const imageUrl = node.assetId ? canvasImageAssetUrl(node.assetId) : node.imageUrl
   const crop = node.crop
   const imageStyle = crop ? {
@@ -827,8 +889,32 @@ const FreeCanvasImageNodeView = ({ node, selected }: { node: IFreeCanvasImageNod
     left: `${-crop.x / crop.width * 100}%`,
     top: `${-crop.y / crop.height * 100}%`
   } : undefined
+
   return (
-    <div data-image-node className={`group relative overflow-visible ${selected ? 'ring-2 ring-[#c96442]' : ''}`} style={{ width: node.width, height: node.height }}>
+    <div data-image-node className={`group relative h-full w-full overflow-visible ${selected ? 'ring-2 ring-[#c96442]' : ''}`}>
+      <NodeResizer
+        isVisible={selected && selectedNodeCount === 1}
+        keepAspectRatio
+        minWidth={80}
+        minHeight={60}
+        color="#0ea5e9"
+        handleStyle={{ width: 10, height: 10, border: '2px solid #0ea5e9', background: '#ffffff' }}
+        lineStyle={{ borderColor: '#0ea5e9', borderWidth: 1.5 }}
+        onResizeEnd={(_event, params) => {
+          onResize(node.id, {
+            position: { x: params.x, y: params.y },
+            width: params.width,
+            height: params.height
+          })
+        }}
+      />
+      <NodeToolbar isVisible={selected && selectedNodeCount === 1} position={Position.Top} offset={10}>
+        <ImageNodeToolbar
+          canCrop={Boolean(node.assetId && !node.crop)}
+          onEdit={() => onStartAnnotationEdit(node.id)}
+          onCrop={() => onStartImageCrop(node.id)}
+        />
+      </NodeToolbar>
       <Handle type="target" position={Position.Left} className="!bg-gray-950 !opacity-0 group-hover:!opacity-100" />
       <div className="relative h-full w-full overflow-hidden">
         {imageUrl ? (
@@ -845,11 +931,1401 @@ const FreeCanvasImageNodeView = ({ node, selected }: { node: IFreeCanvasImageNod
             Drop image
           </div>
         )}
+        <ImageAnnotationsLayer
+          annotations={node.annotations || []}
+          mode="display"
+        />
       </div>
       <Handle type="source" position={Position.Right} className="!bg-gray-950 !opacity-0 group-hover:!opacity-100" />
     </div>
   )
 }
+
+const ImageNodeToolbar = ({
+  canCrop,
+  onEdit,
+  onCrop
+}: {
+  canCrop: boolean
+  onEdit: () => void
+  onCrop: () => void
+}) => (
+  <div
+    className="nodrag nowheel flex items-center gap-1 rounded-full border border-gray-200 bg-gray-950 px-3 py-2 text-white shadow-[0_18px_60px_rgba(15,23,42,0.22)]"
+    onPointerDown={event => event.stopPropagation()}
+    onMouseDown={event => event.stopPropagation()}
+    onClick={event => event.stopPropagation()}
+  >
+    <ImageToolbarButton title="Edit image annotations" onClick={onEdit}><Pencil className="h-4 w-4" /></ImageToolbarButton>
+    {canCrop && (
+      <>
+        <div className="mx-1 h-6 w-px bg-white/20" />
+        <ImageToolbarButton title="Crop image" onClick={onCrop}><Scissors className="h-4 w-4" /></ImageToolbarButton>
+      </>
+    )}
+  </div>
+)
+
+const ImageToolbarButton = ({
+  title,
+  active = false,
+  onClick,
+  children
+}: {
+  title: string
+  active?: boolean
+  onClick: () => void
+  children: ReactNode
+}) => (
+  <button
+    type="button"
+    className={`nodrag flex h-8 w-8 items-center justify-center rounded-full transition ${active ? 'bg-white text-gray-950' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+    title={title}
+    aria-label={title}
+    onPointerDown={event => event.stopPropagation()}
+    onMouseDown={event => event.stopPropagation()}
+    onClick={event => {
+      event.stopPropagation()
+      onClick()
+    }}
+  >
+    {children}
+  </button>
+)
+
+type ImageAnnotationHistory = {
+  past: IFreeCanvasImageAnnotation[][]
+  present: IFreeCanvasImageAnnotation[]
+  future: IFreeCanvasImageAnnotation[][]
+}
+
+type ImageAnnotationResizeHandle = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se'
+
+const IMAGE_ANNOTATION_RESIZE_HANDLES: ImageAnnotationResizeHandle[] = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
+const SHOT_NUMBER_RESIZE_HANDLES: ImageAnnotationResizeHandle[] = ['nw', 'ne', 'se', 'sw']
+const IMAGE_ANNOTATION_MODE_LABELS: Record<FreeCanvasImageAnnotationKind, string> = {
+  text: 'Text',
+  rect: 'Rectangle',
+  arrow: 'Arrow',
+  freehand: 'Brush',
+  shotNumber: 'Shot number'
+}
+
+const ImageAnnotationsLayer = ({
+  annotations,
+  mode,
+  activeAnnotationMode = null,
+  selectedAnnotationId = null,
+  editingTextAnnotationId = null,
+  interactive = false,
+  onSelect,
+  onClearSelection,
+  onBeginTextEdit,
+  onEndTextEdit,
+  onLiveChange,
+  onCommitChange,
+  onDelete
+}: {
+  annotations: IFreeCanvasImageAnnotation[]
+  mode: 'display' | 'edit'
+  activeAnnotationMode?: FreeCanvasImageAnnotationKind | null
+  selectedAnnotationId?: string | null
+  editingTextAnnotationId?: string | null
+  interactive?: boolean
+  onSelect?: (annotationId: string) => void
+  onClearSelection?: () => void
+  onBeginTextEdit?: (annotationId: string) => void
+  onEndTextEdit?: () => void
+  onLiveChange?: (annotations: IFreeCanvasImageAnnotation[]) => void
+  onCommitChange?: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void
+  onDelete?: (annotationId: string) => void
+}) => (
+  <div
+    className={`absolute inset-0 ${mode === 'display' || !interactive ? 'pointer-events-none' : ''}`}
+    onPointerDown={event => {
+      if (event.target === event.currentTarget) onClearSelection?.()
+    }}
+  >
+    {annotations.map(annotation => {
+      const editable = mode === 'edit' && interactive && annotation.kind === activeAnnotationMode
+      return (
+        <ImageAnnotationItem
+          key={annotation.id}
+          annotation={annotation}
+          annotations={annotations}
+          editable={editable}
+          selected={editable && annotation.id === selectedAnnotationId}
+          editing={editable && annotation.id === editingTextAnnotationId}
+          onSelect={onSelect}
+          onBeginTextEdit={onBeginTextEdit}
+          onEndTextEdit={onEndTextEdit}
+          onLiveChange={onLiveChange}
+          onCommitChange={onCommitChange}
+          onDelete={onDelete}
+        />
+      )
+    })}
+  </div>
+)
+
+const ImageAnnotationItem = ({
+  annotation,
+  annotations,
+  editable,
+  selected,
+  editing,
+  onSelect,
+  onBeginTextEdit,
+  onEndTextEdit,
+  onLiveChange,
+  onCommitChange,
+  onDelete
+}: {
+  annotation: IFreeCanvasImageAnnotation
+  annotations: IFreeCanvasImageAnnotation[]
+  editable: boolean
+  selected: boolean
+  editing: boolean
+  onSelect?: (annotationId: string) => void
+  onBeginTextEdit?: (annotationId: string) => void
+  onEndTextEdit?: () => void
+  onLiveChange?: (annotations: IFreeCanvasImageAnnotation[]) => void
+  onCommitChange?: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void
+  onDelete?: (annotationId: string) => void
+}) => {
+  if (annotation.kind === 'freehand') {
+    return (
+      <>
+        <svg className={`absolute inset-0 h-full w-full ${editable ? 'pointer-events-auto' : 'pointer-events-none'}`} viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+          <polyline
+            points={(annotation.points || []).map(point => `${point.x},${point.y}`).join(' ')}
+            fill="none"
+            stroke={annotation.color}
+            strokeWidth={(annotation.strokeWidth || 4) / 500}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={editable ? 'cursor-pointer' : ''}
+            pointerEvents={editable ? 'stroke' : 'none'}
+            onPointerDown={editable ? event => {
+              if (onLiveChange && onCommitChange) {
+                startFreehandMove(event, annotation, annotations, onLiveChange, onCommitChange, onSelect)
+                return
+              }
+              event.preventDefault()
+              event.stopPropagation()
+              onSelect?.(annotation.id)
+            } : undefined}
+          />
+        </svg>
+        {editable && selected && (
+          <AnnotationSelectionFrame
+            annotation={annotation}
+            onDelete={() => onDelete?.(annotation.id)}
+            onMovePointerDown={event => {
+              if (!onLiveChange || !onCommitChange) return
+              startFreehandBoxMove(event, annotation, annotations, onLiveChange, onCommitChange, onSelect)
+            }}
+          />
+        )}
+      </>
+    )
+  }
+
+  if (annotation.kind === 'arrow' && annotation.points && annotation.points.length >= 2) {
+    return (
+      <PointArrowAnnotation
+        annotation={annotation}
+        annotations={annotations}
+        editable={editable}
+        selected={selected}
+        onSelect={onSelect}
+        onLiveChange={onLiveChange}
+        onCommitChange={onCommitChange}
+        onDelete={onDelete}
+      />
+    )
+  }
+
+  const style: CSSProperties = {
+    left: `${annotation.x * 100}%`,
+    top: `${annotation.y * 100}%`,
+    width: `${annotation.width * 100}%`,
+    ...(annotation.kind === 'shotNumber'
+      ? { aspectRatio: '1 / 1' }
+      : { height: `${annotation.height * 100}%` })
+  }
+
+  return (
+    <div
+      className={`absolute ${editable ? 'nodrag nowheel' : 'pointer-events-none'} ${selected ? 'ring-2 ring-sky-500' : ''}`}
+      style={style}
+      onPointerDown={editable && onLiveChange && onCommitChange ? event => startBoxAnnotationDrag(event, annotation, annotations, onLiveChange, onCommitChange, onSelect) : undefined}
+      onDoubleClick={editable && (annotation.kind === 'text' || annotation.kind === 'shotNumber') ? event => {
+        event.preventDefault()
+        event.stopPropagation()
+        onSelect?.(annotation.id)
+        onBeginTextEdit?.(annotation.id)
+      } : undefined}
+      data-image-annotation-kind={annotation.kind}
+      data-selected={selected || undefined}
+    >
+      {annotation.kind === 'rect' ? (
+        <div className="h-full w-full border border-gray-950/70" style={{ backgroundColor: annotation.fill || '#ffffff' }} />
+      ) : annotation.kind === 'arrow' ? (
+        <ArrowAnnotation color={annotation.color} id={annotation.id} />
+      ) : annotation.kind === 'shotNumber' ? (
+        editable && editing ? (
+          <input
+            className="h-full w-full border-0 text-center text-lg font-black leading-none outline-none"
+            style={{ backgroundColor: annotation.fill || '#111827', color: annotation.color || '#ffffff' }}
+            value={annotation.text || ''}
+            maxLength={4}
+            inputMode="numeric"
+            onChange={event => onLiveChange?.(replaceImageAnnotation(annotations, annotation.id, { text: event.target.value, updatedAt: Date.now() }))}
+            onBlur={event => {
+              onCommitChange?.(replaceImageAnnotation(annotations, annotation.id, { text: event.currentTarget.value, updatedAt: Date.now() }), annotation.id)
+              onEndTextEdit?.()
+            }}
+            onKeyDown={event => {
+              if (event.key === 'Escape' || event.key === 'Enter') {
+                event.currentTarget.blur()
+              }
+            }}
+            onPointerDown={event => event.stopPropagation()}
+            aria-label="Shot number"
+            autoFocus
+          />
+        ) : (
+          <div
+            className="flex h-full w-full cursor-move items-center justify-center text-lg font-black leading-none"
+            style={{ backgroundColor: annotation.fill || '#111827', color: annotation.color || '#ffffff' }}
+          >
+            {annotation.text || ''}
+          </div>
+        )
+      ) : (
+        editable && editing ? (
+          <textarea
+            className="h-full w-full resize-none border border-white/70 bg-white/70 px-2 py-1 text-sm font-semibold leading-snug text-gray-950 outline-none shadow-sm"
+            value={annotation.text || ''}
+            onChange={event => onLiveChange?.(replaceImageAnnotation(annotations, annotation.id, { text: event.target.value, updatedAt: Date.now() }))}
+            onBlur={event => {
+              onCommitChange?.(replaceImageAnnotation(annotations, annotation.id, { text: event.currentTarget.value, updatedAt: Date.now() }), annotation.id)
+              onEndTextEdit?.()
+            }}
+            onKeyDown={event => {
+              if (event.key === 'Escape') event.currentTarget.blur()
+            }}
+            onPointerDown={event => event.stopPropagation()}
+            aria-label="Image annotation text"
+            autoFocus
+          />
+        ) : (
+          <div
+            className="h-full w-full cursor-move whitespace-pre-wrap break-words border border-white/70 bg-white/70 px-2 py-1 text-sm font-semibold leading-snug text-gray-950 shadow-sm"
+          >
+            {annotation.text || ''}
+          </div>
+        )
+      )}
+      {editable && selected && (
+        <>
+          <button
+            type="button"
+            className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-gray-950 text-white shadow-md hover:bg-red-600"
+            title="Delete annotation"
+            aria-label="Delete annotation"
+            onPointerDown={event => event.stopPropagation()}
+            onClick={event => {
+              event.preventDefault()
+              event.stopPropagation()
+              onDelete?.(annotation.id)
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          {annotation.kind !== 'arrow' && (
+            <AnnotationResizeHandles
+              annotation={annotation}
+              annotations={annotations}
+              handles={annotation.kind === 'shotNumber' ? SHOT_NUMBER_RESIZE_HANDLES : IMAGE_ANNOTATION_RESIZE_HANDLES}
+              onLiveChange={onLiveChange}
+              onCommitChange={onCommitChange}
+            />
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+const ArrowAnnotation = ({ color, id }: { color: string; id: string }) => {
+  const markerId = `image-arrow-${id}`
+  return (
+    <svg className="h-full w-full overflow-visible" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <marker id={markerId} markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+          <path d="M 0 0 L 10 4 L 0 8 z" fill={color} />
+        </marker>
+      </defs>
+      <line x1="4" y1="12" x2="92" y2="12" stroke={color} strokeWidth="5" strokeLinecap="round" markerEnd={`url(#${markerId})`} />
+    </svg>
+  )
+}
+
+const PointArrowAnnotation = ({
+  annotation,
+  annotations,
+  editable,
+  selected,
+  onSelect,
+  onLiveChange,
+  onCommitChange,
+  onDelete
+}: {
+  annotation: IFreeCanvasImageAnnotation
+  annotations: IFreeCanvasImageAnnotation[]
+  editable: boolean
+  selected: boolean
+  onSelect?: (annotationId: string) => void
+  onLiveChange?: (annotations: IFreeCanvasImageAnnotation[]) => void
+  onCommitChange?: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void
+  onDelete?: (annotationId: string) => void
+}) => {
+  const [start, end] = annotation.points || []
+  if (!start || !end) return null
+  const markerId = `image-arrow-point-${annotation.id}`
+  const lineWidth = Math.max((annotation.strokeWidth || 5) / 450, 0.008)
+  const mid = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 }
+
+  return (
+    <>
+      <svg className={`absolute inset-0 h-full w-full ${editable ? 'pointer-events-auto' : 'pointer-events-none'}`} viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <marker id={markerId} markerWidth="0.08" markerHeight="0.08" refX="0.07" refY="0.04" orient="auto" markerUnits="strokeWidth">
+            <path d="M 0 0 L 0.08 0.04 L 0 0.08 z" fill={annotation.color || '#ef4423'} />
+          </marker>
+        </defs>
+        <line
+          x1={start.x}
+          y1={start.y}
+          x2={end.x}
+          y2={end.y}
+          stroke={annotation.color || '#ef4423'}
+          strokeWidth={lineWidth}
+          strokeLinecap="round"
+          markerEnd={`url(#${markerId})`}
+          className={editable ? 'cursor-move' : ''}
+          pointerEvents={editable ? 'stroke' : 'none'}
+          onPointerDown={editable && onLiveChange && onCommitChange ? event => startArrowMove(event, annotation, annotations, onLiveChange, onCommitChange, onSelect) : undefined}
+        />
+      </svg>
+      {editable && selected && (
+        <>
+          <button
+            type="button"
+            className="absolute z-10 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-gray-950 text-white shadow-md hover:bg-red-600"
+            style={{ left: `${mid.x * 100}%`, top: `${mid.y * 100 - 4}%` }}
+            title="Delete annotation"
+            aria-label="Delete annotation"
+            onPointerDown={event => event.stopPropagation()}
+            onClick={event => {
+              event.preventDefault()
+              event.stopPropagation()
+              onDelete?.(annotation.id)
+            }}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+          {(['start', 'end'] as const).map((endpoint, index) => {
+            const point = endpoint === 'start' ? start : end
+            return (
+              <button
+                key={endpoint}
+                type="button"
+                className="absolute z-10 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-sky-500 shadow"
+                style={{ left: `${point.x * 100}%`, top: `${point.y * 100}%` }}
+                title={`${endpoint} arrow point`}
+                aria-label={`${endpoint} arrow point`}
+                onPointerDown={event => {
+                  if (!onLiveChange || !onCommitChange) return
+                  startArrowPointDrag(event, annotation, annotations, index, onLiveChange, onCommitChange, onSelect)
+                }}
+              />
+            )
+          })}
+        </>
+      )}
+    </>
+  )
+}
+
+const AnnotationSelectionFrame = ({
+  annotation,
+  onDelete,
+  onMovePointerDown
+}: {
+  annotation: IFreeCanvasImageAnnotation
+  onDelete: () => void
+  onMovePointerDown?: (event: ReactPointerEvent<HTMLDivElement>) => void
+}) => {
+  const points = annotation.points || []
+  if (points.length === 0) return null
+  const box = annotationBoxFromPoints(points)
+  return (
+    <div
+      className={`absolute border border-sky-500 ${onMovePointerDown ? 'pointer-events-auto cursor-move' : 'pointer-events-none'}`}
+      style={{
+        left: `${box.x * 100}%`,
+        top: `${box.y * 100}%`,
+        width: `${box.width * 100}%`,
+        height: `${box.height * 100}%`
+      }}
+      onPointerDown={onMovePointerDown}
+    >
+      <button
+        type="button"
+        className="pointer-events-auto absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-gray-950 text-white shadow-md hover:bg-red-600"
+        title="Delete annotation"
+        aria-label="Delete annotation"
+        onPointerDown={event => event.stopPropagation()}
+        onClick={event => {
+          event.preventDefault()
+          event.stopPropagation()
+          onDelete()
+        }}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )
+}
+
+const AnnotationResizeHandles = ({
+  annotation,
+  annotations,
+  handles,
+  onLiveChange,
+  onCommitChange
+}: {
+  annotation: IFreeCanvasImageAnnotation
+  annotations: IFreeCanvasImageAnnotation[]
+  handles: ImageAnnotationResizeHandle[]
+  onLiveChange?: (annotations: IFreeCanvasImageAnnotation[]) => void
+  onCommitChange?: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void
+}) => (
+  <>
+    {handles.map(handle => (
+      <button
+        key={handle}
+        type="button"
+        className="absolute z-10 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-sky-500 shadow"
+        style={resizeHandleStyle(handle)}
+        title={`Resize ${handle}`}
+        aria-label={`Resize ${handle}`}
+        onPointerDown={event => {
+          if (!onLiveChange || !onCommitChange) return
+          startAnnotationResize(event, annotation, annotations, handle, onLiveChange, onCommitChange)
+        }}
+      />
+    ))}
+  </>
+)
+
+const resizeHandleStyle = (handle: ImageAnnotationResizeHandle): CSSProperties => {
+  const style: CSSProperties = {}
+  if (handle.includes('n')) style.top = 0
+  if (handle.includes('s')) style.top = '100%'
+  if (!handle.includes('n') && !handle.includes('s')) style.top = '50%'
+  if (handle.includes('w')) style.left = 0
+  if (handle.includes('e')) style.left = '100%'
+  if (!handle.includes('w') && !handle.includes('e')) style.left = '50%'
+  return style
+}
+
+const startBoxAnnotationDrag = (
+  event: ReactPointerEvent<HTMLDivElement>,
+  annotation: IFreeCanvasImageAnnotation,
+  annotations: IFreeCanvasImageAnnotation[],
+  onLiveChange: (annotations: IFreeCanvasImageAnnotation[]) => void,
+  onCommitChange: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void,
+  onSelect?: (annotationId: string) => void
+) => {
+  const target = event.target instanceof HTMLElement ? event.target : null
+  if (target?.closest('input, textarea, button')) return
+  const parentRect = event.currentTarget.parentElement?.getBoundingClientRect()
+  if (!parentRect || parentRect.width <= 0 || parentRect.height <= 0) return
+  event.preventDefault()
+  event.stopPropagation()
+  onSelect?.(annotation.id)
+  const startX = event.clientX
+  const startY = event.clientY
+  const initialX = annotation.x
+  const initialY = annotation.y
+  const baseAnnotations = cloneImageAnnotations(annotations)
+  let latestAnnotations = annotations
+
+  const move = (moveEvent: PointerEvent) => {
+    moveEvent.preventDefault()
+    const nextX = clampUnit(initialX + (moveEvent.clientX - startX) / parentRect.width, 1 - annotation.width)
+    const nextY = clampUnit(initialY + (moveEvent.clientY - startY) / parentRect.height, 1 - annotation.height)
+    latestAnnotations = replaceImageAnnotation(baseAnnotations, annotation.id, { x: nextX, y: nextY, updatedAt: Date.now() })
+    onLiveChange(latestAnnotations)
+  }
+  const stop = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', stop)
+    onCommitChange(latestAnnotations, annotation.id, baseAnnotations)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', stop, { once: true })
+}
+
+const startAnnotationResize = (
+  event: ReactPointerEvent<HTMLButtonElement>,
+  annotation: IFreeCanvasImageAnnotation,
+  annotations: IFreeCanvasImageAnnotation[],
+  handle: ImageAnnotationResizeHandle,
+  onLiveChange: (annotations: IFreeCanvasImageAnnotation[]) => void,
+  onCommitChange: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void
+) => {
+  const parentRect = event.currentTarget.closest('[data-image-annotation-editor-frame]')?.getBoundingClientRect()
+  if (!parentRect || parentRect.width <= 0 || parentRect.height <= 0) return
+  event.preventDefault()
+  event.stopPropagation()
+  const startX = event.clientX
+  const startY = event.clientY
+  const baseAnnotations = cloneImageAnnotations(annotations)
+  let latestAnnotations = annotations
+
+  const move = (moveEvent: PointerEvent) => {
+    moveEvent.preventDefault()
+    const dx = (moveEvent.clientX - startX) / parentRect.width
+    const dy = (moveEvent.clientY - startY) / parentRect.height
+    const next = resizeImageAnnotation(annotation, handle, dx, dy)
+    latestAnnotations = replaceImageAnnotation(baseAnnotations, annotation.id, { ...next, updatedAt: Date.now() })
+    onLiveChange(latestAnnotations)
+  }
+  const stop = () => {
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', stop)
+    onCommitChange(latestAnnotations, annotation.id, baseAnnotations)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', stop, { once: true })
+}
+
+const startArrowMove = (
+  event: ReactPointerEvent<SVGLineElement>,
+  annotation: IFreeCanvasImageAnnotation,
+  annotations: IFreeCanvasImageAnnotation[],
+  onLiveChange: (annotations: IFreeCanvasImageAnnotation[]) => void,
+  onCommitChange: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void,
+  onSelect?: (annotationId: string) => void
+) => {
+  const frameRect = event.currentTarget.closest('[data-image-annotation-editor-frame]')?.getBoundingClientRect()
+  if (!frameRect || frameRect.width <= 0 || frameRect.height <= 0 || !annotation.points || annotation.points.length < 2) return
+  event.preventDefault()
+  event.stopPropagation()
+  onSelect?.(annotation.id)
+  const startX = event.clientX
+  const startY = event.clientY
+  const startPoints = annotation.points.map(point => ({ ...point }))
+  const baseAnnotations = cloneImageAnnotations(annotations)
+  let latestAnnotations = annotations
+  const pointerId = event.pointerId
+  let stopped = false
+
+  const move = (moveEvent: PointerEvent) => {
+    if (moveEvent.pointerId !== pointerId) return
+    if (moveEvent.buttons === 0) {
+      stop()
+      return
+    }
+    moveEvent.preventDefault()
+    const dx = (moveEvent.clientX - startX) / frameRect.width
+    const dy = (moveEvent.clientY - startY) / frameRect.height
+    const points = startPoints.map(point => ({
+      x: clampUnit(point.x + dx),
+      y: clampUnit(point.y + dy)
+    }))
+    latestAnnotations = replaceImageAnnotation(baseAnnotations, annotation.id, { ...annotationFrameFromPoints(points), points, updatedAt: Date.now() })
+    onLiveChange(latestAnnotations)
+  }
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', stop)
+    window.removeEventListener('pointercancel', stop)
+    window.removeEventListener('blur', stop)
+    onCommitChange(latestAnnotations, annotation.id, baseAnnotations)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', stop, { once: true })
+  window.addEventListener('pointercancel', stop, { once: true })
+  window.addEventListener('blur', stop, { once: true })
+}
+
+const startArrowPointDrag = (
+  event: ReactPointerEvent<HTMLButtonElement>,
+  annotation: IFreeCanvasImageAnnotation,
+  annotations: IFreeCanvasImageAnnotation[],
+  pointIndex: number,
+  onLiveChange: (annotations: IFreeCanvasImageAnnotation[]) => void,
+  onCommitChange: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void,
+  onSelect?: (annotationId: string) => void
+) => {
+  const frameRect = event.currentTarget.closest('[data-image-annotation-editor-frame]')?.getBoundingClientRect()
+  if (!frameRect || frameRect.width <= 0 || frameRect.height <= 0 || !annotation.points || annotation.points.length < 2) return
+  event.preventDefault()
+  event.stopPropagation()
+  onSelect?.(annotation.id)
+  const baseAnnotations = cloneImageAnnotations(annotations)
+  let latestAnnotations = annotations
+  const pointerId = event.pointerId
+  let stopped = false
+
+  const move = (moveEvent: PointerEvent) => {
+    if (moveEvent.pointerId !== pointerId) return
+    if (moveEvent.buttons === 0) {
+      stop()
+      return
+    }
+    moveEvent.preventDefault()
+    const points = (annotation.points || []).map((point, index) => index === pointIndex
+      ? {
+        x: clampUnit((moveEvent.clientX - frameRect.left) / frameRect.width),
+        y: clampUnit((moveEvent.clientY - frameRect.top) / frameRect.height)
+      }
+      : { ...point })
+    latestAnnotations = replaceImageAnnotation(baseAnnotations, annotation.id, { ...annotationFrameFromPoints(points), points, updatedAt: Date.now() })
+    onLiveChange(latestAnnotations)
+  }
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', stop)
+    window.removeEventListener('pointercancel', stop)
+    window.removeEventListener('blur', stop)
+    onCommitChange(latestAnnotations, annotation.id, baseAnnotations)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', stop, { once: true })
+  window.addEventListener('pointercancel', stop, { once: true })
+  window.addEventListener('blur', stop, { once: true })
+}
+
+const startFreehandMove = (
+  event: ReactPointerEvent<SVGPolylineElement>,
+  annotation: IFreeCanvasImageAnnotation,
+  annotations: IFreeCanvasImageAnnotation[],
+  onLiveChange: (annotations: IFreeCanvasImageAnnotation[]) => void,
+  onCommitChange: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void,
+  onSelect?: (annotationId: string) => void
+) => {
+  const frameRect = event.currentTarget.closest('[data-image-annotation-editor-frame]')?.getBoundingClientRect()
+  if (!frameRect || frameRect.width <= 0 || frameRect.height <= 0 || !annotation.points || annotation.points.length === 0) return
+  event.preventDefault()
+  event.stopPropagation()
+  onSelect?.(annotation.id)
+  startFreehandPointMove(event.clientX, event.clientY, frameRect, annotation, annotations, onLiveChange, onCommitChange)
+}
+
+const startFreehandBoxMove = (
+  event: ReactPointerEvent<HTMLDivElement>,
+  annotation: IFreeCanvasImageAnnotation,
+  annotations: IFreeCanvasImageAnnotation[],
+  onLiveChange: (annotations: IFreeCanvasImageAnnotation[]) => void,
+  onCommitChange: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void,
+  onSelect?: (annotationId: string) => void
+) => {
+  const frameRect = event.currentTarget.closest('[data-image-annotation-editor-frame]')?.getBoundingClientRect()
+  if (!frameRect || frameRect.width <= 0 || frameRect.height <= 0 || !annotation.points || annotation.points.length === 0) return
+  const target = event.target instanceof HTMLElement ? event.target : null
+  if (target?.closest('button')) return
+  event.preventDefault()
+  event.stopPropagation()
+  onSelect?.(annotation.id)
+  startFreehandPointMove(event.clientX, event.clientY, frameRect, annotation, annotations, onLiveChange, onCommitChange)
+}
+
+const startFreehandPointMove = (
+  startClientX: number,
+  startClientY: number,
+  frameRect: DOMRect,
+  annotation: IFreeCanvasImageAnnotation,
+  annotations: IFreeCanvasImageAnnotation[],
+  onLiveChange: (annotations: IFreeCanvasImageAnnotation[]) => void,
+  onCommitChange: (annotations: IFreeCanvasImageAnnotation[], selectedAnnotationId?: string | null, baseAnnotations?: IFreeCanvasImageAnnotation[]) => void
+) => {
+  const startPoints = (annotation.points || []).map(point => ({ ...point }))
+  if (startPoints.length === 0) return
+  const baseAnnotations = cloneImageAnnotations(annotations)
+  let latestAnnotations = annotations
+  let stopped = false
+
+  const move = (moveEvent: PointerEvent) => {
+    if (moveEvent.buttons === 0) {
+      stop()
+      return
+    }
+    moveEvent.preventDefault()
+    const dx = (moveEvent.clientX - startClientX) / frameRect.width
+    const dy = (moveEvent.clientY - startClientY) / frameRect.height
+    const adjusted = clampPointMoveDelta(startPoints, dx, dy)
+    const points = startPoints.map(point => ({
+      x: point.x + adjusted.dx,
+      y: point.y + adjusted.dy
+    }))
+    latestAnnotations = replaceImageAnnotation(baseAnnotations, annotation.id, { ...annotationFrameFromPoints(points), points, updatedAt: Date.now() })
+    onLiveChange(latestAnnotations)
+  }
+  const stop = () => {
+    if (stopped) return
+    stopped = true
+    window.removeEventListener('pointermove', move)
+    window.removeEventListener('pointerup', stop)
+    window.removeEventListener('pointercancel', stop)
+    window.removeEventListener('blur', stop)
+    onCommitChange(latestAnnotations, annotation.id, baseAnnotations)
+  }
+  window.addEventListener('pointermove', move)
+  window.addEventListener('pointerup', stop, { once: true })
+  window.addEventListener('pointercancel', stop, { once: true })
+  window.addEventListener('blur', stop, { once: true })
+}
+
+const ImageAnnotationEditor = ({
+  node,
+  imageUrl,
+  onCancel,
+  onSave
+}: {
+  node: IFreeCanvasImageNode
+  imageUrl: string
+  onCancel: () => void
+  onSave: (annotations: IFreeCanvasImageAnnotation[]) => void
+}) => {
+  const editorRootRef = useRef<HTMLDivElement>(null)
+  const imageFrameRef = useRef<HTMLDivElement>(null)
+  const draftPointsRef = useRef<{ x: number; y: number }[]>([])
+  const draftArrowRef = useRef<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null)
+  const activeDrawPointerIdRef = useRef<number | null>(null)
+  const textEditBaseRef = useRef<IFreeCanvasImageAnnotation[] | null>(null)
+  const [history, setHistory] = useState<ImageAnnotationHistory>(() => ({
+    past: [],
+    present: cloneImageAnnotations(node.annotations || []),
+    future: []
+  }))
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null)
+  const [editingTextAnnotationId, setEditingTextAnnotationId] = useState<string | null>(null)
+  const [activeAnnotationMode, setActiveAnnotationMode] = useState<FreeCanvasImageAnnotationKind | null>(null)
+  const [draftPoints, setDraftPoints] = useState<{ x: number; y: number }[]>([])
+  const [draftArrow, setDraftArrow] = useState<{ start: { x: number; y: number }; end: { x: number; y: number } } | null>(null)
+  const draftAnnotations = history.present
+  const selectedAnnotation = selectedAnnotationId
+    ? draftAnnotations.find(annotation => annotation.id === selectedAnnotationId && annotation.kind === activeAnnotationMode) || null
+    : null
+  const selectedAnnotationIdInMode = selectedAnnotation?.id || null
+  const activeModeLabel = activeAnnotationMode ? IMAGE_ANNOTATION_MODE_LABELS[activeAnnotationMode] : 'Select a tool'
+  const crop = node.crop
+  const imageStyle = crop ? {
+    width: `${100 / crop.width}%`,
+    height: `${100 / crop.height}%`,
+    left: `${-crop.x / crop.width * 100}%`,
+    top: `${-crop.y / crop.height * 100}%`
+  } : undefined
+
+  useEffect(() => {
+    setHistory({
+      past: [],
+      present: cloneImageAnnotations(node.annotations || []),
+      future: []
+    })
+    setSelectedAnnotationId(null)
+    setEditingTextAnnotationId(null)
+    setActiveAnnotationMode(null)
+    setDraftPoints([])
+    setDraftArrow(null)
+    draftPointsRef.current = []
+    draftArrowRef.current = null
+    activeDrawPointerIdRef.current = null
+    textEditBaseRef.current = null
+  }, [node.id, node.annotations])
+
+  useEffect(() => {
+    editorRootRef.current?.focus()
+  }, [node.id])
+
+  const setLiveAnnotations = (annotations: IFreeCanvasImageAnnotation[]) => {
+    setHistory(current => ({
+      ...current,
+      present: cloneImageAnnotations(annotations)
+    }))
+  }
+
+  const commitDraft = useCallback((
+    annotations: IFreeCanvasImageAnnotation[],
+    nextSelectedAnnotationId: string | null = selectedAnnotationId,
+    baseAnnotations?: IFreeCanvasImageAnnotation[]
+  ) => {
+    const nextPresent = cloneImageAnnotations(annotations)
+    setHistory(current => {
+      const base = cloneImageAnnotations(baseAnnotations || current.present)
+      if (sameImageAnnotations(base, nextPresent)) {
+        return { ...current, present: nextPresent }
+      }
+      return {
+        past: [...current.past, base].slice(-80),
+        present: nextPresent,
+        future: []
+      }
+    })
+    setSelectedAnnotationId(nextSelectedAnnotationId)
+  }, [selectedAnnotationId])
+
+  const commitAnnotationChange = useCallback((
+    annotations: IFreeCanvasImageAnnotation[],
+    nextSelectedAnnotationId: string | null = selectedAnnotationId,
+    baseAnnotations?: IFreeCanvasImageAnnotation[]
+  ) => {
+    commitDraft(annotations, nextSelectedAnnotationId, baseAnnotations || textEditBaseRef.current || undefined)
+    textEditBaseRef.current = null
+  }, [commitDraft, selectedAnnotationId])
+
+  const undo = () => {
+    setHistory(current => {
+      const previous = current.past[current.past.length - 1]
+      if (!previous) return current
+      setSelectedAnnotationId(null)
+      setEditingTextAnnotationId(null)
+      textEditBaseRef.current = null
+      return {
+        past: current.past.slice(0, -1),
+        present: cloneImageAnnotations(previous),
+        future: [cloneImageAnnotations(current.present), ...current.future]
+      }
+    })
+  }
+
+  const redo = () => {
+    setHistory(current => {
+      const next = current.future[0]
+      if (!next) return current
+      setSelectedAnnotationId(null)
+      setEditingTextAnnotationId(null)
+      textEditBaseRef.current = null
+      return {
+        past: [...current.past, cloneImageAnnotations(current.present)],
+        present: cloneImageAnnotations(next),
+        future: current.future.slice(1)
+      }
+    })
+  }
+
+  const beginTextEdit = useCallback((annotationId: string) => {
+    const annotation = draftAnnotations.find(item => item.id === annotationId)
+    if (!annotation || annotation.kind !== activeAnnotationMode) return
+    textEditBaseRef.current = cloneImageAnnotations(draftAnnotations)
+    setSelectedAnnotationId(annotationId)
+    setEditingTextAnnotationId(annotationId)
+  }, [activeAnnotationMode, draftAnnotations])
+
+  const deleteAnnotation = useCallback((annotationId: string) => {
+    const annotation = draftAnnotations.find(item => item.id === annotationId)
+    if (!annotation || annotation.kind !== activeAnnotationMode) return
+    commitDraft(draftAnnotations.filter(annotation => annotation.id !== annotationId), null)
+    setEditingTextAnnotationId(null)
+  }, [activeAnnotationMode, commitDraft, draftAnnotations])
+
+  const deleteSelectedAnnotation = useCallback(() => {
+    if (!selectedAnnotationIdInMode) return
+    deleteAnnotation(selectedAnnotationIdInMode)
+  }, [deleteAnnotation, selectedAnnotationIdInMode])
+
+  const selectAnnotationMode = (kind: FreeCanvasImageAnnotationKind) => {
+    setActiveAnnotationMode(kind)
+    setSelectedAnnotationId(null)
+    setEditingTextAnnotationId(null)
+    setDraftPoints([])
+    setDraftArrow(null)
+    draftPointsRef.current = []
+    draftArrowRef.current = null
+    textEditBaseRef.current = null
+  }
+
+  const imagePoint = (event: ReactPointerEvent): { x: number; y: number } | null => {
+    const rect = imageFrameRef.current?.getBoundingClientRect()
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null
+    return {
+      x: clampUnit((event.clientX - rect.left) / rect.width),
+      y: clampUnit((event.clientY - rect.top) / rect.height)
+    }
+  }
+
+  const pointHitsAnnotation = (point: { x: number; y: number }) => draftAnnotations.some(annotation => {
+    const box = annotation.points && annotation.points.length > 0
+      ? annotationBoxFromPoints(annotation.points)
+      : annotation
+    const padding = annotation.kind === 'arrow' || annotation.kind === 'freehand' ? 0.015 : 0
+    return point.x >= box.x - padding &&
+      point.x <= box.x + box.width + padding &&
+      point.y >= box.y - padding &&
+      point.y <= box.y + box.height + padding
+  })
+
+  const createAnnotationAtPoint = (kind: 'text' | 'rect' | 'shotNumber', point: { x: number; y: number }) => {
+    const annotation = createFreeCanvasImageAnnotation(kind)
+    const height = kind === 'shotNumber' ? annotation.width : annotation.height
+    const placed = {
+      ...annotation,
+      x: clampNumber(point.x - annotation.width / 2, 0, 1 - annotation.width),
+      y: clampNumber(point.y - height / 2, 0, 1 - height),
+      height
+    }
+    commitDraft([...draftAnnotations, placed], placed.id)
+  }
+
+  const handleFramePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!activeAnnotationMode) return
+    if (event.button !== 0) return
+    const point = imagePoint(event)
+    if (!point) return
+    if (pointHitsAnnotation(point)) return
+    event.preventDefault()
+    event.stopPropagation()
+    if (activeAnnotationMode === 'text' || activeAnnotationMode === 'rect' || activeAnnotationMode === 'shotNumber') {
+      createAnnotationAtPoint(activeAnnotationMode, point)
+      return
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    activeDrawPointerIdRef.current = event.pointerId
+    if (activeAnnotationMode === 'arrow') {
+      const arrow = { start: point, end: point }
+      draftArrowRef.current = arrow
+      setDraftArrow(arrow)
+      return
+    }
+    if (activeAnnotationMode === 'freehand') {
+      draftPointsRef.current = [point]
+      setDraftPoints([point])
+    }
+  }
+
+  const releaseActiveDrawPointer = (target: HTMLDivElement) => {
+    const pointerId = activeDrawPointerIdRef.current
+    if (pointerId !== null && target.hasPointerCapture(pointerId)) {
+      target.releasePointerCapture(pointerId)
+    }
+    activeDrawPointerIdRef.current = null
+  }
+
+  const drawActiveTool = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activeDrawPointerIdRef.current !== null && event.pointerId !== activeDrawPointerIdRef.current) return
+    if (activeDrawPointerIdRef.current !== null && event.buttons === 0) {
+      endActiveTool(event)
+      return
+    }
+    if (activeAnnotationMode === 'arrow' && draftArrowRef.current) {
+      const point = imagePoint(event)
+      if (!point) return
+      event.preventDefault()
+      event.stopPropagation()
+      draftArrowRef.current = { ...draftArrowRef.current, end: point }
+      setDraftArrow(draftArrowRef.current)
+      return
+    }
+    if (activeAnnotationMode !== 'freehand' || draftPointsRef.current.length === 0) return
+    const point = imagePoint(event)
+    if (!point) return
+    event.preventDefault()
+    event.stopPropagation()
+    const previous = draftPointsRef.current[draftPointsRef.current.length - 1]
+    if (previous && Math.abs(previous.x - point.x) + Math.abs(previous.y - point.y) < 0.004) return
+    draftPointsRef.current = [...draftPointsRef.current, point]
+    setDraftPoints(draftPointsRef.current)
+  }
+
+  const endActiveTool = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (activeDrawPointerIdRef.current !== null && event.pointerId !== activeDrawPointerIdRef.current) return
+    if (activeAnnotationMode !== 'freehand' && activeAnnotationMode !== 'arrow') return
+    event.preventDefault()
+    event.stopPropagation()
+    if (activeAnnotationMode === 'arrow' && draftArrowRef.current) {
+      const points = [draftArrowRef.current.start, draftArrowRef.current.end]
+      const distance = Math.abs(points[0].x - points[1].x) + Math.abs(points[0].y - points[1].y)
+      if (distance > 0.01) {
+        const annotation = {
+          ...createFreeCanvasImageAnnotation('arrow'),
+          ...annotationFrameFromPoints(points),
+          points,
+          color: '#ef4423'
+        }
+        commitDraft([...draftAnnotations, annotation], annotation.id)
+      }
+      draftArrowRef.current = null
+      setDraftArrow(null)
+      releaseActiveDrawPointer(event.currentTarget)
+      return
+    }
+    if (activeAnnotationMode === 'freehand' && draftPointsRef.current.length > 1) {
+      const annotation = {
+        ...createFreeCanvasImageAnnotation('freehand'),
+        x: 0,
+        y: 0,
+        width: 1,
+        height: 1,
+        points: draftPointsRef.current
+      }
+      commitDraft([...draftAnnotations, annotation], annotation.id)
+    }
+    draftPointsRef.current = []
+    setDraftPoints([])
+    releaseActiveDrawPointer(event.currentTarget)
+  }
+
+  const handleEditorKeyDownCapture = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    event.stopPropagation()
+    event.nativeEvent.stopImmediatePropagation()
+    const target = event.target instanceof HTMLElement ? event.target : null
+    const textInput = target?.closest('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null
+    const key = event.key.toLowerCase()
+
+    if ((event.ctrlKey || event.metaKey) && key === 'z') {
+      event.preventDefault()
+      if (event.shiftKey) redo()
+      else undo()
+      return
+    }
+    if ((event.ctrlKey || event.metaKey) && key === 'y') {
+      event.preventDefault()
+      redo()
+      return
+    }
+    if (textInput) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        textInput.blur()
+      }
+      if (event.key === 'Enter' && textInput instanceof HTMLInputElement) {
+        event.preventDefault()
+        textInput.blur()
+      }
+      return
+    }
+    if (event.key === 'Escape' && editingTextAnnotationId) {
+      event.preventDefault()
+      setEditingTextAnnotationId(null)
+      textEditBaseRef.current = null
+      return
+    }
+    if ((event.key === 'Delete' || event.key === 'Backspace') && selectedAnnotationIdInMode) {
+      event.preventDefault()
+      deleteSelectedAnnotation()
+      return
+    }
+    if (event.key === 'Enter' && selectedAnnotationIdInMode) {
+      const selected = draftAnnotations.find(annotation => annotation.id === selectedAnnotationIdInMode && annotation.kind === activeAnnotationMode)
+      if (selected?.kind === 'text' || selected?.kind === 'shotNumber') {
+        event.preventDefault()
+        beginTextEdit(selected.id)
+      }
+    }
+  }
+
+  const stopEditorPointerPropagation = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.stopPropagation()
+    event.nativeEvent.stopImmediatePropagation()
+  }
+
+  const focusEditorPointerCapture = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.target instanceof HTMLElement ? event.target : null
+    if (target?.closest('input, textarea, button')) return
+    editorRootRef.current?.focus()
+  }
+
+  const stopEditorMousePropagation = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.stopPropagation()
+    event.nativeEvent.stopImmediatePropagation()
+  }
+
+  return (
+    <div
+      ref={editorRootRef}
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-gray-950/55 p-8 backdrop-blur-sm"
+      data-image-annotation-editor
+      tabIndex={-1}
+      onKeyDownCapture={handleEditorKeyDownCapture}
+      onPointerDownCapture={focusEditorPointerCapture}
+      onPointerDown={stopEditorPointerPropagation}
+      onMouseDown={stopEditorMousePropagation}
+      onClick={stopEditorMousePropagation}
+    >
+      <section className="flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-[8px] border border-white/15 bg-[#f7f7f5] shadow-[0_32px_100px_rgba(15,23,42,0.35)]">
+        <header className="flex items-center justify-between border-b border-gray-200 px-5 py-3">
+          <div>
+            <h2 className="text-sm font-black text-gray-950">Edit image annotations</h2>
+            <p className="mt-0.5 text-xs font-semibold text-gray-500">{node.title}</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              className="rounded-full p-2 text-gray-500 hover:bg-gray-200 hover:text-gray-950 disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={undo}
+              disabled={history.past.length === 0}
+              title="Undo"
+              aria-label="Undo"
+            >
+              <Undo2 className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="rounded-full p-2 text-gray-500 hover:bg-gray-200 hover:text-gray-950 disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={redo}
+              disabled={history.future.length === 0}
+              title="Redo"
+              aria-label="Redo"
+            >
+              <Redo2 className="h-4 w-4" />
+            </button>
+            <button type="button" className="rounded-full p-2 text-gray-500 hover:bg-gray-200 hover:text-gray-950" onClick={onCancel} title="Close annotation editor" aria-label="Close annotation editor">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </header>
+
+        <div className="grid min-h-0 flex-1 grid-cols-[72px_1fr] overflow-hidden">
+          <aside className="flex flex-col items-center gap-2 border-r border-gray-200 bg-white/70 px-3 py-4">
+            <ImageEditorToolButton title="Text mode" active={activeAnnotationMode === 'text'} onClick={() => selectAnnotationMode('text')}><Type className="h-4 w-4" /></ImageEditorToolButton>
+            <ImageEditorToolButton title="Rectangle mode" active={activeAnnotationMode === 'rect'} onClick={() => selectAnnotationMode('rect')}><Square className="h-4 w-4" /></ImageEditorToolButton>
+            <ImageEditorToolButton title="Arrow mode" active={activeAnnotationMode === 'arrow'} onClick={() => selectAnnotationMode('arrow')}><ArrowRight className="h-4 w-4" /></ImageEditorToolButton>
+            <ImageEditorToolButton title="Brush mode" active={activeAnnotationMode === 'freehand'} onClick={() => selectAnnotationMode('freehand')}><Brush className="h-4 w-4" /></ImageEditorToolButton>
+            <ImageEditorToolButton title="Shot number mode" active={activeAnnotationMode === 'shotNumber'} onClick={() => selectAnnotationMode('shotNumber')}><Hash className="h-4 w-4" /></ImageEditorToolButton>
+          </aside>
+
+          <div className="min-h-0 overflow-auto p-8">
+            <div
+              ref={imageFrameRef}
+              data-image-annotation-editor-frame
+              className={`relative mx-auto flex max-h-[680px] max-w-[960px] items-center justify-center overflow-hidden bg-white shadow-[0_10px_35px_rgba(15,23,42,0.14)] ${activeAnnotationMode ? 'cursor-crosshair' : ''}`}
+              style={{ aspectRatio: `${node.width} / ${node.height}`, width: 'min(74vw, 960px)' }}
+              onPointerDown={handleFramePointerDown}
+              onPointerMove={drawActiveTool}
+              onPointerUp={endActiveTool}
+              onPointerCancel={endActiveTool}
+              onLostPointerCapture={endActiveTool}
+            >
+              {imageUrl ? (
+                <img
+                  src={imageUrl}
+                  alt={node.title}
+                  className={`pointer-events-none select-none ${crop ? 'absolute max-w-none' : 'h-full w-full object-contain'}`}
+                  style={imageStyle}
+                  draggable={false}
+                />
+              ) : (
+                <div className="flex h-full w-full min-h-[360px] items-center justify-center text-xs font-semibold text-gray-400">
+                  <ImageIcon className="mr-2 h-4 w-4" />
+                  Drop image
+                </div>
+              )}
+              <ImageAnnotationsLayer
+                annotations={draftAnnotations}
+                mode="edit"
+                activeAnnotationMode={activeAnnotationMode}
+                selectedAnnotationId={selectedAnnotationId}
+                editingTextAnnotationId={editingTextAnnotationId}
+                interactive={activeAnnotationMode !== null}
+                onSelect={annotationId => {
+                  const annotation = draftAnnotations.find(item => item.id === annotationId)
+                  if (!annotation || annotation.kind !== activeAnnotationMode) return
+                  setSelectedAnnotationId(annotationId)
+                }}
+                onClearSelection={() => {
+                  setSelectedAnnotationId(null)
+                  setEditingTextAnnotationId(null)
+                }}
+                onBeginTextEdit={beginTextEdit}
+                onEndTextEdit={() => setEditingTextAnnotationId(null)}
+                onLiveChange={setLiveAnnotations}
+                onCommitChange={commitAnnotationChange}
+                onDelete={deleteAnnotation}
+              />
+              {draftPoints.length > 1 && (
+                <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+                  <polyline
+                    points={draftPoints.map(point => `${point.x},${point.y}`).join(' ')}
+                    fill="none"
+                    stroke="#ef4423"
+                    strokeWidth={0.008}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
+              {draftArrow && (
+                <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 1 1" preserveAspectRatio="none" aria-hidden="true">
+                  <defs>
+                    <marker id="draft-image-arrow" markerWidth="0.08" markerHeight="0.08" refX="0.07" refY="0.04" orient="auto" markerUnits="strokeWidth">
+                      <path d="M 0 0 L 0.08 0.04 L 0 0.08 z" fill="#ef4423" />
+                    </marker>
+                  </defs>
+                  <line
+                    x1={draftArrow.start.x}
+                    y1={draftArrow.start.y}
+                    x2={draftArrow.end.x}
+                    y2={draftArrow.end.y}
+                    stroke="#ef4423"
+                    strokeWidth={0.01}
+                    strokeLinecap="round"
+                    markerEnd="url(#draft-image-arrow)"
+                  />
+                </svg>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <footer className="flex items-center justify-between border-t border-gray-200 px-5 py-3">
+          <span className="text-xs font-semibold text-gray-500">{draftAnnotations.length} annotations · Mode: {activeModeLabel}</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="rounded-full p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={deleteSelectedAnnotation}
+              disabled={!selectedAnnotationIdInMode}
+              title="Delete selected annotation"
+              aria-label="Delete selected annotation"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+            <button type="button" className="rounded-full px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-200" onClick={onCancel}>Cancel</button>
+            <button
+              type="button"
+              className="rounded-full bg-gray-950 px-5 py-2 text-sm font-bold text-white transition active:scale-[0.98]"
+              onClick={() => onSave(history.present)}
+            >
+              Save annotations
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+  )
+}
+
+const ImageEditorToolButton = ({
+  title,
+  active = false,
+  onClick,
+  children
+}: {
+  title: string
+  active?: boolean
+  onClick: () => void
+  children: ReactNode
+}) => (
+  <button
+    type="button"
+    className={`flex h-11 w-11 items-center justify-center rounded-[8px] border text-gray-700 transition ${active ? 'border-gray-950 bg-gray-950 text-white' : 'border-gray-200 bg-white hover:bg-gray-100 hover:text-gray-950'}`}
+    title={title}
+    aria-label={title}
+    onClick={onClick}
+  >
+    {children}
+  </button>
+)
+
+const replaceImageAnnotation = (
+  annotations: IFreeCanvasImageAnnotation[],
+  annotationId: string,
+  updates: Partial<Omit<IFreeCanvasImageAnnotation, 'id' | 'kind' | 'createdAt'>>
+): IFreeCanvasImageAnnotation[] =>
+  annotations.map(annotation => annotation.id === annotationId
+    ? { ...annotation, ...updates, meta: updates.meta || annotation.meta }
+    : annotation)
+
+const resizeImageAnnotation = (
+  annotation: IFreeCanvasImageAnnotation,
+  handle: ImageAnnotationResizeHandle,
+  dx: number,
+  dy: number
+): Pick<IFreeCanvasImageAnnotation, 'x' | 'y' | 'width' | 'height'> => {
+  if (annotation.kind === 'shotNumber') {
+    const signedDelta = handle.includes('w') ? -dx : dx
+    const nextSize = clampNumber(annotation.width + signedDelta, 0.025, 1)
+    const width = Math.min(nextSize, handle.includes('w') ? annotation.x + annotation.width : 1 - annotation.x)
+    const x = handle.includes('w') ? clampUnit(annotation.x + annotation.width - width, 1 - width) : annotation.x
+    return { x, y: annotation.y, width, height: width }
+  }
+
+  let x = annotation.x
+  let y = annotation.y
+  let width = annotation.width
+  let height = annotation.height
+
+  if (handle.includes('e')) width = clampNumber(annotation.width + dx, 0.02, 1 - annotation.x)
+  if (handle.includes('s')) height = clampNumber(annotation.height + dy, 0.02, 1 - annotation.y)
+  if (handle.includes('w')) {
+    const right = annotation.x + annotation.width
+    x = clampNumber(annotation.x + dx, 0, right - 0.02)
+    width = right - x
+  }
+  if (handle.includes('n')) {
+    const bottom = annotation.y + annotation.height
+    y = clampNumber(annotation.y + dy, 0, bottom - 0.02)
+    height = bottom - y
+  }
+
+  return { x, y, width, height }
+}
+
+const annotationBoxFromPoints = (points: { x: number; y: number }[]): Pick<IFreeCanvasImageAnnotation, 'x' | 'y' | 'width' | 'height'> => {
+  const xs = points.map(point => point.x)
+  const ys = points.map(point => point.y)
+  const minX = Math.min(...xs)
+  const minY = Math.min(...ys)
+  const maxX = Math.max(...xs)
+  const maxY = Math.max(...ys)
+  return {
+    x: clampUnit(minX),
+    y: clampUnit(minY),
+    width: Math.max(0.01, maxX - minX),
+    height: Math.max(0.01, maxY - minY)
+  }
+}
+
+const annotationFrameFromPoints = (points: { x: number; y: number }[]): Pick<IFreeCanvasImageAnnotation, 'x' | 'y' | 'width' | 'height'> =>
+  annotationBoxFromPoints(points)
+
+const clampPointMoveDelta = (
+  points: { x: number; y: number }[],
+  dx: number,
+  dy: number
+): { dx: number; dy: number } => {
+  const xs = points.map(point => point.x)
+  const ys = points.map(point => point.y)
+  const minX = Math.min(...xs)
+  const maxX = Math.max(...xs)
+  const minY = Math.min(...ys)
+  const maxY = Math.max(...ys)
+  return {
+    dx: clampNumber(dx, -minX, 1 - maxX),
+    dy: clampNumber(dy, -minY, 1 - maxY)
+  }
+}
+
+const sameImageAnnotations = (left: IFreeCanvasImageAnnotation[], right: IFreeCanvasImageAnnotation[]): boolean =>
+  JSON.stringify(left) === JSON.stringify(right)
+
+const cloneImageAnnotations = (annotations: IFreeCanvasImageAnnotation[]): IFreeCanvasImageAnnotation[] =>
+  annotations.map(annotation => ({
+    ...annotation,
+    points: annotation.points?.map(point => ({ ...point })),
+    meta: { ...annotation.meta }
+  }))
 
 const FreeCanvasArrowNodeView = ({ node, selected }: { node: Extract<IFreeCanvasNode, { kind: 'arrow' }>; selected: boolean }) => (
   <div className={`group relative flex items-center gap-3 rounded-md border bg-white px-4 py-3 text-sm font-semibold shadow-sm ${selected ? 'border-sky-500 ring-1 ring-sky-400' : 'border-gray-200'}`} style={{ width: node.width, minHeight: node.height }}>
@@ -1159,6 +2635,12 @@ const nodeTypes = {
 const nextNodePosition = (reactFlow: ReturnType<typeof useReactFlow<FreeCanvasFlowNode>>, count: number) => (
   reactFlow.screenToFlowPosition({ x: window.innerWidth / 2 + count * 20, y: window.innerHeight / 2 + count * 16 })
 )
+
+const clampUnit = (value: number, max = 1): number =>
+  Math.min(Math.max(Number.isFinite(value) ? value : 0, 0), Math.max(0, max))
+
+const clampNumber = (value: number, min: number, max: number): number =>
+  Math.min(Math.max(Number.isFinite(value) ? value : min, min), max)
 
 const fontSizeClass = (size: IFreeCanvasTextNode['fontSize']) => {
   if (size === 'small') return 'text-sm'

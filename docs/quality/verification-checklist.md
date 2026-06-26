@@ -20,6 +20,6 @@ For browser-facing changes, also smoke test the local app at:
 npm.cmd run test:e2e
 ```
 
-Manual browser smoke testing at `http://127.0.0.1:3000/` is still useful when validating layout or copy.
+Manual browser smoke testing is still useful when validating layout or copy. Start the local stack and use the `frontendUrl` in `logs/dev-runtime.json`.
 
 For Agent live-model behavior, require a local key and avoid running secret-dependent checks in generic CI.

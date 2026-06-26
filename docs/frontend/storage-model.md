@@ -12,7 +12,7 @@ Frontend persistence is exposed through `src/utils/storage.ts`.
 
 The primary durable endpoint is:
 
-- `/storage-api/*` -> `http://127.0.0.1:8002/api/*`
+- `/storage-api/*` -> `${PROMPTCARD_STORAGE_URL}/api/*`
 
 When the Vite dev server is available, legacy helpers expose read-only migration views:
 

@@ -1,9 +1,10 @@
 param(
-  [string]$StorageHealthUrl = "http://127.0.0.1:8002/health",
-  [string]$AgentHealthUrl = "http://127.0.0.1:8001/health",
-  [string]$FrontendUrl = "http://127.0.0.1:3000/",
+  [string]$StorageHealthUrl = "",
+  [string]$AgentHealthUrl = "",
+  [string]$FrontendUrl = "",
   [int]$HealthTimeoutSeconds = 30,
-  [string]$FrontendCommand = "npm.cmd run dev"
+  [string]$FrontendCommand = "npm.cmd run dev",
+  [string]$RuntimeManifestPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,6 +14,30 @@ $AgentScript = Join-Path $RepoRoot "scripts\start-agent-runtime.ps1"
 $StorageScript = Join-Path $RepoRoot "scripts\start-storage-service.ps1"
 $LogsDir = if ($env:PROMPTCARD_LOGS_DIR) { $env:PROMPTCARD_LOGS_DIR } else { Join-Path $RepoRoot "logs" }
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
+. (Join-Path $PSScriptRoot "dev-port-runtime.ps1")
+
+if (!$RuntimeManifestPath) {
+  $RuntimeManifestPath = if ($env:PROMPTCARD_DEV_RUNTIME_MANIFEST) { $env:PROMPTCARD_DEV_RUNTIME_MANIFEST } else { Join-Path $LogsDir "dev-runtime.json" }
+}
+$env:PROMPTCARD_DEV_RUNTIME_MANIFEST = $RuntimeManifestPath
+
+$Runtime = $null
+if ($env:PROMPTCARD_REUSE_DEV_RUNTIME -eq "1") {
+  $Runtime = Read-PromptCardDevRuntime $RuntimeManifestPath
+}
+if (!$Runtime) {
+  $Runtime = New-PromptCardDevRuntime `
+    -RepoRoot $RepoRoot `
+    -ManifestPath $RuntimeManifestPath `
+    -FrontendUrlOverride $FrontendUrl `
+    -AgentHealthUrlOverride $AgentHealthUrl `
+    -StorageHealthUrlOverride $StorageHealthUrl
+}
+Set-PromptCardDevRuntimeEnvironment $Runtime
+
+$StorageHealthUrl = $Runtime.storageHealthUrl
+$AgentHealthUrl = $Runtime.agentHealthUrl
+$FrontendUrl = $Runtime.frontendUrl
 
 function Test-HttpOk($Url) {
   try {
@@ -45,32 +70,6 @@ function Test-StorageService {
   }
   catch {
     return $false
-  }
-}
-
-function Stop-StaleStorageListener {
-  try {
-    $uri = [System.Uri]$StorageHealthUrl
-    if ($uri.Port -ne 8002 -or $uri.Host -notin @("127.0.0.1", "localhost")) { return }
-    $listeners = Get-NetTCPConnection -State Listen -LocalPort $uri.Port -ErrorAction SilentlyContinue
-    foreach ($listener in $listeners) {
-      $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
-      $parent = if ($process) { Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction SilentlyContinue } else { $null }
-      $commandLine = [string]$process.CommandLine
-      $parentCommandLine = [string]$parent.CommandLine
-      $owned = $commandLine.Contains([string]$RepoRoot) -or
-        $parentCommandLine.Contains([string]$RepoRoot) -or
-        $parentCommandLine.Contains("start-storage-service.ps1")
-      if (!$owned) {
-        throw "Port $($uri.Port) is occupied by an unknown process $($listener.OwningProcess); refusing to stop it."
-      }
-      Write-Host "Stopping stale PromptCard storage service process $($listener.OwningProcess)."
-      Stop-Process -Id $listener.OwningProcess -Force
-    }
-    if ($listeners) { Start-Sleep -Milliseconds 500 }
-  }
-  catch {
-    throw "Unable to replace stale PromptCard storage service: $($_.Exception.Message)"
   }
 }
 
@@ -115,31 +114,6 @@ function Test-Frontend {
   }
 }
 
-function Stop-StaleFrontendListener {
-  try {
-    $uri = [System.Uri]$FrontendUrl
-    if ($uri.Port -ne 3000 -or $uri.Host -notin @("127.0.0.1", "localhost")) { return }
-    $listeners = Get-NetTCPConnection -State Listen -LocalPort $uri.Port -ErrorAction SilentlyContinue
-    foreach ($listener in $listeners) {
-      $process = Get-CimInstance Win32_Process -Filter "ProcessId=$($listener.OwningProcess)" -ErrorAction SilentlyContinue
-      $parent = if ($process) { Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction SilentlyContinue } else { $null }
-      $commandLine = [string]$process.CommandLine
-      $parentCommandLine = [string]$parent.CommandLine
-      $owned = ($commandLine.Contains([string]$RepoRoot) -or $parentCommandLine.Contains([string]$RepoRoot)) -and
-        ($commandLine.Contains("vite") -or $parentCommandLine.Contains("npm.cmd run dev"))
-      if (!$owned) {
-        throw "Port $($uri.Port) is occupied by an unknown process $($listener.OwningProcess); refusing to stop it."
-      }
-      Write-Host "Stopping stale PromptCard frontend process $($listener.OwningProcess)."
-      Stop-Process -Id $listener.OwningProcess -Force
-    }
-    if ($listeners) { Start-Sleep -Milliseconds 500 }
-  }
-  catch {
-    throw "Unable to replace stale PromptCard frontend: $($_.Exception.Message)"
-  }
-}
-
 function Wait-UntilHealthy($Name, $Probe) {
   $deadline = (Get-Date).AddSeconds($HealthTimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
@@ -150,7 +124,6 @@ function Wait-UntilHealthy($Name, $Probe) {
 }
 
 if (-not (Test-StorageService)) {
-  Stop-StaleStorageListener
   Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$StorageScript`"" -WindowStyle Hidden
   Wait-UntilHealthy "PromptCard storage service at $StorageHealthUrl" ${function:Test-StorageService}
 }
@@ -170,8 +143,6 @@ if (Test-Frontend) {
   Write-Host "Vite frontend is already healthy at $FrontendUrl"
   exit 0
 }
-
-Stop-StaleFrontendListener
 
 Push-Location $RepoRoot
 try {

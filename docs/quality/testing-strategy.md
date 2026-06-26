@@ -48,13 +48,13 @@ npm.cmd run agent:check
 For startup script work, run:
 
 ```powershell
-npm.cmd run test -- scripts/start-dev-with-agent.test.ts --run
+npm.cmd run test -- --run scripts/start-dev-with-agent.test.ts scripts/launch-desktop-shell.test.ts
 ```
 
-For browser-facing changes, use a manual or Playwright smoke test against:
+For browser-facing changes, start the local stack and read the active browser URL from:
 
-```text
-http://127.0.0.1:3000/
+```powershell
+Get-Content logs\dev-runtime.json
 ```
 
 The Playwright smoke suite runs through:
@@ -118,7 +118,7 @@ In restricted sandbox environments, Chromium launch may require elevated executi
 - Open settings.
 - Click **Close development server**.
 - Confirm the browser shows the closed-server message.
-- Confirm the Vite dev server stops listening on port 3000.
+- Confirm the Vite dev server stops listening on the `frontendUrl` port from `logs/dev-runtime.json`.
 
 ## Quality Gates
 

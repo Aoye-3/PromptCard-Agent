@@ -32,6 +32,7 @@ export interface IPromptProject {
 export type FreeCanvasProjectNodeKind = 'text' | 'image' | 'arrow'
 export type FreeCanvasTextSegmentSource = 'preset' | 'user'
 export type FreeCanvasTextSize = 'small' | 'medium' | 'large' | 'extra-large' | 'huge'
+export type FreeCanvasImageAnnotationKind = 'text' | 'rect' | 'arrow' | 'freehand' | 'shotNumber'
 
 export interface IFreeCanvasPosition {
   x: number
@@ -52,6 +53,23 @@ export interface IFreeCanvasTextSegment {
   color: string
   createdAt: number
   updatedAt: number
+}
+
+export interface IFreeCanvasImageAnnotation {
+  id: string
+  kind: FreeCanvasImageAnnotationKind
+  x: number
+  y: number
+  width: number
+  height: number
+  text?: string
+  color: string
+  fill?: string
+  points?: IFreeCanvasPosition[]
+  strokeWidth?: number
+  createdAt: number
+  updatedAt: number
+  meta: Record<string, unknown>
 }
 
 export interface IFreeCanvasBaseNode {
@@ -77,6 +95,7 @@ export interface IFreeCanvasImageNode extends IFreeCanvasBaseNode {
   imagePrompt?: string
   sourceNodeId?: string | null
   crop?: IFreeCanvasCropRect | null
+  annotations: IFreeCanvasImageAnnotation[]
 }
 
 export interface IFreeCanvasArrowNode extends IFreeCanvasBaseNode {

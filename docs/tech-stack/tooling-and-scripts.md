@@ -21,8 +21,16 @@ The PowerShell scripts derive the project root from `$PSScriptRoot`, so the proj
 
 `API-Key.txt` remains in the workspace root because the runtime scripts include `F:\.Agent-PromptCardManager\API-Key.txt` as a default local secret path.
 
-`scripts/start-dev-with-agent.ps1` probes storage, Agent Runtime, and frontend health before starting new work. Healthy storage and Agent Runtime processes are reused; a healthy frontend at `http://127.0.0.1:3000/` makes the script exit successfully instead of launching another strict-port Vite process.
+`scripts/start-dev-with-agent.ps1` is the full-stack local orchestrator. It uses `scripts/dev-port-runtime.ps1` to resolve local ports, writes `logs/dev-runtime.json`, exports the matching environment variables, and probes storage, Agent Runtime, and frontend health before starting new work.
 
-The startup script accepts injectable health URLs, timeout seconds, and frontend command parameters for Vitest coverage. The defaults preserve the normal `npm.cmd run dev:with-agent` and `start.bat` behavior.
+Port inputs:
 
-`npm.cmd run tauri:dev` starts the Tauri desktop dev shell. Tauri delegates service startup to `npm.cmd run desktop:dev-services`, which uses the user-data desktop profile instead of repository-local `data/`.
+- `PROMPTCARD_FRONTEND_PORT`: optional strict frontend port. Without it, the frontend prefers `3000` and falls forward when busy.
+- `PROMPTCARD_AGENT_PORT`: optional strict Agent Runtime port. Without it, the orchestrator chooses a free local port.
+- `PROMPTCARD_STORAGE_PORT`: optional strict storage port. Without it, the orchestrator chooses a free local port.
+- `PROMPTCARD_AGENT_URL` and `PROMPTCARD_STORAGE_URL`: exported by the orchestrator for Vite proxy targets.
+- `PROMPTCARD_STORAGE_HEALTH_URL`: exported for the PromptCard Runtime status check.
+
+The startup script accepts injectable health URLs, timeout seconds, frontend command parameters, and runtime manifest path for Vitest coverage. The defaults preserve the normal `npm.cmd run dev:with-agent` and `start.bat` behavior.
+
+`npm.cmd run tauri:dev` starts the Tauri desktop dev shell. Tauri delegates service startup to `npm.cmd run desktop:dev-services`, which reuses `logs/dev-runtime.json` when launched from `scripts/launch-desktop-shell.ps1`.

@@ -7,7 +7,7 @@ if ($env:PROMPTCARD_DESKTOP_USE_APPDATA_PROFILE -eq "1") {
   $ProfileRoot = if ($env:PROMPTCARD_DESKTOP_PROFILE_ROOT) {
     $env:PROMPTCARD_DESKTOP_PROFILE_ROOT
   } else {
-    Join-Path $env:APPDATA "PromptCard-Manager\dev-profile"
+    Join-Path $RepoRoot "logs\desktop-profile"
   }
 
   $DataDir = Join-Path $ProfileRoot "data"

@@ -18,8 +18,8 @@ if not exist node_modules (
 )
 
 echo Starting storage service, Agent Runtime, and Vite frontend...
-echo Frontend: http://localhost:3000/
-echo Storage:  http://127.0.0.1:8002/health
+echo Frontend and service ports are resolved automatically.
+echo Runtime:  logs\dev-runtime.json
 echo.
 echo Press Ctrl+C in this window to stop the Vite frontend.
 echo Background storage and Agent windows can be closed separately if needed.

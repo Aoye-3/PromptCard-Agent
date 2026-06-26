@@ -19,7 +19,7 @@ if not exist node_modules (
 
 echo Starting Tauri desktop shell with editable source...
 echo Window:   PromptCard Manager Dev Shell
-echo Frontend: http://127.0.0.1:3000/
+echo Frontend: resolved automatically; see logs\dev-runtime.json after launch
 echo Data:     repository-local data folder
 echo.
 echo The launcher stays visible until the desktop window opens.

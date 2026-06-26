@@ -13,7 +13,7 @@ The Agent Runtime is a Python service under `agent-runtime/`. It is DeerFlow-der
 ## Runtime Flow
 
 1. Frontend posts a message to `/agent-api/promptcard/runtime/messages`.
-2. Vite proxies to `127.0.0.1:8001/api/promptcard/runtime/messages`.
+2. Vite proxies to `${PROMPTCARD_AGENT_URL}/api/promptcard/runtime/messages`.
 3. The PromptCard adapter creates or reuses a DeerFlow thread.
 4. The adapter builds the PMAgent prompt with workspace context and a bounded Prompt Library snapshot.
 5. DeerFlow runs `lead_agent` with the configured DeepSeek default model, which defaults to `deepseek-chat`.
@@ -30,7 +30,7 @@ npm.cmd run dev:with-agent
 npm.cmd run agent:check
 ```
 
-`dev:with-agent` now treats storage and Agent Runtime as idempotent background services: if health checks pass, the existing service is reused. Logs are written to `logs/storage-service.log`, `logs/storage-service.err.log`, `logs/agent-runtime.log`, and `logs/agent-runtime.err.log`.
+`dev:with-agent` treats storage and Agent Runtime as idempotent background services: if manifest-backed health checks pass, the existing service is reused. The active local URLs are written to `logs/dev-runtime.json`.
 
 ## Configuration
 

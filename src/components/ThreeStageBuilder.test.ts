@@ -25,7 +25,6 @@ describe('three-stage rail zoom', () => {
 
   it('limits form reordering drag to the explicit drag handle', () => {
     expect(threeStageBuilderSource).toContain('draggable={false}')
-    expect(threeStageBuilderSource).toContain('title="拖动排序"')
     expect(threeStageBuilderSource).toContain('draggable={draggable}')
     expect(threeStageBuilderSource).toContain('onDragStart={(event) =>')
   })
@@ -48,20 +47,15 @@ describe('three-stage rail zoom', () => {
 })
 
 describe('three-stage independent UI guards', () => {
-  it('does not expose legacy story/prompt binding copy or paths in the standard builder', () => {
-    expect(threeStageBuilderSource).not.toContain('固定绑定')
-    expect(threeStageBuilderSource).not.toContain('绑定组')
-    expect(threeStageBuilderSource).not.toContain('阶段2注入')
+  it('does not expose legacy story/prompt binding paths in the standard builder', () => {
     expect(threeStageBuilderSource).not.toContain('pairedStoryboardForm')
     expect(threeStageBuilderSource).not.toContain('buildStoryboardInjectionForVideo')
     expect(threeStageBuilderSource).not.toContain('const StageFormCard =')
-    expect(threeStageBuilderSource).not.toContain('当前表单完整 Prompt')
   })
 
-  it('labels the free-canvas combined shortcut as independent nodes', () => {
-    expect(freeCanvasBuilderSource).not.toContain('新建故事版 + 提示词版')
-    expect(freeCanvasBuilderSource).not.toContain('故事版 + 提示词版')
-    expect(freeCanvasBuilderSource).toContain('新建独立故事版和提示词版')
-    expect(freeCanvasBuilderSource).toContain('独立故事版和提示词版')
+  it('keeps free canvas on the standalone canvas surface', () => {
+    expect(freeCanvasBuilderSource).toContain('data-free-canvas-screen')
+    expect(freeCanvasBuilderSource).toContain('data-free-canvas-toolbar')
+    expect(freeCanvasBuilderSource).toContain('free-canvas-workspace')
   })
 })

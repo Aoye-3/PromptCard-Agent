@@ -650,8 +650,9 @@ def _request_config(request: Request):
 
 
 def _storage_health() -> dict[str, Any]:
+    storage_health_url = os.getenv("PROMPTCARD_STORAGE_HEALTH_URL", "http://127.0.0.1:8002/health")
     try:
-        with urllib.request.urlopen("http://127.0.0.1:8002/health", timeout=2) as response:
+        with urllib.request.urlopen(storage_health_url, timeout=2) as response:
             payload = json.loads(response.read().decode("utf-8"))
             return {"ok": response.status == 200, "payload": payload}
     except (OSError, urllib.error.HTTPError, json.JSONDecodeError) as exc:

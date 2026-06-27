@@ -353,6 +353,9 @@ export const normalizeFreeCanvasProject = (
 export const freeCanvasTextDisplay = (node: IFreeCanvasTextNode): string =>
   node.segments.map(segment => segment.text).filter(Boolean).join('\n')
 
+export const freeCanvasTextSegmentsToPlainText = (segments: IFreeCanvasTextSegment[]): string =>
+  segments.map(segment => segment.text).join('')
+
 export const freeCanvasPresetText = (node: IFreeCanvasTextNode): string =>
   node.segments.filter(segment => segment.source === 'preset').map(segment => segment.text).filter(Boolean).join('\n')
 

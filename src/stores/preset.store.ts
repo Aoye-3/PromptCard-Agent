@@ -2,6 +2,12 @@ import { create } from 'zustand'
 import type { IPreset, ICard } from '@/models/Card.model'
 import { storage } from '@/utils/storage'
 import { reorderPresetsByCategory, type PresetReorderType } from './preset-order'
+import {
+  LEGACY_QUICK_MESSAGE_SETTINGS_KEY,
+  createQuickMessagePresetInput,
+  getQuickMessageLegacyId,
+  normalizeLegacyQuickMessage
+} from '@/domain/prompt-library/quick-messages'
 
 interface PresetState {
   presets: IPreset[]
@@ -29,6 +35,7 @@ export const usePresetStore = create<PresetState>((set, get) => ({
   init: async () => {
     if (get().initialized || get().loading) return
     await get().refresh()
+    await migrateLegacyQuickMessages(get().presets, presets => set({ presets }))
   },
 
   refresh: async () => {
@@ -103,3 +110,47 @@ export const usePresetStore = create<PresetState>((set, get) => ({
     )
   }
 }))
+
+const migrateLegacyQuickMessages = async (
+  presets: IPreset[],
+  setPresets: (presets: IPreset[]) => void
+): Promise<void> => {
+  try {
+    const settings = await storage.settings.get()
+    const raw = settings.meta?.[LEGACY_QUICK_MESSAGE_SETTINGS_KEY]
+    if (!Array.isArray(raw)) return
+
+    const existingLegacyIds = new Set(presets.map(getQuickMessageLegacyId).filter((id): id is string => Boolean(id)))
+    const legacyPresets = raw.flatMap(value => {
+      const legacy = normalizeLegacyQuickMessage(value)
+      if (!legacy || existingLegacyIds.has(legacy.id)) return []
+      existingLegacyIds.add(legacy.id)
+      return [legacy]
+    })
+    if (legacyPresets.length === 0) return
+
+    const created: IPreset[] = []
+    for (const legacy of legacyPresets) {
+      const draft = createQuickMessagePresetInput({
+        name: legacy.name,
+        body: legacy.body
+      }, {
+        legacyId: legacy.id,
+        createdAt: legacy.createdAt
+      })
+      created.push(await storage.presets.create({
+        ...draft,
+        id: `preset-quick-${legacy.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`,
+        usageCount: 0
+      }))
+    }
+
+    const ordered = await storage.presets.reorder([
+      ...created.map(preset => preset.id),
+      ...presets.map(preset => preset.id)
+    ])
+    setPresets(ordered)
+  } catch (error) {
+    console.error('Failed to migrate legacy quick messages:', error)
+  }
+}

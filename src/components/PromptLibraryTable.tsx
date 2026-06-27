@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { IPreset } from '@/models/Card.model'
 import { useI18n } from '@/i18n'
 import { getPresetMedia } from '@/domain/prompt-media/prompt-media'
+import { QUICK_MESSAGE_LABEL, isQuickMessagePreset } from '@/domain/prompt-library/quick-messages'
 import { Image, PlaySquare } from 'lucide-react'
 
 interface PromptLibraryTableProps {
@@ -59,6 +60,7 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onPre
       timing: 'bg-amber-100 text-amber-700',
       audio: 'bg-teal-100 text-teal-700',
       constraint: 'bg-purple-100 text-purple-700',
+      'quick-message': 'bg-red-50 text-red-700',
       custom: 'bg-gray-100 text-gray-700'
     }
     return colorMap[type] || 'bg-gray-100 text-gray-700'
@@ -106,6 +108,8 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onPre
             const media = getPresetMedia(preset)
             const imageCount = media.filter(item => item.kind === 'image').length
             const videoCount = media.filter(item => item.kind === 'video').length
+            const typeLabel = isQuickMessagePreset(preset) ? QUICK_MESSAGE_LABEL : cardTypeLabel(preset.type)
+            const typeColorKey = isQuickMessagePreset(preset) ? 'quick-message' : preset.type
             return (
             <tr
               key={preset.id}
@@ -155,8 +159,8 @@ const PromptLibraryTable = ({ presets, selectedIds = [], onEdit, onDelete, onPre
                 </span>
               </td>
               <td className="px-3 py-4">
-                <span className={`inline-flex max-w-full rounded-full px-2 py-1 text-xs font-semibold leading-5 ${getTypeColor(preset.type)}`}>
-                  {cardTypeLabel(preset.type)}
+                <span className={`inline-flex max-w-full rounded-full px-2 py-1 text-xs font-semibold leading-5 ${getTypeColor(typeColorKey)}`}>
+                  {typeLabel}
                 </span>
               </td>
               <td className="px-3 py-4">

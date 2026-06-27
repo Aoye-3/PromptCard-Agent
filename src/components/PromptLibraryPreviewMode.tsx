@@ -2,7 +2,18 @@ import { useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { Check, Copy, Database, Image, PlaySquare, Search } from 'lucide-react'
 import { useI18n } from '@/i18n'
 import { getPresetMedia, getPresetMediaSearchText } from '@/domain/prompt-media/prompt-media'
+import {
+  QUICK_MESSAGE_CATEGORY,
+  QUICK_MESSAGE_LABEL,
+  isQuickMessagePreset,
+  quickMessageSearchText
+} from '@/domain/prompt-library/quick-messages'
 import type { IPreset } from '@/models/Card.model'
+
+export interface PromptLibraryCategory {
+  type: string
+  label: string
+}
 
 export interface PromptLibraryPreviewModeProps {
   presets: IPreset[]
@@ -10,7 +21,7 @@ export interface PromptLibraryPreviewModeProps {
   visibleCount: number
   mediaCount: number
   searchTerm: string
-  cardTypes: { type: string; label: string }[]
+  cardTypes: PromptLibraryCategory[]
   categoryCounts: Record<string, number>
   onCategoryChange: (type: string) => void
   onSearchChange: (searchTerm: string) => void
@@ -20,7 +31,7 @@ export interface PromptLibraryPreviewModeProps {
 
 export interface PromptLibraryPreviewPanelProps {
   presets: IPreset[]
-  cardTypes: { type: string; label: string }[]
+  cardTypes: PromptLibraryCategory[]
   compact?: boolean
   onPreview: (preset: IPreset) => void
 }
@@ -33,13 +44,17 @@ export const PromptLibraryPreviewPanel = ({
 }: PromptLibraryPreviewPanelProps) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [activeCategory, setActiveCategory] = useState<string>('all')
+  const promptLibraryCategories = useMemo(
+    () => createPromptLibraryCategories(cardTypes),
+    [cardTypes]
+  )
   const filteredPresets = useMemo(
     () => filterPromptLibraryPresets(presets, searchTerm, activeCategory),
     [activeCategory, presets, searchTerm]
   )
   const categoryCounts = useMemo(
-    () => createCategoryCounts(cardTypes, presets),
-    [cardTypes, presets]
+    () => createCategoryCounts(promptLibraryCategories, presets),
+    [promptLibraryCategories, presets]
   )
   const mediaCount = useMemo(
     () => presets.reduce((count, preset) => count + getPresetMedia(preset).length, 0),
@@ -53,7 +68,7 @@ export const PromptLibraryPreviewPanel = ({
       visibleCount={presets.length}
       mediaCount={mediaCount}
       searchTerm={searchTerm}
-      cardTypes={cardTypes}
+      cardTypes={promptLibraryCategories}
       categoryCounts={categoryCounts}
       onCategoryChange={setActiveCategory}
       onSearchChange={setSearchTerm}
@@ -131,18 +146,31 @@ export const filterPromptLibraryPresets = (
     preset.label.toLowerCase().includes(keyword) ||
     preset.content.toLowerCase().includes(keyword) ||
     preset.category.toLowerCase().includes(keyword) ||
+    quickMessageSearchText(preset).toLowerCase().includes(keyword) ||
     getPresetMediaSearchText(preset).toLowerCase().includes(keyword)
-  const matchesCategory = activeCategory === 'all' || preset.type === activeCategory
+  const matchesCategory = matchesPromptLibraryCategory(preset, activeCategory)
   return matchesSearch && matchesCategory
 })
 
 export const createCategoryCounts = (
-  cardTypes: { type: string }[],
+  cardTypes: Pick<PromptLibraryCategory, 'type'>[],
   presets: IPreset[]
 ) => cardTypes.reduce((counts, type) => {
-  counts[type.type] = presets.filter(preset => preset.type === type.type).length
+  counts[type.type] = presets.filter(preset => matchesPromptLibraryCategory(preset, type.type)).length
   return counts
 }, {} as Record<string, number>)
+
+export const createPromptLibraryCategories = (cardTypes: PromptLibraryCategory[]): PromptLibraryCategory[] => [
+  ...cardTypes,
+  { type: QUICK_MESSAGE_CATEGORY, label: QUICK_MESSAGE_LABEL }
+]
+
+export const matchesPromptLibraryCategory = (preset: IPreset, activeCategory: string): boolean => {
+  if (activeCategory === 'all') return true
+  if (activeCategory === QUICK_MESSAGE_CATEGORY) return isQuickMessagePreset(preset)
+  if (activeCategory === 'custom') return preset.type === 'custom' && !isQuickMessagePreset(preset)
+  return preset.type === activeCategory
+}
 
 const CategoryFilter = ({
   cardTypes,
@@ -152,7 +180,7 @@ const CategoryFilter = ({
   onCategoryChange,
   compact
 }: {
-  cardTypes: { type: string; label: string }[]
+  cardTypes: PromptLibraryCategory[]
   activeCategory: string
   visibleCount: number
   categoryCounts: Record<string, number>
@@ -201,6 +229,7 @@ const PromptPreviewCard = ({
   const media = getPresetMedia(preset)
   const imageCount = media.filter(item => item.kind === 'image').length
   const videoCount = media.filter(item => item.kind === 'video').length
+  const typeLabel = isQuickMessagePreset(preset) ? QUICK_MESSAGE_LABEL : cardTypeLabel(preset.type)
 
   const copyPresetContent = async (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
@@ -228,13 +257,13 @@ const PromptPreviewCard = ({
     >
       <div className="flex items-center gap-2">
         <span className={`flex shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-black leading-4 text-gray-700 ${compact ? 'h-9 w-9' : 'h-10 w-10'}`}>
-          {cardTypeLabel(preset.type).slice(0, 2)}
+          {typeLabel.slice(0, 2)}
         </span>
       </div>
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate text-xs text-gray-400">{preset.type}</span>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{cardTypeLabel(preset.type)}</span>
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{typeLabel}</span>
         </div>
         <h3 className={`${compact ? 'text-sm' : 'text-base'} mt-1 line-clamp-2 font-black leading-5 text-gray-950`}>{preset.label}</h3>
         {compact && <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-600">{preset.content}</p>}

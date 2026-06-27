@@ -24,9 +24,20 @@ Text nodes store visible text as ordered segments:
 - The UI presents both as one editable-looking node; color is the only visible distinction.
 - Agent edits are restricted to user segments through `free_canvas_text_update`.
 
-Quick message presets are user-level local settings under `settings.meta.freeCanvasQuickTextPresets`.
-Each preset is only a text string. Clicking a quick message creates a new text node with the
-preset content as a red `preset` segment; later typing creates or updates black `user` text.
+Quick messages are Prompt Library presets in the dedicated `quick-message` category. Clicking a
+quick message creates a new text node with the preset content as a red `preset` segment; later
+typing creates or updates black `user` text.
+
+Quick-message reference media belongs to Prompt Library preview (`meta.media`). It is not inserted
+into the canvas when a quick message is clicked.
+
+Legacy quick messages from `settings.meta.freeCanvasQuickTextPresets` are read as a compatibility
+source and migrated into Prompt Library presets with `meta.quickMessage.legacyId`. New quick
+message creates, edits, deletes, Trash, and restores use the Prompt Library preset store.
+
+Quick-message notes are historical only. The Free Canvas drawer and lightweight quick-message
+dialog show and edit only the name and template body; they do not display or write
+`meta.quickMessage.note`.
 
 ### Interaction Rules
 
@@ -34,6 +45,8 @@ preset content as a red `preset` segment; later typing creates or updates black 
 - Hold `Space` while left-dragging the empty canvas to pan the viewport.
 - Node dragging remains enabled from the node body when the node is not in an editing state.
 - Text node toolbars are single-selection only. Multi-select must not show per-node edit controls.
+- Text node toolbars expose Edit, Copy, font size, and user-text color controls. Copy writes the ordered visible text segments to the clipboard and preserves segment newlines.
+- The text node font-size selector keeps the stored `small`, `medium`, `large`, `extra-large`, and `huge` values while rendering with high-contrast closed-state text on the dark toolbar.
 - Text nodes created from quick messages start selected but not editing, so they can be moved or deleted immediately.
 - Empty text nodes created from the toolbar still enter editing mode immediately.
 
@@ -116,6 +129,7 @@ The Free Canvas right panel has an `Agent` / `Prompt库` segmented switcher.
 - `Agent` keeps the existing `free-canvas-workspace` Agent chat flow.
 - `Prompt库` embeds the reusable prompt library preview panel.
 - Prompt library preview supports search, category filters, preset/media preview, and copy actions.
+- The preview category filter includes `快捷消息`, backed by Prompt Library quick-message presets.
 - Prompt clicks open `PromptPresetPreviewDialog`; they do not insert text into the canvas or fill the Agent input.
 - Management functions such as edit mode, add-to-library, Trash, and Agent ingestion are intentionally hidden in the embedded preview.
 - `previewMode` still disables Agent Runtime, while Prompt library preview can read locally available presets.
@@ -136,3 +150,7 @@ annotation editor, verifying mode-filtered annotation editing, checking that mod
 deletes the image node, confirming arrow/freehand gestures stop on pointer release, cropping an
 image from each edge direction, connecting nodes, switching the side panel between Agent and
 Prompt library preview, and approving a `free_canvas_text_update` proposal.
+
+Quick-message manual checks should confirm the drawer and lightweight dialog have no note field,
+and that clicking a quick message inserts only a red preset text node even when the preset has
+reference media in Prompt Library.

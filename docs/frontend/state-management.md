@@ -24,13 +24,21 @@ Cards use the `ICard` schema and are grouped into pages from `card-initial-state
 `preset.store` owns Prompt library state:
 
 - preset initialization
+- legacy Free Canvas quick-message migration
 - type filtering
+- quick-message category filtering
 - create, update, delete
 - reorder by category/type
 - usage count increments
 - text search
 
 The store preserves `IPreset` compatibility and persists changes through `storage.presets`.
+
+Quick messages are stored as `IPreset` records with `category: "quick-message"` and `type: "custom"`.
+They are not a new card type. The store migrates old `settings.meta.freeCanvasQuickTextPresets`
+records once by preserving each legacy id in `meta.quickMessage.legacyId`.
+Quick-message UI drafts contain only `name` and `body`; reference media remains in the preset
+`meta.media` payload and old notes remain historical data only.
 
 ### Agent Store
 
@@ -106,6 +114,11 @@ Supported card types include subject, action, scene, style, camera, lighting, ti
 - optional timestamps
 
 Any Agent or UI feature that writes Prompt library data should preserve this contract.
+
+Free Canvas quick messages use this same contract. The prompt body remains `content`, and
+`meta.quickMessage.note` is treated only as a legacy field that new writes must not preserve.
+Reference media is shared through `meta.media` for Prompt Library preview and is not inserted into
+Free Canvas text nodes.
 
 Prompt Library is the only UI surface allowed to approve Agent-generated writes to this contract. Builder chatboxes may select or reuse existing presets, but must not create, update, or archive presets. Prompt Library Agent approvals are additive only; they create new presets and never update, delete, archive, overwrite, or replace existing presets.
 

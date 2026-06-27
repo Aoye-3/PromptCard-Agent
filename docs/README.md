@@ -6,6 +6,7 @@ This is the single entry point for the maintained project documentation. Histori
 
 - [Project Overview](./00-project-overview.md)
 - [Architecture](./architecture/README.md)
+- [Architecture Decisions](./decisions/README.md)
 - [Tech Stack](./tech-stack/README.md)
 - [API](./api/README.md)
 - [Frontend](./frontend/README.md)
@@ -57,5 +58,6 @@ When code changes, update the nearest documentation category in the same change.
 - Keep DeepSeek model configuration unified in the Agent panel and backend local config. Do not create another browser-local model settings source.
 - Treat `workspaceContext.snapshot` as the per-request current workspace view. Do not use selected cards, current rows, or focused fields as the thread identity unless a future spec explicitly changes the product model.
 - Keep permission scopes narrow: `prompt-library-agent` is the only Prompt Library write proposal surface; `workspace-chatbot-agent` is for project-local card, storyboard, and three-stage edits.
+- Keep Free Canvas quick messages in the Prompt Library preset model (`category: "quick-message"`); see [ADR-001](./decisions/ADR-001-prompt-library-quick-messages.md).
 - Any ToolUse expansion needs documentation of the visible UI affordance, runtime tool permission, and proposal or approval boundary.
 - Update this README plus the closest architecture/API/frontend/backend docs whenever Agent routing, storage, model configuration, or project workflows change.

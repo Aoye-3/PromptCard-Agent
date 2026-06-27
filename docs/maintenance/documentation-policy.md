@@ -5,6 +5,7 @@ Docs describe current code truth. Planned or incomplete capabilities must be lab
 ## Placement
 
 - Architecture changes go under `architecture/`.
+- Durable architecture or data-model decisions go under `decisions/` as ADRs.
 - Stack and tool changes go under `tech-stack/`.
 - Endpoint changes go under `api/`.
 - UI and state changes go under `frontend/`.

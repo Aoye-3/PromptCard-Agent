@@ -24,6 +24,7 @@ On first initialization, `preset.store` loads presets through `storage.presets.g
 The preset store supports:
 
 - filtering by card type
+- filtering quick messages through the dedicated `quick-message` category
 - adding a preset
 - updating a preset
 - deleting a preset
@@ -35,6 +36,41 @@ The preset store supports:
 - searching by label or content
 
 UI features should call these store methods instead of writing storage directly.
+
+## Quick Messages
+
+Free Canvas quick messages are managed as normal Prompt Library records with the existing `IPreset` contract:
+
+- `type: "custom"`
+- `category: "quick-message"`
+- `label` stores the quick message name
+- `content` stores the template body
+- `meta.quickMessage.legacyId` links records migrated from old Free Canvas settings
+
+The `quick-message` filter is a Prompt Library category, not a new `CardType`. It appears in the category filter beside the card-type filters, but quick-message presets are excluded from the normal `custom` count so they do not appear twice.
+
+Prompt Library edit mode owns project-outside quick message CRUD. Free Canvas may consume and edit these same presets, but new quick messages are no longer written to `settings.meta.freeCanvasQuickTextPresets`.
+
+Quick messages may use the same reference media metadata as normal presets through `meta.media`. Media upload, removal, table badges, and preview dialog rendering are shared with normal Prompt Library presets.
+
+`meta.quickMessage.note` is a legacy field only. New quick-message creates and edits do not show, search, preserve, or write notes.
+
+See [ADR-001](../decisions/ADR-001-prompt-library-quick-messages.md) for the decision to model quick messages as Prompt Library presets instead of adding a new card type, storage table, or settings-backed source.
+
+## Add / Edit Form
+
+`PromptLibraryForm` is the shared create/edit surface for normal presets and quick messages.
+
+- Desktop layout mirrors `PromptPresetPreviewDialog`: a fixed-size two-column modal with media on the left and editable prompt fields on the right.
+- Narrow viewports may stack the same regions vertically to avoid horizontal overflow.
+- The left column manages reference media for both normal presets and quick messages. Upload still uses the existing asset path and persists media through `meta.media`.
+- The right column edits `type`, `label`, and `content` for normal presets.
+- In quick-message mode, the right column edits only the quick-message name and template body. Type is hidden and stored as `custom`; category is stored as `quick-message`.
+- Quick-message notes are intentionally absent from the form. Saving a quick message removes any old `meta.quickMessage.note` while preserving supported metadata such as `legacyId` and `meta.media`.
+
+## Edit Mode Agent Panel Width
+
+Prompt Library edit mode uses a resizable split layout between the preset table and `PMAgent 助手`. The desktop-only separator stores the Agent panel width in `settings.meta.promptLibraryAgentPanelWidthPx`. The value is clamped at runtime so the Agent panel remains readable and the preset table keeps a minimum working width. Preview mode and embedded preview panels do not use this setting.
 
 Three-stage structured fields reuse this same store. Shot-related fields bind to existing `camera` presets in the right-side field editor, where users can append or replace the focused field and usage count is incremented through `incrementUsage()`.
 
@@ -115,3 +151,5 @@ npm.cmd run build
 ```
 
 Manual checks should cover the full Prompt Library preview dialog, Free Canvas side-panel Prompt Library preview, prompt copy buttons in both list and dialog surfaces, and confirming that embedded preview mode does not expose management controls.
+
+Manual edit-mode checks should also cover the two-column create/edit form, media upload and removal from the left column, normal preset type/name/content saving from the right column, and quick-message editing without any note field.

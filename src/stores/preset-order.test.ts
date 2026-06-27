@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import type { IPreset } from '@/models/Card.model'
 import { reorderPresetsByCategory } from './preset-order'
+import { QUICK_MESSAGE_CATEGORY } from '@/domain/prompt-library/quick-messages'
 
 const preset = (id: string, type: IPreset['type'], label = id): IPreset => ({
   id,
@@ -10,6 +11,12 @@ const preset = (id: string, type: IPreset['type'], label = id): IPreset => ({
   content: label,
   usageCount: 0,
   meta: {}
+})
+
+const quickMessagePreset = (id: string, label = id): IPreset => ({
+  ...preset(id, 'custom', label),
+  category: QUICK_MESSAGE_CATEGORY,
+  meta: { quickMessage: { kind: QUICK_MESSAGE_CATEGORY } }
 })
 
 describe('reorderPresetsByCategory', () => {
@@ -47,5 +54,37 @@ describe('reorderPresetsByCategory', () => {
     const result = reorderPresetsByCategory(presets, 'scene', ['scene-3', 'scene-1'])
 
     expect(result.map(item => item.id)).toEqual(['scene-3', 'scene-1', 'scene-2'])
+  })
+
+  test('reorders quick messages without moving normal custom presets', () => {
+    const presets = [
+      preset('custom-1', 'custom'),
+      quickMessagePreset('quick-1'),
+      preset('subject-1', 'subject'),
+      quickMessagePreset('quick-2'),
+      preset('custom-2', 'custom')
+    ]
+
+    const result = reorderPresetsByCategory(presets, QUICK_MESSAGE_CATEGORY, ['quick-2', 'quick-1'])
+
+    expect(result.map(item => item.id)).toEqual([
+      'custom-1',
+      'quick-2',
+      'subject-1',
+      'quick-1',
+      'custom-2'
+    ])
+  })
+
+  test('normal custom sorting excludes quick message presets', () => {
+    const presets = [
+      preset('custom-1', 'custom'),
+      quickMessagePreset('quick-1'),
+      preset('custom-2', 'custom')
+    ]
+
+    const result = reorderPresetsByCategory(presets, 'custom', ['custom-2', 'custom-1'])
+
+    expect(result.map(item => item.id)).toEqual(['custom-2', 'quick-1', 'custom-1'])
   })
 })

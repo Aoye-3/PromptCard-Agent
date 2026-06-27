@@ -1,22 +1,37 @@
-import { useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react'
-import { ArchiveRestore, Check, Copy, Database, Grid2X2, Image, ListChecks, PlaySquare, Plus, Search, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react'
+import { ArchiveRestore, Check, Copy, Database, GripVertical, Grid2X2, Image, ListChecks, PlaySquare, Plus, Search, Trash2, X } from 'lucide-react'
 import { usePresetStore } from '@/stores/preset.store'
 import PromptLibraryTable from './PromptLibraryTable'
 import PromptLibraryForm, { type PromptLibraryFormSave } from './PromptLibraryForm'
 import { PromptLibraryAgentPanel } from './PromptLibraryAgentPanel'
-import { createCategoryCounts, filterPromptLibraryPresets } from './PromptLibraryPreviewMode'
+import { createCategoryCounts, createPromptLibraryCategories, filterPromptLibraryPresets, type PromptLibraryCategory } from './PromptLibraryPreviewMode'
 import { PromptPresetPreviewDialog } from './prompt-media/PromptPresetPreviewDialog'
-import type { CardType, IPreset } from '@/models/Card.model'
+import type { IPreset } from '@/models/Card.model'
+import type { PresetReorderType } from '@/stores/preset-order'
+import { QUICK_MESSAGE_LABEL, isQuickMessagePreset } from '@/domain/prompt-library/quick-messages'
 import { useI18n } from '@/i18n'
 import { storage } from '@/utils/storage'
 import type { TrashEntry } from '@/storage/storage-service-client'
 import { getPresetMedia } from '@/domain/prompt-media/prompt-media'
+import {
+  PROMPT_LIBRARY_AGENT_PANEL_KEYBOARD_STEP,
+  PROMPT_LIBRARY_AGENT_PANEL_SETTINGS_KEY,
+  clampPromptLibraryAgentPanelWidth,
+  getPromptLibraryAgentPanelDefaultWidth,
+  getPromptLibraryAgentPanelWidthBounds
+} from '@/domain/prompt-library/agent-panel-layout'
 
 interface PromptLibraryProps {
   embedded?: boolean
 }
 
 type PromptLibraryMode = 'preview' | 'edit'
+
+interface AgentPanelResizeState {
+  startX: number
+  startWidth: number
+  containerWidth: number
+}
 
 const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
   const { t, cardTypeLabel } = useI18n()
@@ -42,10 +57,54 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
   const [selectedTrashIds, setSelectedTrashIds] = useState<string[]>([])
   const [showTrash, setShowTrash] = useState(false)
   const [trashItems, setTrashItems] = useState<TrashEntry<IPreset>[]>([])
+  const [editLayoutWidth, setEditLayoutWidth] = useState(0)
+  const [agentPanelWidth, setAgentPanelWidth] = useState(() => getPromptLibraryAgentPanelDefaultWidth(0))
+  const [isResizingAgentPanel, setIsResizingAgentPanel] = useState(false)
+  const editLayoutRef = useRef<HTMLDivElement | null>(null)
+  const agentPanelResizeRef = useRef<AgentPanelResizeState | null>(null)
 
   useEffect(() => {
     init()
   }, [init])
+
+  useEffect(() => {
+    let cancelled = false
+    storage.settings.get()
+      .then(settings => {
+        if (cancelled) return
+        setAgentPanelWidth(clampPromptLibraryAgentPanelWidth(
+          settings.meta?.[PROMPT_LIBRARY_AGENT_PANEL_SETTINGS_KEY],
+          editLayoutWidth
+        ))
+      })
+      .catch(error => {
+        console.error('Failed to load prompt library layout settings:', error)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [editLayoutWidth])
+
+  useEffect(() => {
+    if (mode !== 'edit') return
+    const layout = editLayoutRef.current
+    if (!layout) return
+
+    const updateWidth = () => {
+      setEditLayoutWidth(layout.getBoundingClientRect().width)
+    }
+    updateWidth()
+
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(layout)
+    return () => observer.disconnect()
+  }, [mode])
+
+  useEffect(() => {
+    if (editLayoutWidth <= 0) return
+    setAgentPanelWidth(width => clampPromptLibraryAgentPanelWidth(width, editLayoutWidth))
+  }, [editLayoutWidth])
 
   useEffect(() => {
     storage.presets.getTrash().then(setTrashItems).catch(error => {
@@ -65,13 +124,14 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
     { type: 'constraint', label: cardTypeLabel('constraint') },
     { type: 'custom', label: cardTypeLabel('custom') }
   ], [cardTypeLabel])
+  const promptLibraryCategories = useMemo(() => createPromptLibraryCategories(cardTypes), [cardTypes])
 
   const visiblePresets = showTrash && mode === 'edit' ? trashItems.map(item => item.payload) : presets
   const filteredPresets = filterPromptLibraryPresets(visiblePresets, searchTerm, activeCategory)
   const isSearchActive = searchTerm.trim().length > 0
   const canReorder = activeCategory !== 'all' && !isSearchActive && filteredPresets.length > 1
 
-  const categoryCounts = createCategoryCounts(cardTypes, visiblePresets)
+  const categoryCounts = createCategoryCounts(promptLibraryCategories, visiblePresets)
   const mediaCount = visiblePresets.reduce((count, preset) => count + getPresetMedia(preset).length, 0)
 
   const handleSavePreset = async (presetData: PromptLibraryFormSave) => {
@@ -99,7 +159,7 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
 
   const handleReorderPresets = async (orderedIds: string[]) => {
     if (activeCategory === 'all' || isSearchActive) return
-    await reorderPresets(activeCategory as CardType, orderedIds)
+    await reorderPresets(activeCategory as PresetReorderType, orderedIds)
   }
 
   const toggleSelected = (id: string) => {
@@ -132,6 +192,78 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
     setTrashItems(await storage.presets.getTrash())
     await refresh()
   }
+
+  const saveAgentPanelWidth = useCallback(async (width: number) => {
+    try {
+      const settings = await storage.settings.get()
+      await storage.settings.save({
+        meta: {
+          ...(settings.meta || {}),
+          [PROMPT_LIBRARY_AGENT_PANEL_SETTINGS_KEY]: width
+        }
+      })
+    } catch (error) {
+      console.error('Failed to save prompt library layout settings:', error)
+    }
+  }, [])
+
+  const startAgentPanelResize = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    const containerWidth = editLayoutRef.current?.getBoundingClientRect().width || editLayoutWidth
+    agentPanelResizeRef.current = {
+      startX: event.clientX,
+      startWidth: agentPanelWidth,
+      containerWidth
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault()
+    setIsResizingAgentPanel(true)
+  }
+
+  const moveAgentPanelResize = (event: PointerEvent<HTMLButtonElement>) => {
+    const state = agentPanelResizeRef.current
+    if (!state) return
+    const nextWidth = clampPromptLibraryAgentPanelWidth(
+      state.startWidth - (event.clientX - state.startX),
+      state.containerWidth
+    )
+    setAgentPanelWidth(nextWidth)
+  }
+
+  const finishAgentPanelResize = (event: PointerEvent<HTMLButtonElement>) => {
+    const state = agentPanelResizeRef.current
+    if (!state) return
+    const nextWidth = clampPromptLibraryAgentPanelWidth(
+      state.startWidth - (event.clientX - state.startX),
+      state.containerWidth
+    )
+    agentPanelResizeRef.current = null
+    setAgentPanelWidth(nextWidth)
+    setIsResizingAgentPanel(false)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    void saveAgentPanelWidth(nextWidth)
+  }
+
+  const handleAgentPanelResizeKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    const bounds = getPromptLibraryAgentPanelWidthBounds(editLayoutWidth)
+    let nextWidth: number | null = null
+    if (event.key === 'ArrowLeft') nextWidth = agentPanelWidth + PROMPT_LIBRARY_AGENT_PANEL_KEYBOARD_STEP
+    if (event.key === 'ArrowRight') nextWidth = agentPanelWidth - PROMPT_LIBRARY_AGENT_PANEL_KEYBOARD_STEP
+    if (event.key === 'Home') nextWidth = bounds.max
+    if (event.key === 'End') nextWidth = bounds.min
+    if (nextWidth === null) return
+    event.preventDefault()
+    const clamped = clampPromptLibraryAgentPanelWidth(nextWidth, editLayoutWidth)
+    setAgentPanelWidth(clamped)
+    void saveAgentPanelWidth(clamped)
+  }
+
+  const agentPanelWidthBounds = getPromptLibraryAgentPanelWidthBounds(editLayoutWidth)
+  const editLayoutStyle = {
+    '--prompt-library-agent-panel-width': `${agentPanelWidth}px`
+  } as CSSProperties
 
   return (
     <div className={embedded ? 'flex h-full flex-col overflow-hidden bg-white' : 'flex h-screen flex-col overflow-hidden bg-white'}>
@@ -177,7 +309,10 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
               <>
                 <button
                   className="rounded-full bg-black px-4 py-2 text-sm font-semibold text-white transition hover:bg-gray-800"
-                  onClick={() => setIsFormOpen(true)}
+                  onClick={() => {
+                    setEditingPreset(null)
+                    setIsFormOpen(true)
+                  }}
                 >
                   <Plus className="h-4 w-4" />
                   {t('addPrompt')}
@@ -207,15 +342,21 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
             visibleCount={visiblePresets.length}
             mediaCount={mediaCount}
             cardTypes={cardTypes}
+            promptLibraryCategories={promptLibraryCategories}
             categoryCounts={categoryCounts}
             onCategoryChange={setActiveCategory}
             onPreview={setPreviewPreset}
           />
         ) : (
-          <div className="mx-auto grid h-full max-w-[1900px] gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(500px,0.82fr)]">
+          <div
+            ref={editLayoutRef}
+            className="mx-auto grid h-full max-w-[1900px] gap-5 xl:grid-cols-[minmax(0,1fr)_16px_var(--prompt-library-agent-panel-width)]"
+            style={editLayoutStyle}
+          >
             <div className="flex min-h-0 min-w-0 flex-col overflow-hidden">
               <CategoryFilter
                 cardTypes={cardTypes}
+                promptLibraryCategories={promptLibraryCategories}
                 activeCategory={activeCategory}
                 visibleCount={visiblePresets.length}
                 categoryCounts={categoryCounts}
@@ -273,6 +414,26 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
                 </div>
               </div>
             </div>
+            <button
+              type="button"
+              role="separator"
+              aria-label="调整 Agent 面板宽度"
+              aria-orientation="vertical"
+              aria-valuemin={agentPanelWidthBounds.min}
+              aria-valuemax={agentPanelWidthBounds.max}
+              aria-valuenow={agentPanelWidth}
+              data-testid="prompt-library-agent-resize-handle"
+              className={`hidden h-full min-h-[240px] cursor-col-resize items-center justify-center rounded-full text-gray-300 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-200 xl:flex ${isResizingAgentPanel ? 'bg-gray-100 text-gray-700' : ''}`}
+              onPointerDown={startAgentPanelResize}
+              onPointerMove={moveAgentPanelResize}
+              onPointerUp={finishAgentPanelResize}
+              onPointerCancel={finishAgentPanelResize}
+              onKeyDown={handleAgentPanelResizeKeyDown}
+            >
+              <span className="flex h-16 w-2 items-center justify-center rounded-full bg-gray-100">
+                <GripVertical className="h-4 w-4" />
+              </span>
+            </button>
             <PromptLibraryAgentPanel />
           </div>
         )}
@@ -282,6 +443,7 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
         <PromptLibraryForm
           editingPreset={editingPreset}
           cardTypes={cardTypes}
+          activeCategory={activeCategory}
           onSave={handleSavePreset}
           onCancel={() => {
             setIsFormOpen(false)
@@ -298,13 +460,14 @@ const PromptLibrary = ({ embedded = false }: PromptLibraryProps) => {
 }
 
 const CategoryFilter = ({
-  cardTypes,
+  promptLibraryCategories,
   activeCategory,
   visibleCount,
   categoryCounts,
   onCategoryChange
 }: {
-  cardTypes: { type: string; label: string }[]
+  cardTypes?: { type: string; label: string }[]
+  promptLibraryCategories: PromptLibraryCategory[]
   activeCategory: string
   visibleCount: number
   categoryCounts: Record<string, number>
@@ -324,7 +487,7 @@ const CategoryFilter = ({
         >
           {t('all')} <span className="ml-1 text-xs opacity-70">{visibleCount}</span>
         </button>
-        {cardTypes.map(type => (
+        {promptLibraryCategories.map(type => (
           <button
             key={type.type}
             className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${activeCategory === type.type ? 'bg-black text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
@@ -343,7 +506,7 @@ const PromptLibraryPreviewMode = ({
   activeCategory,
   visibleCount,
   mediaCount,
-  cardTypes,
+  promptLibraryCategories,
   categoryCounts,
   onCategoryChange,
   onPreview
@@ -352,14 +515,15 @@ const PromptLibraryPreviewMode = ({
   activeCategory: string
   visibleCount: number
   mediaCount: number
-  cardTypes: { type: string; label: string }[]
+  cardTypes?: { type: string; label: string }[]
+  promptLibraryCategories: PromptLibraryCategory[]
   categoryCounts: Record<string, number>
   onCategoryChange: (type: string) => void
   onPreview: (preset: IPreset) => void
 }) => (
   <div className="mx-auto flex h-full max-w-[1600px] flex-col overflow-hidden">
     <CategoryFilter
-      cardTypes={cardTypes}
+      promptLibraryCategories={promptLibraryCategories}
       activeCategory={activeCategory}
       visibleCount={visibleCount}
       categoryCounts={categoryCounts}
@@ -389,6 +553,7 @@ const PromptPreviewCard = ({ preset, onPreview }: { preset: IPreset; onPreview: 
   const media = getPresetMedia(preset)
   const imageCount = media.filter(item => item.kind === 'image').length
   const videoCount = media.filter(item => item.kind === 'video').length
+  const typeLabel = isQuickMessagePreset(preset) ? QUICK_MESSAGE_LABEL : cardTypeLabel(preset.type)
   const copyPresetContent = async (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation()
     await navigator.clipboard.writeText(preset.content)
@@ -417,7 +582,7 @@ const PromptPreviewCard = ({ preset, onPreview }: { preset: IPreset; onPreview: 
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <span className="truncate text-xs text-gray-400">{preset.type}</span>
-          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{cardTypeLabel(preset.type)}</span>
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{typeLabel}</span>
         </div>
         <h3 className="mt-1 line-clamp-2 text-base font-black leading-5 text-gray-950">{preset.label}</h3>
       </div>

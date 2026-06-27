@@ -25,7 +25,7 @@ import {
   useReactFlow
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ArrowLeft, ArrowRight, Bot, BookOpen, Brush, ChevronRight, Hash, Image as ImageIcon, MessageSquare, MousePointer2, Palette, Pencil, Plus, Redo2, Save, Scissors, Square, Trash2, Type, Undo2, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bot, BookOpen, Brush, ChevronRight, Copy, Hash, Image as ImageIcon, MessageSquare, MousePointer2, Palette, Pencil, Plus, Redo2, Save, Scissors, Square, Trash2, Type, Undo2, X } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { PromptLibraryPreviewPanel } from '@/components/PromptLibraryPreviewMode'
 import { PromptPresetPreviewDialog } from '@/components/prompt-media/PromptPresetPreviewDialog'
@@ -37,6 +37,7 @@ import {
   createFreeCanvasImageAnnotation,
   createFreeCanvasTextNode,
   createQuickTextNode,
+  freeCanvasTextSegmentsToPlainText,
   replaceFreeCanvasTextRange,
   replaceFreeCanvasImageAnnotations,
   removeFreeCanvasProjectNodes,
@@ -46,12 +47,17 @@ import {
   updateFreeCanvasTextNodeUserText
 } from '@/domain/free-canvas/free-canvas-project'
 import { buildFreeCanvasWorkspaceContext } from '@/utils/agent-workspace'
-import { storage } from '@/utils/storage'
 import { useI18n } from '@/i18n'
 import { usePresetStore } from '@/stores/preset.store'
+import {
+  createQuickMessagePresetInput,
+  isQuickMessagePreset,
+  quickMessagePresetToDraft,
+  type QuickMessageDraft
+} from '@/domain/prompt-library/quick-messages'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
-import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IFreeCanvasTextSegment, IPromptProject } from '@/models/PromptHistory.model'
+import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject } from '@/models/PromptHistory.model'
 
 interface FreeCanvasBuilderScreenProps {
   activeProject: IPromptProject
@@ -67,6 +73,7 @@ type FreeCanvasFlowNodeData = {
   canvasNode: IFreeCanvasNode
   editing: boolean
   onEdit: (nodeId: string | null) => void
+  onTextCopy: (nodeId: string) => void
   onTextRangeReplace: (nodeId: string, range: { start: number; end: number }, insertedText: string, color: string) => void
   onTextStyleChange: (nodeId: string, updates: Parameters<typeof updateFreeCanvasTextNodeStyle>[2]) => void
   onImageResize: (nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => void
@@ -76,20 +83,9 @@ type FreeCanvasFlowNodeData = {
 
 type FreeCanvasFlowNode = Node<FreeCanvasFlowNodeData>
 
-type QuickTextPreset = {
-  id: string
-  name: string
-  note: string
-  body: string
-  createdAt: number
-}
-
-type QuickTextPresetDraft = Pick<QuickTextPreset, 'name' | 'note' | 'body'>
-
-const QUICK_TEXT_SETTINGS_KEY = 'freeCanvasQuickTextPresets'
 const TEXT_COLORS = ['#111827', '#ef4423', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#ffffff']
 const FONT_SIZES: IFreeCanvasTextNode['fontSize'][] = ['small', 'medium', 'large', 'extra-large', 'huge']
-const emptyQuickTextPresetDraft: QuickTextPresetDraft = { name: '', note: '', body: '' }
+const emptyQuickTextPresetDraft: QuickMessageDraft = { name: '', body: '' }
 
 const isTypingTarget = (target: EventTarget | null): boolean => {
   const element = target instanceof HTMLElement ? target : null
@@ -131,7 +127,14 @@ const FreeCanvasBuilderInner = ({
 }: FreeCanvasBuilderScreenProps) => {
   const reactFlow = useReactFlow<FreeCanvasFlowNode>()
   const { cardTypeLabel } = useI18n()
-  const { presets, initialized: presetsInitialized, init: initPresets } = usePresetStore()
+  const {
+    presets,
+    initialized: presetsInitialized,
+    init: initPresets,
+    addPreset,
+    updatePreset,
+    deletePreset
+  } = usePresetStore()
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
@@ -139,10 +142,9 @@ const FreeCanvasBuilderInner = ({
   const [rightPanelMode, setRightPanelMode] = useState<'agent' | 'prompt-library'>('agent')
   const [previewPreset, setPreviewPreset] = useState<IPreset | null>(null)
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false)
-  const [quickPresets, setQuickPresets] = useState<QuickTextPreset[]>([])
   const [quickComposerOpen, setQuickComposerOpen] = useState(false)
   const [quickEditingPresetId, setQuickEditingPresetId] = useState<string | null>(null)
-  const [quickPresetDraft, setQuickPresetDraft] = useState<QuickTextPresetDraft>(emptyQuickTextPresetDraft)
+  const [quickPresetDraft, setQuickPresetDraft] = useState<QuickMessageDraft>(emptyQuickTextPresetDraft)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [clipboardNotice, setClipboardNotice] = useState<string | null>(null)
   const [fileDragActive, setFileDragActive] = useState(false)
@@ -150,6 +152,7 @@ const FreeCanvasBuilderInner = ({
   const [annotationEditorNodeId, setAnnotationEditorNodeId] = useState<string | null>(null)
   const selectedNode = freeCanvas.nodes.find(node => node.id === freeCanvas.selectedNodeId) || null
   const selectedImageNode = selectedNode?.kind === 'image' ? selectedNode : null
+  const quickPresets = useMemo(() => presets.filter(isQuickMessagePreset), [presets])
   const cropNode = cropNodeId
     ? freeCanvas.nodes.find((node): node is IFreeCanvasImageNode => node.id === cropNodeId && node.kind === 'image')
     : null
@@ -183,32 +186,6 @@ const FreeCanvasBuilderInner = ({
     { type: 'constraint', label: cardTypeLabel('constraint') },
     { type: 'custom', label: cardTypeLabel('custom') }
   ], [cardTypeLabel])
-
-  useEffect(() => {
-    let cancelled = false
-    storage.settings.get().then(settings => {
-      if (cancelled) return
-      const raw = settings.meta?.[QUICK_TEXT_SETTINGS_KEY]
-      setQuickPresets(Array.isArray(raw) ? raw.flatMap(value => {
-        const preset = normalizeQuickTextPreset(value)
-        return preset ? [preset] : []
-      }) : [])
-    })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  const persistQuickPresets = useCallback(async (presets: QuickTextPreset[]) => {
-    setQuickPresets(presets)
-    const settings = await storage.settings.get()
-    await storage.settings.save({
-      meta: {
-        ...settings.meta,
-        [QUICK_TEXT_SETTINGS_KEY]: presets
-      }
-    })
-  }, [])
 
   const setSelectedNodeId = useCallback((nodeId: string | null) => {
     onChange({ ...freeCanvas, selectedNodeId: nodeId })
@@ -326,6 +303,22 @@ const FreeCanvasBuilderInner = ({
     onChange(updateFreeCanvasTextNodeStyle(freeCanvas, nodeId, updates))
   }, [freeCanvas, onChange])
 
+  const copyTextNode = useCallback((nodeId: string) => {
+    const node = freeCanvasRef.current.nodes.find((candidate): candidate is IFreeCanvasTextNode =>
+      candidate.id === nodeId && candidate.kind === 'text'
+    )
+    if (!node) return
+    const text = freeCanvasTextSegmentsToPlainText(node.segments)
+    if (!text) return
+    if (!navigator.clipboard?.writeText) {
+      setClipboardNotice('复制文本失败')
+      return
+    }
+    void navigator.clipboard.writeText(text)
+      .then(() => setClipboardNotice('已复制文本节点'))
+      .catch(() => setClipboardNotice('复制文本失败'))
+  }, [])
+
   const resizeImageNode = useCallback((nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => {
     onChange(updateFreeCanvasImageNodeFrame(freeCanvas, nodeId, frame))
   }, [freeCanvas, onChange])
@@ -345,13 +338,14 @@ const FreeCanvasBuilderInner = ({
       canvasNode: node,
       editing: editingNodeId === node.id,
       onEdit: setEditingNodeId,
+      onTextCopy: copyTextNode,
       onTextRangeReplace: replaceTextRange,
       onTextStyleChange: updateTextStyle,
       onImageResize: resizeImageNode,
       onStartImageAnnotationEdit: setAnnotationEditorNodeId,
       onStartImageCrop: setCropNodeId
     }
-  })), [editingNodeId, freeCanvas.nodes, freeCanvas.selectedNodeId, replaceTextRange, resizeImageNode, updateTextStyle])
+  })), [copyTextNode, editingNodeId, freeCanvas.nodes, freeCanvas.selectedNodeId, replaceTextRange, resizeImageNode, updateTextStyle])
 
   const [flowNodes, setFlowNodes] = useState<FreeCanvasFlowNode[]>(nodes)
   useEffect(() => setFlowNodes(nodes), [nodes])
@@ -473,21 +467,17 @@ const FreeCanvasBuilderInner = ({
     onChange(updateFreeCanvasTextNodeUserText(freeCanvas, proposal.nodeId, proposal.userText, proposal.mode))
   }
 
-  const createQuickPreset = async (draft: QuickTextPresetDraft) => {
+  const createQuickPreset = async (draft: QuickMessageDraft) => {
     const name = draft.name.trim()
-    const note = draft.note.trim()
     const body = draft.body.trim()
     if (!name || !body) return
-    await persistQuickPresets([
-      { id: `quick-${Date.now()}`, name, note, body, createdAt: Date.now() },
-      ...quickPresets
-    ])
+    await addPreset(createQuickMessagePresetInput({ name, body }, { createdAt: Date.now() }))
   }
 
-  const openQuickPresetComposer = (preset?: QuickTextPreset) => {
+  const openQuickPresetComposer = (preset?: IPreset) => {
     if (preset) {
       setQuickEditingPresetId(preset.id)
-      setQuickPresetDraft({ name: preset.name, note: preset.note, body: preset.body })
+      setQuickPresetDraft(quickMessagePresetToDraft(preset))
     } else {
       setQuickEditingPresetId(null)
       setQuickPresetDraft(emptyQuickTextPresetDraft)
@@ -504,20 +494,19 @@ const FreeCanvasBuilderInner = ({
 
   const saveQuickPresetDraft = async () => {
     const name = quickPresetDraft.name.trim()
-    const note = quickPresetDraft.note.trim()
     const body = quickPresetDraft.body.trim()
     if (!name || !body) return
     if (quickEditingPresetId) {
-      await persistQuickPresets(quickPresets.map(preset => preset.id === quickEditingPresetId ? { ...preset, name, note, body } : preset))
+      await updatePreset(quickEditingPresetId, createQuickMessagePresetInput({ name, body }))
     } else {
-      await createQuickPreset({ name, note, body })
+      await createQuickPreset({ name, body })
     }
     closeQuickPresetComposer()
   }
 
   const deleteQuickPresetDraft = async () => {
     if (!quickEditingPresetId) return
-    await persistQuickPresets(quickPresets.filter(preset => preset.id !== quickEditingPresetId))
+    await deletePreset(quickEditingPresetId)
     closeQuickPresetComposer()
   }
 
@@ -714,6 +703,7 @@ const FreeCanvasNode = ({ data, selected }: NodeProps<FreeCanvasFlowNode>) => {
         selected={selected}
         editing={data.editing}
         onEdit={data.onEdit}
+        onTextCopy={data.onTextCopy}
         onTextRangeReplace={data.onTextRangeReplace}
         onTextStyleChange={data.onTextStyleChange}
       />
@@ -738,6 +728,7 @@ const FreeCanvasTextNodeView = ({
   selected,
   editing,
   onEdit,
+  onTextCopy,
   onTextRangeReplace,
   onTextStyleChange
 }: {
@@ -745,13 +736,14 @@ const FreeCanvasTextNodeView = ({
   selected: boolean
   editing: boolean
   onEdit: (nodeId: string | null) => void
+  onTextCopy: (nodeId: string) => void
   onTextRangeReplace: (nodeId: string, range: { start: number; end: number }, insertedText: string, color: string) => void
   onTextStyleChange: (nodeId: string, updates: Parameters<typeof updateFreeCanvasTextNodeStyle>[2]) => void
 }) => {
   const editorRef = useRef<HTMLDivElement>(null)
   const draftTextRef = useRef<string | null>(null)
   const caretOffsetRef = useRef<number | null>(null)
-  const displayText = freeCanvasSegmentsText(node.segments)
+  const displayText = freeCanvasTextSegmentsToPlainText(node.segments)
   const userColor = userTextColor(node)
   const selectedNodeCount = useStore(state => state.nodes.filter(candidate => candidate.selected).length)
 
@@ -763,7 +755,7 @@ const FreeCanvasTextNodeView = ({
       restoreEditableCaret(editor, offset)
     }
     if (document.activeElement !== editor) {
-      const offset = caretOffsetRef.current ?? freeCanvasSegmentsText(node.segments).length
+      const offset = caretOffsetRef.current ?? freeCanvasTextSegmentsToPlainText(node.segments).length
       restore(offset)
       window.requestAnimationFrame(() => {
         if (editorRef.current && document.activeElement !== editorRef.current) {
@@ -830,6 +822,7 @@ const FreeCanvasTextNodeView = ({
         <TextNodeToolbar
           node={node}
           onEdit={() => onEdit(node.id)}
+          onCopy={() => onTextCopy(node.id)}
           onStyleChange={updates => onTextStyleChange(node.id, updates)}
         />
       </NodeToolbar>
@@ -2189,7 +2182,7 @@ const ImageAnnotationEditor = ({
         </div>
 
         <footer className="flex items-center justify-between border-t border-gray-200 px-5 py-3">
-          <span className="text-xs font-semibold text-gray-500">{draftAnnotations.length} annotations · Mode: {activeModeLabel}</span>
+          <span className="text-xs font-semibold text-gray-500">{draftAnnotations.length} annotations 璺?Mode: {activeModeLabel}</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -2339,21 +2332,50 @@ const FreeCanvasArrowNodeView = ({ node, selected }: { node: Extract<IFreeCanvas
 const TextNodeToolbar = ({
   node,
   onEdit,
+  onCopy,
   onStyleChange
 }: {
   node: IFreeCanvasTextNode
   onEdit: () => void
+  onCopy: () => void
   onStyleChange: (updates: Parameters<typeof updateFreeCanvasTextNodeStyle>[2]) => void
 }) => (
-  <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-950 px-3 py-2 text-white shadow-[0_18px_60px_rgba(15,23,42,0.22)]">
-    <button type="button" className="rounded-full px-3 py-1.5 text-xs font-black hover:bg-white/10" onClick={onEdit}>Edit</button>
+  <div
+    className="nodrag nowheel flex items-center gap-2 rounded-full border border-gray-200 bg-gray-950 px-3 py-2 text-white shadow-[0_18px_60px_rgba(15,23,42,0.22)]"
+    onPointerDown={event => event.stopPropagation()}
+    onMouseDown={event => event.stopPropagation()}
+    onClick={event => event.stopPropagation()}
+  >
+    <button
+      type="button"
+      className="nodrag rounded-full px-3 py-1.5 text-xs font-black text-white hover:bg-white/10"
+      onClick={onEdit}
+    >
+      Edit
+    </button>
+    <button
+      type="button"
+      className="nodrag flex h-8 w-8 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white"
+      data-free-canvas-copy-text
+      title="复制文本"
+      aria-label="复制文本"
+      onClick={onCopy}
+    >
+      <Copy className="h-4 w-4" />
+    </button>
     <select
-      className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-black outline-none"
+      className="nodrag min-w-[116px] rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-black text-white outline-none transition hover:border-white/40 hover:bg-white/15 focus:border-white/60 focus:ring-2 focus:ring-white/25"
+      data-free-canvas-font-size
       value={node.fontSize}
       onChange={event => onStyleChange({ fontSize: event.target.value as IFreeCanvasTextNode['fontSize'] })}
-      title="Font size"
+      title="复制文本"
+      aria-label="复制文本"
     >
-      {FONT_SIZES.map(size => <option key={size} value={size}>{size}</option>)}
+      {FONT_SIZES.map(size => (
+        <option key={size} value={size} className="bg-white text-gray-950">
+          {size}
+        </option>
+      ))}
     </select>
     <div className="h-6 w-px bg-white/20" />
     <Palette className="h-4 w-4 text-white/70" />
@@ -2361,7 +2383,7 @@ const TextNodeToolbar = ({
       <button
         key={color}
         type="button"
-        className="h-5 w-5 rounded-full border border-white/30"
+        className="nodrag h-5 w-5 rounded-full border border-white/30"
         style={{ backgroundColor: color }}
         title={color}
         onClick={() => onStyleChange({ color })}
@@ -2381,12 +2403,12 @@ const CanvasBottomToolbar = ({
   onUseQuickPreset
 }: {
   quickDrawerOpen: boolean
-  quickPresets: QuickTextPreset[]
+  quickPresets: IPreset[]
   onCreateText: () => void
   onCreateImage: () => void
   onToggleQuickDrawer: () => void
   onOpenQuickPresetComposer: () => void
-  onEditQuickPreset: (preset: QuickTextPreset) => void
+  onEditQuickPreset: (preset: IPreset) => void
   onUseQuickPreset: (text: string) => void
 }) => (
     <div className="absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-3">
@@ -2413,21 +2435,20 @@ const CanvasBottomToolbar = ({
                 <button
                   type="button"
                   className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
-                  onClick={() => onUseQuickPreset(preset.body)}
+                  onClick={() => onUseQuickPreset(preset.content)}
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-red-50 text-red-600">
                     <MessageSquare className="h-4 w-4" />
-                  </span>
-                  <span className="min-w-0 flex-1 text-left">
-                    <span className="block truncate text-sm font-semibold text-gray-950">{preset.name}</span>
-                    {preset.note ? <span className="block truncate text-xs font-semibold text-gray-400">{preset.note}</span> : null}
+                   </span>
+                   <span className="min-w-0 flex-1 text-left">
+                    <span className="block truncate text-sm font-semibold text-gray-950">{preset.label}</span>
                   </span>
                 </button>
                 <button
                   type="button"
                   className="mr-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-950"
                   onClick={() => onEditQuickPreset(preset)}
-                  title={`编辑 ${preset.name}`}
+                  title={`编辑 ${preset.label}`}
                 >
                   <Pencil className="h-4 w-4" />
                 </button>
@@ -2453,10 +2474,10 @@ const QuickMessageDialog = ({
   onDelete,
   onSave
 }: {
-  draft: QuickTextPresetDraft
+  draft: QuickMessageDraft
   editing: boolean
   rightOffset: number
-  onDraftChange: (draft: QuickTextPresetDraft) => void
+  onDraftChange: (draft: QuickMessageDraft) => void
   onClose: () => void
   onDelete?: () => void
   onSave: () => void
@@ -2500,15 +2521,6 @@ const QuickMessageDialog = ({
           </div>
         </label>
 
-        <label className="block">
-          <div className="mb-2 text-sm font-bold text-gray-950">备注</div>
-          <textarea
-            className="h-14 w-full resize-none rounded-[8px] border-0 bg-gray-100 px-4 py-3 text-base outline-none ring-0 placeholder:text-gray-400 focus:border-transparent focus:outline-none focus:ring-0"
-            value={draft.note}
-            onChange={event => onDraftChange({ ...draft, note: event.target.value })}
-            placeholder="请输入备注"
-          />
-        </label>
 
         <label className="flex min-h-0 flex-1 flex-col">
           <div className="mb-2 text-sm font-bold text-gray-950">模板正文 <span className="text-red-500">*</span></div>
@@ -2544,9 +2556,6 @@ const QuickMessageDialog = ({
     </section>
   </div>
 )
-
-const freeCanvasSegmentsText = (segments: IFreeCanvasTextSegment[]): string =>
-  segments.map(segment => segment.text).join('')
 
 const editablePlainText = (element: HTMLElement): string =>
   element.textContent || ''
@@ -2654,35 +2663,5 @@ const userTextColor = (node: IFreeCanvasTextNode): string =>
   typeof node.meta.userTextColor === 'string'
     ? node.meta.userTextColor
     : node.segments.find(segment => segment.source === 'user')?.color || '#111827'
-
-const normalizeQuickTextPreset = (value: unknown): QuickTextPreset | null => {
-  if (!value || typeof value !== 'object') return null
-  const record = value as Record<string, unknown>
-  if (typeof record.id !== 'string') return null
-
-  if (typeof record.body === 'string' && typeof record.name === 'string') {
-    return {
-      id: record.id,
-      name: record.name,
-      note: typeof record.note === 'string' ? record.note : '',
-      body: record.body,
-      createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now()
-    }
-  }
-
-  if (typeof record.text === 'string') {
-    const body = record.text.trim()
-    if (!body) return null
-    return {
-      id: record.id,
-      name: body.slice(0, 20),
-      note: '',
-      body,
-      createdAt: typeof record.createdAt === 'number' ? record.createdAt : Date.now()
-    }
-  }
-
-  return null
-}
 
 export default FreeCanvasBuilderScreen

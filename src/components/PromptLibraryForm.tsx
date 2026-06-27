@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Image, PlaySquare, Trash2, Upload } from 'lucide-react'
+import { Image as ImageIcon, PlaySquare, Trash2, Upload, X } from 'lucide-react'
 import type { CardType, IPreset } from '@/models/Card.model'
 import { useI18n } from '@/i18n'
 import {
@@ -9,6 +9,11 @@ import {
   withPresetMedia,
   type PromptPresetMediaItem
 } from '@/domain/prompt-media/prompt-media'
+import {
+  QUICK_MESSAGE_CATEGORY,
+  createQuickMessagePresetInput,
+  isQuickMessagePreset
+} from '@/domain/prompt-library/quick-messages'
 import { storage } from '@/utils/storage'
 
 export type PromptLibraryFormSave = Pick<IPreset, 'type' | 'category' | 'label' | 'content' | 'meta'>
@@ -16,6 +21,7 @@ export type PromptLibraryFormSave = Pick<IPreset, 'type' | 'category' | 'label' 
 interface PromptLibraryFormProps {
   editingPreset: IPreset | null
   cardTypes: { type: string; label: string }[]
+  activeCategory: string
   onSave: (preset: PromptLibraryFormSave) => void
   onCancel: () => void
 }
@@ -32,12 +38,16 @@ const emptyFormData: FormData = {
   content: ''
 }
 
-const PromptLibraryForm = ({ editingPreset, cardTypes, onSave, onCancel }: PromptLibraryFormProps) => {
+const PromptLibraryForm = ({ editingPreset, cardTypes, activeCategory, onSave, onCancel }: PromptLibraryFormProps) => {
   const { t } = useI18n()
   const [formData, setFormData] = useState<FormData>(emptyFormData)
   const [media, setMedia] = useState<PromptPresetMediaItem[]>([])
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const isQuickMessageMode = activeCategory === QUICK_MESSAGE_CATEGORY || Boolean(editingPreset && isQuickMessagePreset(editingPreset))
+  const title = isQuickMessageMode
+    ? editingPreset ? '编辑快捷消息' : '新增快捷消息'
+    : editingPreset ? t('editPrompt') : t('addPrompt')
 
   useEffect(() => {
     if (!editingPreset) {
@@ -77,8 +87,7 @@ const PromptLibraryForm = ({ editingPreset, cardTypes, onSave, onCancel }: Promp
         if (mediaItem) uploaded.push(mediaItem)
       }
       setMedia(current => [...current, ...uploaded])
-    } catch (error) {
-      console.error('Failed to upload prompt media:', error)
+    } catch {
       setUploadError('上传失败。仅支持 PNG、JPEG、WebP 图片和 MP4、WebM 视频，单个文件不超过 200MB。')
     } finally {
       setUploading(false)
@@ -87,134 +96,206 @@ const PromptLibraryForm = ({ editingPreset, cardTypes, onSave, onCancel }: Promp
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault()
+    if (isQuickMessageMode) {
+      onSave(createQuickMessagePresetInput({
+        name: formData.label,
+        body: formData.content
+      }, {
+        meta: withPresetMedia(editingPreset?.meta, media)
+      }))
+      return
+    }
+
     onSave({
-      ...formData,
+      type: formData.type,
       category: formData.type,
+      label: formData.label,
+      content: formData.content,
       meta: withPresetMedia(editingPreset?.meta, media)
     })
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl">
-        <div className="mb-6 flex items-center justify-between gap-4">
-          <h2 className="text-2xl font-bold text-gray-900">
-            {editingPreset ? t('editPrompt') : t('addPrompt')}
-          </h2>
-          <button className="rounded-full p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700" onClick={onCancel}>
-            <i className="fa fa-times text-xl"></i>
-          </button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/45 px-4 py-6">
+      <div
+        data-prompt-library-form
+        className="grid grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-[8px] bg-white shadow-2xl"
+        style={{
+          width: 'min(1040px, calc(100vw - 32px))',
+          height: 'min(720px, calc(100vh - 48px))'
+        }}
+      >
+        <div className="shrink-0 border-b border-gray-100 px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="text-xs font-bold uppercase tracking-wide text-gray-400">
+                {isQuickMessageMode ? 'QUICK-MESSAGE' : 'PROMPT'}
+              </div>
+              <h2 className="mt-1 break-words text-xl font-black text-gray-950">{title}</h2>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-full bg-gray-100 p-2 text-gray-500 transition hover:bg-gray-200 hover:text-gray-950"
+              onClick={onCancel}
+              aria-label="关闭表单"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label htmlFor="type" className="mb-2 block text-sm font-medium text-gray-700">
-              {t('type')} <span className="text-red-500">*</span>
-            </label>
-            <select
-              id="type"
-              name="type"
-              value={formData.type}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-transparent focus:ring-2 focus:ring-blue-500"
-              required
-            >
-              {cardTypes.map(type => (
-                <option key={type.type} value={type.type}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        <form
+          onSubmit={handleSubmit}
+          className="grid min-h-0 grid-rows-[minmax(260px,0.9fr)_minmax(360px,1.1fr)] overflow-y-auto md:grid-cols-[minmax(0,1fr)_420px] md:grid-rows-none md:overflow-hidden"
+        >
+          <section data-prompt-library-form-media className="flex min-h-0 min-w-0 flex-col border-b border-gray-100 bg-gray-50 md:border-b-0 md:border-r">
+            <div className="shrink-0 px-5 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-sm font-black text-gray-950">
+                  <ImageIcon className="h-4 w-4 text-gray-500" />
+                  媒体预览
+                </div>
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-gray-100 px-3 py-2 text-xs font-black text-gray-700 transition hover:bg-gray-200">
+                  <Upload className="h-4 w-4" />
+                  {uploading ? '上传中...' : '上传图片/视频'}
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,video/mp4,video/webm"
+                    multiple
+                    className="hidden"
+                    disabled={uploading}
+                    onChange={(event) => {
+                      void handleUpload(event.target.files)
+                      event.target.value = ''
+                    }}
+                  />
+                </label>
+              </div>
+              {uploadError && <p className="mt-2 text-sm font-semibold text-red-600">{uploadError}</p>}
+            </div>
 
-          <div>
-            <label htmlFor="label" className="mb-2 block text-sm font-medium text-gray-700">
-              {t('promptName')} <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              id="label"
-              name="label"
-              value={formData.label}
-              onChange={handleChange}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-transparent focus:ring-2 focus:ring-blue-500"
-              placeholder={t('inputPromptName')}
-              required
-            />
-          </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
+              {media.length === 0 ? (
+                <div className="flex h-full min-h-[220px] items-center justify-center rounded-[8px] border border-dashed border-gray-200 bg-white text-center text-sm font-semibold text-gray-400">
+                  可选上传参考图片或视频，供预览模式查看。
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {media.map(item => (
+                    <figure key={item.id} className="overflow-hidden rounded-[8px] border border-gray-200 bg-white shadow-sm">
+                      <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 text-sm">
+                        <div className="flex min-w-0 items-center gap-2 font-semibold text-gray-800">
+                          {item.kind === 'image' ? <ImageIcon className="h-4 w-4 text-gray-500" /> : <PlaySquare className="h-4 w-4 text-gray-500" />}
+                          <span className="truncate">{item.title || item.filename || item.assetId}</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-full p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-600"
+                          onClick={() => setMedia(current => current.filter(candidate => candidate.id !== item.id))}
+                          aria-label="删除媒体"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {item.kind === 'image' ? (
+                        <img
+                          src={storage.assets.url(item.assetId)}
+                          alt={item.title || item.filename || formData.label || 'Prompt media'}
+                          className="max-h-[34vh] w-full bg-gray-950 object-contain"
+                        />
+                      ) : (
+                        <video
+                          src={storage.assets.url(item.assetId)}
+                          controls
+                          className="max-h-[34vh] w-full bg-gray-950"
+                        />
+                      )}
+                      {formatMediaSize(item.size) && (
+                        <figcaption className="border-t border-gray-100 px-4 py-2 text-xs font-semibold text-gray-400">
+                          {item.kind === 'image' ? '图片' : '视频'} {formatMediaSize(item.size)}
+                        </figcaption>
+                      )}
+                    </figure>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
 
-          <div>
-            <label htmlFor="content" className="mb-2 block text-sm font-medium text-gray-700">
-              {t('promptContent')} <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              id="content"
-              name="content"
-              value={formData.content}
-              onChange={handleChange}
-              rows={6}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 focus:border-transparent focus:ring-2 focus:ring-blue-500"
-              placeholder={t('inputPromptContent')}
-              required
-            />
-          </div>
+          <section className="flex min-h-0 min-w-0 flex-col bg-white">
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-5">
+              {!isQuickMessageMode && (
+                <div className="shrink-0">
+                  <label htmlFor="type" className="mb-2 block text-sm font-bold text-gray-950">
+                    {t('type')} <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    id="type"
+                    name="type"
+                    value={formData.type}
+                    onChange={handleChange}
+                    className="w-full rounded-[8px] border border-gray-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-gray-950 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
+                    required
+                  >
+                    {cardTypes.map(type => (
+                      <option key={type.type} value={type.type}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-          <div>
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <label className="block text-sm font-medium text-gray-700">媒体预览</label>
-              <label className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-gray-100 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200">
-                <Upload className="h-4 w-4" />
-                {uploading ? '上传中...' : '上传图片/视频'}
+              <div className="shrink-0">
+                <label htmlFor="label" className="mb-2 block text-sm font-bold text-gray-950">
+                  {isQuickMessageMode ? '提示词名称' : t('promptName')} <span className="text-red-500">*</span>
+                </label>
                 <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,video/mp4,video/webm"
-                  multiple
-                  className="hidden"
-                  disabled={uploading}
-                  onChange={(event) => {
-                    void handleUpload(event.target.files)
-                    event.target.value = ''
-                  }}
+                  type="text"
+                  id="label"
+                  name="label"
+                  value={formData.label}
+                  onChange={handleChange}
+                  className="w-full rounded-[8px] border border-gray-200 bg-gray-50 px-3 py-3 text-sm font-semibold text-gray-950 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
+                  placeholder={isQuickMessageMode ? '请输入名称' : t('inputPromptName')}
+                  required
+                />
+              </div>
+
+              <label htmlFor="content" className="flex min-h-0 flex-1 flex-col">
+                <span className="mb-2 block text-sm font-bold text-gray-950">
+                  {isQuickMessageMode ? '模板正文' : t('promptContent')} <span className="text-red-500">*</span>
+                </span>
+                <textarea
+                  data-prompt-library-form-content
+                  id="content"
+                  name="content"
+                  value={formData.content}
+                  onChange={handleChange}
+                  className="min-h-[220px] flex-1 resize-none overflow-y-auto rounded-[8px] border border-gray-200 bg-gray-50 px-4 py-4 text-sm leading-7 text-gray-900 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-200"
+                  placeholder={isQuickMessageMode ? '请输入模板正文' : t('inputPromptContent')}
+                  required
                 />
               </label>
             </div>
 
-            {uploadError && <p className="mb-2 text-sm text-red-600">{uploadError}</p>}
-
-            <div className="space-y-2">
-              {media.map(item => (
-                <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500">
-                      {item.kind === 'image' ? <Image className="h-4 w-4" /> : <PlaySquare className="h-4 w-4" />}
-                    </span>
-                    <div className="min-w-0">
-                      <div className="truncate text-sm font-semibold text-gray-900">{item.title || item.filename || item.assetId}</div>
-                      <div className="text-xs text-gray-500">{item.kind === 'image' ? '图片' : '视频'} {formatMediaSize(item.size)}</div>
-                    </div>
-                  </div>
-                  <button type="button" className="rounded-full p-2 text-gray-400 transition hover:bg-red-50 hover:text-red-600" onClick={() => setMedia(current => current.filter(candidate => candidate.id !== item.id))}>
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-
-              {media.length === 0 && (
-                <div className="rounded-xl border border-dashed border-gray-200 py-6 text-center text-sm text-gray-400">
-                  可选上传参考图片或视频，供预览模式查看。
-                </div>
-              )}
+            <div className="flex shrink-0 justify-end gap-3 border-t border-gray-100 px-5 py-4">
+              <button
+                type="button"
+                className="rounded-[8px] bg-gray-100 px-5 py-2.5 text-sm font-bold text-gray-700 transition hover:bg-gray-200"
+                onClick={onCancel}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="submit"
+                className="rounded-[8px] bg-blue-600 px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+                disabled={uploading}
+              >
+                {isQuickMessageMode ? '保存' : editingPreset ? t('saveChanges') : t('addPrompt')}
+              </button>
             </div>
-          </div>
-
-          <div className="flex justify-end gap-3 border-t border-gray-200 pt-4">
-            <button type="button" className="rounded-lg bg-gray-100 px-4 py-2 text-gray-700 transition hover:bg-gray-200" onClick={onCancel}>
-              {t('cancel')}
-            </button>
-            <button type="submit" className="rounded-lg bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700" disabled={uploading}>
-              {editingPreset ? t('saveChanges') : t('addPrompt')}
-            </button>
-          </div>
+          </section>
         </form>
       </div>
     </div>

@@ -7,6 +7,7 @@ import {
   createFreeCanvasImageNodeFromMedia,
   createFreeCanvasProject,
   createQuickTextNode,
+  freeCanvasTextSegmentsToPlainText,
   migrateLegacyThreeStageFreeCanvasProject,
   replaceFreeCanvasTextRange,
   replaceFreeCanvasImageAnnotations,
@@ -201,6 +202,16 @@ describe('free canvas project domain', () => {
       expect.objectContaining({ source: 'preset', text: 'Template message', color: '#ef4423' }),
       expect.objectContaining({ source: 'user', text: 'User addition', color: '#111827' })
     ])
+  })
+
+  test('joins text node segments as visible plain text', () => {
+    const node = createQuickTextNode('Template\nmessage', { x: 20, y: 40 }, 100)
+    const project = appendFreeCanvasUserText(createFreeCanvasProject(100, { nodes: [node] }), node.id, '\nUser addition', 101)
+    const textNode = project.nodes[0]
+
+    if (textNode.kind !== 'text') throw new Error('Expected text node')
+    expect(freeCanvasTextSegmentsToPlainText(textNode.segments)).toBe('Template\nmessage\nUser addition')
+    expect(freeCanvasTextSegmentsToPlainText([])).toBe('')
   })
 
   test('agent-safe text updates only change user segments', () => {

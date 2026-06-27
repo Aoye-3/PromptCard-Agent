@@ -8,6 +8,8 @@ Frontend persistence is exposed through `src/utils/storage.ts`.
 
 `localforage` is no longer the durable source for projects, workspace, or Prompt Library presets. It remains available for UI-only cache, prompt history, settings, templates, and one-time migration of legacy browser data.
 
+`settings.meta.freeCanvasQuickTextPresets` is a legacy compatibility source only. On Prompt Library initialization, old Free Canvas quick messages are migrated into `/storage-api/presets` records using the existing `IPreset` shape, with `category: "quick-message"` and `meta.quickMessage.legacyId` for idempotency. Legacy note fields may be read during normalization but are intentionally discarded during migration. New quick-message writes use the Prompt Library preset store and do not write back to settings.
+
 ## Development File Storage
 
 The primary durable endpoint is:
@@ -42,6 +44,8 @@ Project reads normalize data before returning it to the UI. Normalization includ
 ## Change Guidance
 
 Storage changes should include tests for revision conflicts, Trash behavior, migration, and project normalization. Avoid writing project or preset data directly from UI components.
+
+Quick-message changes do not require a storage-service schema change. They should be verified through preset-store migration tests, Prompt Library category filtering tests, quick-message note-retirement tests, and Free Canvas insertion tests.
 
 Delayed saves must distinguish durable content from storage metadata. UI code should not apply a late storage response as a full project replacement after the user has continued editing. Preserve the current local payload, merge only safe metadata such as `revision` and `lastOpenedAt`, and update save status only when the response still matches the edit sequence that started the save.
 

@@ -66,6 +66,7 @@ Thumbs.db
 
 # Large files and directories
 data/assets/
+data/**/*.json
 data/*.sqlite3
 data/*.sqlite3-shm
 data/*.sqlite3-wal
@@ -153,7 +154,7 @@ NewVison/Prompt Guide/
 !src-tauri/tauri.conf.json
 !src-tauri/capabilities/**/*.json
 !public/**/*.json
-!data/**/*.json
+public/prompt-library-presets.json
 *.xml
 *.yaml
 !agent-runtime/config.yaml

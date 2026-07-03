@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture-toolbar-capability",
+  "description": "Allow the floating capture toolbar to drag, hide itself, and emit capture intents to the main window.",
+  "windows": ["capture-toolbar"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*", "http://localhost:*"]
+  },
+  "permissions": [
+    "core:event:allow-emit-to",
+    "core:window:allow-hide",
+    "core:window:allow-start-dragging"
+  ]
+}

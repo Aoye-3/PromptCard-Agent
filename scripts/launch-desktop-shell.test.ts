@@ -15,6 +15,15 @@ describe('launch-desktop-shell.ps1', () => {
     expect(script).toContain('$DesktopShellExecutable')
   })
 
+  test('serializes desktop launches to prevent duplicate toolbar windows', async () => {
+    const script = await readFile(scriptPath, 'utf8')
+
+    expect(script).toContain('PromptCardManagerDesktopShellLaunch')
+    expect(script).toContain('$LaunchMutex.WaitOne(0)')
+    expect(script).toContain('launch is already in progress')
+    expect(script).toContain('$LaunchMutex.ReleaseMutex()')
+  })
+
   test('waits for frontend readiness and falls back to tauri dev when the shell is stale', async () => {
     const script = await readFile(scriptPath, 'utf8')
 

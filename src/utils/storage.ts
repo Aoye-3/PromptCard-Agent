@@ -11,7 +11,7 @@ import {
   sortProjects
 } from '@/domain/projects/project-normalization'
 import { devPresetFileStorage, devProjectFileStorage, staticPresetFileStorage } from '@/storage/dev-file-storage'
-import { storageServiceClient } from '@/storage/storage-service-client'
+import { storageServiceClient, type RecentCaptureItem } from '@/storage/storage-service-client'
 import type { IPromptTemplate } from '@/models/PromptTemplate.model'
 import type { IUserSettings } from '@/models/UserSettings.model'
 import type { IPage } from '@/stores/card-initial-state'
@@ -72,6 +72,21 @@ export const storage = {
     },
     url(assetId: string): string {
       return storageServiceClient.assets.url(assetId)
+    }
+  },
+
+  recentCaptures: {
+    getAll(): Promise<RecentCaptureItem[]> {
+      return storageServiceClient.recentCaptures.getAll()
+    },
+    getById(id: string): Promise<RecentCaptureItem | null> {
+      return storageServiceClient.recentCaptures.getById(id)
+    },
+    create(capture: Partial<RecentCaptureItem> & Pick<RecentCaptureItem, 'assetId'>): Promise<RecentCaptureItem> {
+      return storageServiceClient.recentCaptures.create(capture)
+    },
+    update(id: string, revision: number, updates: Partial<RecentCaptureItem>): Promise<RecentCaptureItem> {
+      return storageServiceClient.recentCaptures.update(id, revision, updates)
     }
   },
 
@@ -441,7 +456,11 @@ export const storage = {
       history: await this.history.getAll(),
       templates: await this.templates.getAll(),
       settings: await this.settings.get(),
-      assetReferences: collectAssetReferences(await this.projects.getAll()),
+      recentCaptures: await this.recentCaptures.getAll(),
+      assetReferences: collectAssetReferences([
+        await this.projects.getAll(),
+        await this.recentCaptures.getAll()
+      ]),
       exportTime: new Date().toISOString(),
       version: '4.0.0'
     }

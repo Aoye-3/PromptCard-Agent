@@ -9,6 +9,29 @@ export interface TrashEntry<T> {
   payload: T
 }
 
+export interface RecentCaptureItem {
+  id: string
+  assetId: string
+  kind: 'screenshot'
+  status: 'recent' | 'annotated' | 'registeredToPromptLibrary' | 'placedOnCanvas' | 'archived'
+  purpose: 'inspirationReference' | 'generatedResult' | 'promptAttachment' | 'shotOutput'
+  role?: 'character' | 'scene' | 'prop' | 'composition' | 'lighting' | 'color' | 'style' | 'mood' | 'other' | null
+  title: string
+  prompt: string
+  userNote: string
+  sourcePlatform: string
+  sourceUrl: string
+  contentType: 'image/png'
+  size: number
+  width: number
+  height: number
+  capturedAt: number
+  origin: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+  revision: number
+}
+
 export class StorageRevisionConflict<T> extends Error {
   current: T
 
@@ -108,6 +131,27 @@ export const storageServiceClient = {
     },
     diagnostics(): Promise<{ unregisteredFiles: string[]; missingFiles: string[]; unreferencedAssets: string[]; missingReferences: string[] }> {
       return request('/storage-api/assets/diagnostics')
+    }
+  },
+  recentCaptures: {
+    async getAll(): Promise<RecentCaptureItem[]> {
+      return (await request<{ captures: RecentCaptureItem[] }>('/storage-api/recent-captures')).captures
+    },
+    async getById(id: string): Promise<RecentCaptureItem | null> {
+      try {
+        return await request<RecentCaptureItem>(`/storage-api/recent-captures/${encodeURIComponent(id)}`)
+      } catch (error) {
+        if (error instanceof StorageHttpError && error.status === 404) return null
+        throw error
+      }
+    },
+    create(capture: Partial<RecentCaptureItem> & Pick<RecentCaptureItem, 'assetId'>): Promise<RecentCaptureItem> {
+      return request('/storage-api/recent-captures', { method: 'POST', body: JSON.stringify(capture) })
+    },
+    update(id: string, revision: number, updates: Partial<RecentCaptureItem>): Promise<RecentCaptureItem> {
+      return request(`/storage-api/recent-captures/${encodeURIComponent(id)}`, {
+        method: 'PUT', body: JSON.stringify({ revision, updates })
+      })
     }
   },
   projects: {

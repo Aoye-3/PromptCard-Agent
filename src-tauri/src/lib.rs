@@ -178,8 +178,8 @@ fn path_to_string(path: &Path) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![git_pull_source, shutdown_local_services])
-        .on_window_event(|_window, event| {
-            if matches!(event, WindowEvent::CloseRequested { .. }) {
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, WindowEvent::CloseRequested { .. }) {
                 if let Err(error) = shutdown_promptcard_services() {
                     eprintln!("Failed to stop PromptCard local services: {error}");
                 }

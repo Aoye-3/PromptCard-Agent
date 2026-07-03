@@ -169,10 +169,11 @@ class SqliteStoreTest(unittest.TestCase):
         store = JsonCollectionStore(self.data_dir)
         health = store.health()
 
-        self.assertEqual(health["schemaVersion"], 1)
+        self.assertEqual(health["schemaVersion"], 2)
         self.assertEqual(health["serviceVersion"], "2.0.0")
         self.assertTrue(health["capabilities"]["sqlite"])
         self.assertTrue(health["capabilities"]["presetBatch"])
+        self.assertTrue(health["capabilities"]["recentCaptures"])
         self.assertIsInstance(health["pid"], int)
 
         connection = sqlite3.connect(self.data_dir / "promptcard.sqlite3")
@@ -190,10 +191,53 @@ class SqliteStoreTest(unittest.TestCase):
 
         manifest = store.backup(destination)
 
-        self.assertEqual(manifest["schemaVersion"], 1)
+        self.assertEqual(manifest["schemaVersion"], 2)
         self.assertTrue((destination / "promptcard.sqlite3").is_file())
         self.assertTrue((destination / "manifest.json").is_file())
         self.assertEqual(len(list((destination / "assets").iterdir())), 1)
+
+    def test_recent_captures_are_persisted_and_ordered(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        asset = store.save_asset("shot.png", "image/png", b"\x89PNG\r\n\x1a\nimage")
+
+        first = store.create_recent_capture({
+            "id": "capture-one",
+            "assetId": asset["id"],
+            "kind": "screenshot",
+            "contentType": "image/png",
+            "width": 640,
+            "height": 360,
+            "capturedAt": 10,
+        })
+        second = store.create_recent_capture({
+            "id": "capture-two",
+            "assetId": asset["id"],
+            "kind": "screenshot",
+            "contentType": "image/png",
+            "width": 800,
+            "height": 450,
+            "capturedAt": 20,
+        })
+
+        self.assertEqual(first["revision"], 1)
+        self.assertEqual([item["id"] for item in store.list_recent_captures()], [second["id"], first["id"]])
+        updated = store.update_recent_capture(first["id"], {"status": "placedOnCanvas"}, first["revision"])
+        self.assertEqual(updated["status"], "placedOnCanvas")
+        self.assertEqual(updated["revision"], 2)
+
+    def test_recent_capture_assets_are_counted_as_referenced(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        asset = store.save_asset("shot.png", "image/png", b"\x89PNG\r\n\x1a\nimage")
+        store.create_recent_capture({
+            "id": "capture-one",
+            "assetId": asset["id"],
+            "kind": "screenshot",
+            "contentType": "image/png",
+        })
+
+        diagnostics = store.diagnose_assets()
+
+        self.assertNotIn(asset["id"], diagnostics["unreferencedAssets"])
 
     def write_json(self, name: str, payload: dict) -> None:
         (self.data_dir / name).write_text(json.dumps(payload), encoding="utf-8")

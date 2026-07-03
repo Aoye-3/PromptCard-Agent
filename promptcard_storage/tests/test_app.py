@@ -76,6 +76,39 @@ class StorageAppContractTest(unittest.TestCase):
         self.assertFalse(first.json()["alreadyApplied"])
         self.assertTrue(second.json()["alreadyApplied"])
 
+    def test_creates_lists_and_updates_recent_captures(self) -> None:
+        asset_response = self.client.post(
+            "/api/assets",
+            content=b"\x89PNG\r\n\x1a\nimage",
+            headers={"content-type": "image/png", "x-file-name": "shot.png"},
+        )
+        asset_id = asset_response.json()["id"]
+
+        create_response = self.client.post("/api/recent-captures", json={
+            "id": "capture-one",
+            "assetId": asset_id,
+            "kind": "screenshot",
+            "contentType": "image/png",
+            "width": 320,
+            "height": 180,
+            "capturedAt": 123,
+        })
+
+        self.assertEqual(create_response.status_code, 200)
+        capture = create_response.json()
+        self.assertEqual(capture["assetId"], asset_id)
+        self.assertEqual(capture["revision"], 1)
+
+        list_response = self.client.get("/api/recent-captures")
+        self.assertEqual(list_response.json()["captures"][0]["id"], "capture-one")
+
+        update_response = self.client.put(
+            "/api/recent-captures/capture-one",
+            json={"revision": capture["revision"], "updates": {"status": "placedOnCanvas"}},
+        )
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["status"], "placedOnCanvas")
+
 
 if __name__ == "__main__":
     unittest.main()

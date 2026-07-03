@@ -20,6 +20,16 @@ The local storage service owns Prompt Library rows in `data/promptcard.sqlite3`.
 
 Frontend project and preset storage calls use `/storage-api/*`, proxied to the storage service. The older Vite dev JSON endpoints are read-only compatibility helpers; their write methods return `410`.
 
+## Floating Screenshot Capture Data
+
+The floating capture toolbar is a separate Tauri window rendered from the same frontend bundle with `?window=capture-toolbar`. Its screenshot button emits `capture:screenshot-requested` to the `main` window. The record button is intentionally disabled for the current MVP.
+
+The main app listens for the event and opens a full-screen screenshot selection overlay. The overlay requests a screen/window stream with the WebView `getDisplayMedia` picker, renders the selected source into a video preview, lets the user drag a region, crops that region to a PNG blob, uploads the blob through `storage.assets.upload`, and creates a Recent Capture record through `storage.recentCaptures.create`.
+
+After creation, the overlay dispatches `recent-captures:changed` so the Media screen reloads its capture list. The post-capture action bar can copy the image, save it locally, dismiss the overlay, or place the same `assetId` on the current free canvas when the active project context supports image nodes. Canvas placement references the existing asset file; it does not duplicate bytes.
+
+Recent Capture metadata is stored in SQLite beside projects and presets. Screenshot assets remain under `data/assets/`, and asset diagnostics treats Recent Capture `assetId` values as live references.
+
 ## Agent Collaboration Data
 
 The frontend sends a bounded workspace snapshot to the Agent Runtime. The runtime response may include structured JSON proposals:

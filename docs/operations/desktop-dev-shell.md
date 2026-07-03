@@ -5,12 +5,15 @@ The desktop dev shell is a Tauri window for local self-use while the source tree
 ## What It Does
 
 - Starts or reuses the local storage service, Agent Runtime, and Vite frontend.
-- Opens a desktop window titled `PromptCard Manager Dev Shell`.
+- Opens the main desktop window titled `PromptCard Manager Dev Shell`.
+- Opens a small floating capture toolbar window labeled `capture-toolbar`.
 - Loads the `frontendUrl` recorded in `logs/dev-runtime.json`, so Vite hot reload still reflects source edits even when port `3000` is already occupied.
-- Stops the local storage service, Agent Runtime, and Vite frontend when the desktop window closes.
+- Stops the local storage service, Agent Runtime, and Vite frontend when the main desktop window closes.
 - Shows a desktop-only source update action under the Me screen settings.
 
 The main webview sets `dragDropEnabled: false`. Windows requires this for Explorer file drags to reach the React HTML5 handlers used by the free canvas. Re-enabling Tauri's native interception would require a separate native path-to-asset bridge.
+
+The floating capture toolbar is a second Tauri window routed to `/?window=capture-toolbar`. It is undecorated, non-resizable, always on top, skipped from the taskbar, and uses a toolbar-only capability with limited event/window permissions. Closing or hiding the toolbar does not stop the local services; service shutdown is tied to the `main` window close path.
 
 ## Commands
 
@@ -91,7 +94,9 @@ Plain `npm.cmd run dev:with-agent` keeps the same repository-local development b
 
 ## Shutdown Behavior
 
-Closing the Tauri window stops the local PromptCard services resolved through the dev runtime manifest. This is the default desktop-shell behavior because self-use should feel like closing one local app.
+Closing the main Tauri window stops the local PromptCard services resolved through the dev runtime manifest. This is the default desktop-shell behavior because self-use should feel like closing one local app.
+
+Closing or hiding the floating capture toolbar affects only that toolbar window. It must not stop the storage service, Agent Runtime, or Vite frontend.
 
 Closing only the `start-desktop.bat` launcher terminal does not stop the desktop shell. Use the app window close button when you want the desktop shell and local services to shut down together.
 
@@ -115,6 +120,9 @@ It uses the system Git credentials. The app does not store GitHub tokens or PATs
 - This is a development shell, not an installer.
 - It does not perform dependency installation after pulling source changes.
 - It does not migrate data during `git pull`.
+- The floating toolbar currently supports screenshot capture intent only. Recording remains disabled and labelled as a future action.
+- Screenshot capture uses the WebView screen-capture picker and requires the user to grant screen/window capture before drag-selecting a region.
+- Toolbar position persistence is not implemented yet.
 - Desktop profile mode is opt-in for now. If it is enabled and an existing service is already healthy but points at a different data directory, startup fails instead of silently reusing it.
 - Before public distribution, remove personal data from the source tree and switch the default profile to AppData.
 

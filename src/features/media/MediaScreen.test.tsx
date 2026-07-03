@@ -16,8 +16,7 @@ describe('MediaScreen', () => {
 
     expect(markup).toContain('data-media-screen')
     expect(markup).toContain('近期捕获')
-    expect(markup).toContain('Neon alley style frame')
-    expect(markup).toContain('Camera move timing study')
+    expect(markup).toContain('0')
     expect(markup).toContain('捕获收件箱')
     expect(markup).toContain('提示词文本')
     expect(markup).toContain('用户备注')

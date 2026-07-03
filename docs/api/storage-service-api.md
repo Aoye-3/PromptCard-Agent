@@ -1,22 +1,22 @@
 # Storage Service API
 
-The local storage service is the durable source of truth for projects and Prompt Library presets. The frontend reaches it through the Vite proxy prefix `/storage-api/*`; the service itself exposes `/api/*` on port `8002`.
+The local storage service is the durable source of truth for projects, Prompt Library presets, image asset metadata, and Recent Capture metadata. The frontend reaches it through the Vite proxy prefix `/storage-api/*`; the service itself exposes `/api/*` on port `8002`.
 
 ## Health
 
-`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, and `backup`.
+`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, and `recentCaptures`.
 
 - `GET /health`
 
 Returns service status and the active data directory.
 
-## Image Assets
+## Assets
 
 - `POST /api/assets`
 - `GET /api/assets/{asset_id}`
 - `GET /api/assets/diagnostics`
 
-Asset uploads send the image bytes as the request body, the MIME type in `Content-Type`, and the original filename in `X-File-Name`. The service accepts static PNG, JPEG, and WebP files up to 20 MB and returns:
+Asset uploads send the bytes as the request body, the MIME type in `Content-Type`, and the original filename in `X-File-Name`. The service accepts signature-validated image and video asset types supported by the asset store. The current app path stores files up to 20 MB and returns:
 
 ```json
 {
@@ -27,7 +27,42 @@ Asset uploads send the image bytes as the request body, the MIME type in `Conten
 }
 ```
 
-The generated ID is safe to persist in project metadata. The read endpoint serves the original bytes with their stored image content type. Invalid types, empty or oversized bodies return `400`; unknown or malformed IDs return `404`.
+The generated ID is safe to persist in project metadata and Recent Capture metadata. The read endpoint serves the original bytes with their stored content type. Invalid types, empty or oversized bodies return `400`; unknown or malformed IDs return `404`.
+
+`GET /api/assets/diagnostics` checks the asset manifest and reference graph. Recent Capture `assetId` values are treated as live references, so screenshots that have not been placed on a project canvas are not reported as unreferenced solely because they are capture-only assets.
+
+## Recent Captures
+
+- `GET /api/recent-captures`
+- `GET /api/recent-captures/{id}`
+- `POST /api/recent-captures`
+- `PUT /api/recent-captures/{id}`
+
+Recent Capture records are metadata rows that point at existing assets by `assetId`. The MVP writes screenshot captures only; recording/video capture remains a future surface. A stored item has this UI-facing shape:
+
+```json
+{
+  "id": "capture-1",
+  "assetId": "generated-id.png",
+  "kind": "screenshot",
+  "status": "saved",
+  "purpose": "reference",
+  "role": null,
+  "title": "Screenshot",
+  "prompt": "",
+  "userNote": "",
+  "sourcePlatform": "",
+  "sourceUrl": "",
+  "contentType": "image/png",
+  "size": 12345,
+  "width": 640,
+  "height": 360,
+  "capturedAt": 1770000000000,
+  "origin": "floating-toolbar"
+}
+```
+
+Creates accept a complete capture metadata payload and return the stored item with service timestamps and `revision`. Updates require the current `revision` and replace only supplied mutable fields. Stale revisions return `409` with the current item. Unknown asset IDs return `404`; malformed payloads return `400`.
 
 ## Projects
 
@@ -95,4 +130,4 @@ The request includes `migrationId`. Repeating a completed ID returns `alreadyApp
 
 ## Errors
 
-Errors use FastAPI's `detail` envelope with `code`, `message`, optional `detail`, and optional `current`. Defined codes include `not_found`, `duplicate_item`, `revision_conflict`, and `invalid_asset`.
+Errors use FastAPI's `detail` envelope with `code`, `message`, optional `detail`, and optional `current`. Defined codes include `not_found`, `duplicate_item`, `revision_conflict`, `invalid_payload`, and `invalid_asset`.

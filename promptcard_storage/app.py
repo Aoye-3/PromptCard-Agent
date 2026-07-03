@@ -95,6 +95,22 @@ def create_app(storage: SqliteStore) -> FastAPI:
         except MissingItem as exc:
             raise _http_error(404, "not_found", "Asset not found") from exc
 
+    @application.get("/api/recent-captures")
+    def list_recent_captures() -> dict[str, Any]:
+        return {"captures": storage.list_recent_captures()}
+
+    @application.get("/api/recent-captures/{item_id}")
+    def get_recent_capture(item_id: str) -> dict[str, Any]:
+        return _handle(lambda: storage.get_recent_capture(item_id))
+
+    @application.post("/api/recent-captures")
+    def create_recent_capture(item: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.create_recent_capture(item))
+
+    @application.put("/api/recent-captures/{item_id}")
+    def update_recent_capture(item_id: str, payload: UpdatePayload) -> dict[str, Any]:
+        return _handle(lambda: storage.update_recent_capture(item_id, payload.updates, payload.revision))
+
     @application.get("/api/projects")
     def list_projects() -> dict[str, Any]:
         return {"projects": storage.list_projects()}
@@ -189,6 +205,8 @@ def _handle(callback: Callable[[], Any]) -> Any:
         raise _http_error(409, "duplicate_item", "Storage item already exists", {"id": str(exc)}) from exc
     except RevisionConflict as exc:
         raise _http_error(409, "revision_conflict", "Storage revision conflict", current=exc.current) from exc
+    except ValueError as exc:
+        raise _http_error(400, "invalid_payload", str(exc)) from exc
 
 
 def _http_error(status: int, code: str, message: str, detail: Any = None, current: Any = None) -> HTTPException:

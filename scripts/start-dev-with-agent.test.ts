@@ -26,7 +26,7 @@ afterEach(async () => {
 function startHealthyServer() {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'application/json' })
-    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":1,"capabilities":{"assets":true,"sqlite":true}}')
+    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":2,"capabilities":{"assets":true,"sqlite":true}}')
   })
 
   return new Promise<string>((resolve) => {

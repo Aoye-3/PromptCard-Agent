@@ -13,6 +13,7 @@ $LogsDir = if ($env:PROMPTCARD_LOGS_DIR) { $env:PROMPTCARD_LOGS_DIR } else { Joi
 $RuntimeManifestPath = if ($env:PROMPTCARD_DEV_RUNTIME_MANIFEST) { $env:PROMPTCARD_DEV_RUNTIME_MANIFEST } else { Join-Path $LogsDir "dev-runtime.json" }
 $TauriDevConfigPath = Join-Path $LogsDir "tauri.dev-runtime.conf.json"
 $DesktopProcessName = "promptcard-manager-dev-shell"
+$LaunchMutexName = "Local\PromptCardManagerDesktopShellLaunch"
 . (Join-Path $PSScriptRoot "dev-port-runtime.ps1")
 
 function Test-HttpOk($Url) {
@@ -101,6 +102,13 @@ function Wait-DesktopShellProcess($StartedAfter) {
   throw "Desktop shell did not open within $StartupTimeoutSeconds seconds."
 }
 
+$LaunchMutex = [System.Threading.Mutex]::new($false, $LaunchMutexName)
+if (!$LaunchMutex.WaitOne(0)) {
+  $LaunchMutex.Dispose()
+  Write-Host "PromptCard Manager Dev Shell launch is already in progress."
+  exit 0
+}
+
 Push-Location $RepoRoot
 try {
   if (!(Test-Path -LiteralPath "node_modules")) {
@@ -154,4 +162,6 @@ try {
 }
 finally {
   Pop-Location
+  $LaunchMutex.ReleaseMutex() | Out-Null
+  $LaunchMutex.Dispose()
 }

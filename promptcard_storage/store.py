@@ -16,7 +16,7 @@ from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DATABASE_NAME = "promptcard.sqlite3"
 JSON_SOURCES = (
     "projects.json",
@@ -60,7 +60,9 @@ class SqliteStore:
             self.data_dir,
             self._connect,
             self._transaction,
-            lambda: self.list_projects() + [entry["payload"] for entry in self.list_project_trash()],
+            lambda: self.list_projects()
+            + [entry["payload"] for entry in self.list_project_trash()]
+            + self.list_recent_captures(),
             now_ms,
         )
         self._backups = BackupManager(
@@ -87,6 +89,7 @@ class SqliteStore:
                 "presetBatch": True,
                 "browserImportIdempotency": True,
                 "backup": True,
+                "recentCaptures": True,
             },
         }
 
@@ -147,6 +150,62 @@ class SqliteStore:
 
     def delete_project_trash(self, ids: list[str]) -> None:
         self._delete_trash("projects", ids)
+
+    def list_recent_captures(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM recent_captures ORDER BY captured_at DESC, created_at DESC"
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows]
+
+    def get_recent_capture(self, item_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute("SELECT payload_json FROM recent_captures WHERE id=?", (item_id,)).fetchone()
+        if not row:
+            raise MissingItem()
+        return json.loads(row[0])
+
+    def create_recent_capture(self, item: dict[str, Any]) -> dict[str, Any]:
+        created = normalize_recent_capture(item)
+        with self._transaction() as connection:
+            try:
+                self._insert_recent_capture(connection, created)
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateItem(created["id"]) from exc
+        return created
+
+    def update_recent_capture(self, item_id: str, updates: dict[str, Any], revision: int) -> dict[str, Any]:
+        with self._transaction() as connection:
+            row = connection.execute("SELECT payload_json FROM recent_captures WHERE id=?", (item_id,)).fetchone()
+            if not row:
+                raise MissingItem()
+            current = json.loads(row[0])
+            if current["revision"] != revision:
+                raise RevisionConflict(current)
+            updated = normalize_recent_capture({
+                **current,
+                **updates,
+                "id": current["id"],
+                "assetId": current["assetId"],
+                "createdAt": current.get("createdAt"),
+                "capturedAt": updates.get("capturedAt", current.get("capturedAt")),
+                "revision": current["revision"] + 1,
+                "updatedAt": updates.get("updatedAt") or now_ms(),
+            })
+            connection.execute(
+                "UPDATE recent_captures SET asset_id=?, kind=?, status=?, captured_at=?, updated_at=?, revision=?, payload_json=? WHERE id=?",
+                (
+                    updated["assetId"],
+                    updated["kind"],
+                    updated["status"],
+                    updated["capturedAt"],
+                    updated["updatedAt"],
+                    updated["revision"],
+                    _json(updated),
+                    item_id,
+                ),
+            )
+        return updated
 
     def list_presets(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -380,8 +439,22 @@ class SqliteStore:
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("PRAGMA busy_timeout=5000")
             row = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
-            if not row or row[0] != SCHEMA_VERSION:
-                raise MigrationError(f"Unsupported SQLite schema version: {row[0] if row else None}")
+            current_version = row[0] if row else None
+            if current_version == 1:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._create_recent_captures_schema(connection)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                        (2, "add-recent-captures", now_ms()),
+                    )
+                    connection.commit()
+                    current_version = 2
+                except Exception:
+                    connection.rollback()
+                    raise
+            if current_version != SCHEMA_VERSION:
+                raise MigrationError(f"Unsupported SQLite schema version: {current_version}")
 
     def _create_schema(self, connection: sqlite3.Connection) -> None:
         connection.executescript("""
@@ -407,6 +480,7 @@ class SqliteStore:
             );
             CREATE TABLE browser_imports(migration_id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
         """)
+        self._create_recent_captures_schema(connection)
 
     def _insert_project(self, connection: sqlite3.Connection, item: dict[str, Any], status: str, trash: dict[str, Any] | None = None) -> None:
         connection.execute(
@@ -422,6 +496,38 @@ class SqliteStore:
             (item["id"], item["revision"], item["type"], item["category"], item["usageCount"], sort_order, status,
              item["createdAt"], item["updatedAt"], trash.get("deletedAt") if trash else None,
              trash.get("deletedBy") if trash else None, trash.get("deleteReason") if trash else None, _json(item)),
+        )
+
+    def _create_recent_captures_schema(self, connection: sqlite3.Connection) -> None:
+        connection.executescript("""
+            CREATE TABLE IF NOT EXISTS recent_captures(
+                id TEXT PRIMARY KEY,
+                asset_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                status TEXT NOT NULL,
+                captured_at INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS recent_captures_order ON recent_captures(captured_at DESC, created_at DESC);
+        """)
+
+    def _insert_recent_capture(self, connection: sqlite3.Connection, item: dict[str, Any]) -> None:
+        connection.execute(
+            "INSERT INTO recent_captures(id, asset_id, kind, status, captured_at, created_at, updated_at, revision, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                item["id"],
+                item["assetId"],
+                item["kind"],
+                item["status"],
+                item["capturedAt"],
+                item["createdAt"],
+                item["updatedAt"],
+                item["revision"],
+                _json(item),
+            ),
         )
 
     def _get_payload(self, table: str, item_id: str, status: str) -> dict[str, Any]:
@@ -548,6 +654,44 @@ def normalize_preset(item: dict[str, Any]) -> dict[str, Any]:
     preset.setdefault("updatedAt", preset.get("createdAt") or now)
     preset["revision"] = int(preset.get("revision") or 1)
     return preset
+
+
+def normalize_recent_capture(item: dict[str, Any]) -> dict[str, Any]:
+    now = now_ms()
+    capture = deepcopy(item)
+    capture.setdefault("id", f"capture-{now}")
+    capture.setdefault("kind", "screenshot")
+    capture.setdefault("status", "recent")
+    capture.setdefault("purpose", "inspirationReference")
+    capture.setdefault("role", None)
+    capture.setdefault("title", "Screenshot capture")
+    capture.setdefault("prompt", "")
+    capture.setdefault("userNote", "")
+    capture.setdefault("sourcePlatform", "Local capture")
+    capture.setdefault("sourceUrl", "")
+    capture.setdefault("contentType", "image/png")
+    capture.setdefault("size", 0)
+    capture.setdefault("width", 0)
+    capture.setdefault("height", 0)
+    capture.setdefault("capturedAt", now)
+    capture.setdefault("origin", {"type": "floating-toolbar"})
+    capture.setdefault("createdAt", capture.get("capturedAt") or now)
+    capture.setdefault("updatedAt", capture.get("createdAt") or now)
+    capture["revision"] = int(capture.get("revision") or 1)
+
+    if not isinstance(capture.get("assetId"), str) or not capture["assetId"]:
+        raise ValueError("Recent capture assetId is required")
+    if capture["kind"] != "screenshot":
+        raise ValueError(f"Unsupported recent capture kind: {capture['kind']}")
+    if capture["contentType"] != "image/png":
+        raise ValueError(f"Unsupported recent capture content type: {capture['contentType']}")
+    capture["size"] = int(capture.get("size") or 0)
+    capture["width"] = int(capture.get("width") or 0)
+    capture["height"] = int(capture.get("height") or 0)
+    capture["capturedAt"] = int(capture.get("capturedAt") or now)
+    capture["createdAt"] = int(capture.get("createdAt") or capture["capturedAt"])
+    capture["updatedAt"] = int(capture.get("updatedAt") or capture["createdAt"])
+    return capture
 
 
 def now_ms() -> int:

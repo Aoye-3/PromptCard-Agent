@@ -1,16 +1,19 @@
 # Local Storage Service
 
-`promptcard_storage` is the sole durable owner of projects, Prompt Library presets, Trash state, and image asset metadata. Runtime records are stored in `data/promptcard.sqlite3`; image bytes remain under `data/assets/`.
+`promptcard_storage` is the sole durable owner of projects, Prompt Library presets, Trash state, image asset metadata, and Recent Capture metadata. Runtime records are stored in `data/promptcard.sqlite3`; asset bytes remain under `data/assets/`.
 
 ## SQLite Contract
 
-- `SqliteStore` is the compatibility facade for project and Prompt Library CRUD plus transaction ownership. `StorageInitializer`, `AssetStore`, and `BackupManager` own JSON initialization, image files/diagnostics, and consistent backup creation respectively.
+- `SqliteStore` is the compatibility facade for project, Prompt Library, and Recent Capture CRUD plus transaction ownership. `StorageInitializer`, `AssetStore`, and `BackupManager` own JSON initialization, asset files/diagnostics, and consistent backup creation respectively.
 - FastAPI routes are registered by `create_app(storage)`, allowing route contract tests to inject an isolated temporary store while the exported default `app` keeps the existing service startup contract.
 - Schema version `1` uses `projects`, `presets`, `assets`, `schema_migrations`, and `browser_imports`.
+- Schema version `2` adds `recent_captures`. Existing version `1` databases migrate in place at startup by creating the table and recording the migration.
 - Projects and presets retain their existing JSON payload. Indexed columns own revision, status, ordering, usage, and timestamps.
+- Recent Capture rows retain their full JSON payload while indexed columns own `asset_id`, `kind`, `status`, capture time, timestamps, and revision.
 - Active and Trash records share one table. Delete and restore are single transactions.
 - Connections enable WAL, foreign keys, a busy timeout, and full synchronous durability. Writes begin with `BEGIN IMMEDIATE`.
 - Duplicate creates and stale revisions return conflicts instead of overwriting data.
+- Asset diagnostics include references from projects, presets, and Recent Capture records before reporting unreferenced files.
 
 ## JSON Migration
 

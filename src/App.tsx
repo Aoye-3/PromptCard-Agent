@@ -10,6 +10,7 @@ import FreeCanvasBuilderScreen from './components/canvas/FreeCanvasBuilderScreen
 import { MeScreen } from './components/app/MeScreen'
 import { TemplateLibraryScreen } from './components/app/TemplateLibraryScreen'
 import { MediaScreen } from './features/media/MediaScreen'
+import { ScreenshotCaptureOverlay } from './features/capture/ScreenshotCaptureOverlay'
 import type { BuilderModePreviewSnapshot } from './components/app/builder-preview-contract'
 import { AddCardModal, CreateProjectModal, HistoryModal, RenameProjectModal } from './components/app/ProjectModals'
 import { useCardStore } from './stores/card.store'
@@ -25,12 +26,14 @@ import { sortProjects } from './domain/projects/project-normalization'
 import { mergeStoredProjectMetadata } from './domain/projects/project-storage-merge'
 import { createProjectSaveCoordinator, type ProjectSaveResult } from './domain/projects/project-save-coordinator'
 import { normalizeThreeStageTemplateSettings, type ThreeStageTemplateSettings } from './domain/three-stage/three-stage-definitions'
+import { createFreeCanvasImageNodeFromMedia } from './domain/free-canvas/free-canvas-project'
+import type { FreeCanvasMediaNode } from './domain/free-canvas/free-canvas'
 import type { IPreset, CardType } from './models/Card.model'
 import type { IFreeCanvasProject, IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
 import type { IUserSettings } from './models/UserSettings.model'
 import type { MainTab, ProjectMode, SaveStatus } from './features/app/app-types'
-import type { TrashEntry } from './storage/storage-service-client'
+import type { RecentCaptureItem, TrashEntry } from './storage/storage-service-client'
 
 const DEFAULT_USER_SETTINGS: IUserSettings = {
   theme: 'light',
@@ -99,6 +102,7 @@ function App() {
   const [duplicateMode, setDuplicateMode] = useState(false)
   const [activeEditMode, setActiveEditMode] = useState<'learn' | 'creative'>('creative')
   const [showSettings, setShowSettings] = useState(false)
+  const [showScreenshotCapture, setShowScreenshotCapture] = useState(false)
   const [userSettings, setUserSettings] = useState<IUserSettings>(DEFAULT_USER_SETTINGS)
   const threeStageTemplateSettings = useMemo(
     () => normalizeThreeStageTemplateSettings(userSettings.meta?.threeStageTemplates),
@@ -250,6 +254,24 @@ function App() {
   useEffect(() => {
     initPresets()
   }, [initPresets])
+
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return
+    let unlisten: (() => void) | null = null
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen('capture:screenshot-requested', () => {
+        setShowScreenshotCapture(true)
+      }))
+      .then(nextUnlisten => {
+        unlisten = nextUnlisten
+      })
+      .catch(error => {
+        console.error('Failed to listen for screenshot capture requests:', error)
+      })
+    return () => {
+      unlisten?.()
+    }
+  }, [])
 
   useEffect(() => {
     if (!isHydrated || !activeProjectId || projectMode !== 'builder' || activeProject?.type !== 'card') {
@@ -744,6 +766,53 @@ function App() {
     ))
   }
 
+  const handlePlaceCaptureOnCanvas = async (capture: RecentCaptureItem) => {
+    if (!activeProjectId || activeProject?.type !== 'free-canvas' || !activeProject.freeCanvas) return
+    const size = fitCaptureForCanvas(capture.width, capture.height)
+    const mediaNode: FreeCanvasMediaNode = {
+      id: `capture-media-${capture.id}`,
+      kind: 'imageAsset',
+      title: capture.title,
+      position: { x: 120, y: 120 },
+      width: size.width,
+      height: size.height,
+      assetId: capture.assetId,
+      imageUrl: storage.assets.url(capture.assetId),
+      meta: {
+        recentCaptureId: capture.id,
+        originalWidth: capture.width,
+        originalHeight: capture.height
+      }
+    }
+    const imageNode = createFreeCanvasImageNodeFromMedia(mediaNode)
+    const updatedFreeCanvas = {
+      ...activeProject.freeCanvas,
+      nodes: [...activeProject.freeCanvas.nodes, imageNode],
+      selectedNodeId: imageNode.id
+    }
+    const savedAt = Date.now()
+    markProjectEdited(activeProjectId)
+    setProjects(currentProjects => currentProjects.map(project =>
+      project.id === activeProjectId
+        ? { ...project, freeCanvas: updatedFreeCanvas, updatedAt: savedAt }
+        : project
+    ))
+    setProjectSaveStatus(activeProjectId, 'saving')
+    const result = await persistProjectChanges(activeProject, {
+      freeCanvas: updatedFreeCanvas,
+      updatedAt: savedAt,
+      lastOpenedAt: savedAt
+    }, getProjectEditSeq(activeProjectId), savedAt, 'Place capture on canvas failed:')
+    if (result.status === 'saved') {
+      setProjectSaveStatus(activeProjectId, 'saved', savedAt)
+      try {
+        await storage.recentCaptures.update(capture.id, capture.revision, { status: 'placedOnCanvas' })
+      } catch (error) {
+        console.error('Failed to update capture placement status:', error)
+      }
+    }
+  }
+
   const handleUpdateUserSettings = async (settings: Partial<IUserSettings>) => {
     const updated = await storage.settings.save(settings)
     setUserSettings(updated)
@@ -1179,8 +1248,28 @@ function App() {
           </div>
         </div>
       )}
+      {showScreenshotCapture && (
+        <ScreenshotCaptureOverlay
+          onClose={() => setShowScreenshotCapture(false)}
+          onCaptureCreated={() => {
+            setActiveTab('media')
+            setShowTemplateLibrary(false)
+            setProjectMode('home')
+          }}
+          canPlaceOnCanvas={activeProject?.type === 'free-canvas' && Boolean(activeProject.freeCanvas)}
+          onPlaceOnCanvas={handlePlaceCaptureOnCanvas}
+        />
+      )}
     </AppShell>
   )
+}
+
+const fitCaptureForCanvas = (width: number, height: number): { width: number; height: number } => {
+  const maximum = 360
+  const safeWidth = Math.max(1, width || maximum)
+  const safeHeight = Math.max(1, height || 220)
+  const scale = maximum / Math.max(safeWidth, safeHeight)
+  return { width: safeWidth * scale, height: safeHeight * scale }
 }
 
 export default App

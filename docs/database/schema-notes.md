@@ -12,6 +12,8 @@ Core frontend schemas:
 - `IThreeStageForm`
 - `PromptLibraryWriteProposal`
 - `AgentWorkspaceProposal`
+- `RecentCaptureItem`
+- `RecentCaptureItemViewModel`
 
 Schema changes should be documented with migration or normalization behavior. Prefer extending `meta` for Prompt Library metadata rather than changing the top-level `IPreset` shape.
 
@@ -48,3 +50,34 @@ Normalization behavior:
 - Legacy `storyVideoPair` items split into adjacent independent storyboard and video-prompt forms.
 - Form numbering is monotonic per form type and is not compacted after deletion.
 - `selectedPairId` is retained only for input compatibility and is synchronized to `null`.
+
+## Recent Capture Shape
+
+`RecentCaptureItem` is durable metadata stored by the local storage service. It references the physical asset file by `assetId`; it does not duplicate image bytes inside project JSON or capture JSON.
+
+Current MVP fields:
+
+- `id`
+- `assetId`
+- `kind: "screenshot"`
+- `status`
+- `purpose`
+- `role?: string | null`
+- `title`
+- `prompt`
+- `userNote`
+- `sourcePlatform`
+- `sourceUrl`
+- `contentType`
+- `size`
+- `width`
+- `height`
+- `capturedAt`
+- `origin`
+- `createdAt`
+- `updatedAt`
+- `revision`
+
+Only screenshot records are created in the current floating capture MVP. Video capture and Prompt Library registration are future work. Raw Recent Capture items are not Agent-visible or Prompt Library-visible until a separate explicit registration flow promotes them.
+
+UI code should convert durable records to `RecentCaptureItemViewModel` through the media normalization helpers. Preview surfaces resolve screenshot thumbnails from `storage.assets.url(assetId)`.

@@ -54,7 +54,7 @@ function Test-StorageService {
     $response = Invoke-WebRequest -UseBasicParsing $StorageHealthUrl -TimeoutSec 2
     if ($response.StatusCode -ne 200) { return $false }
     $payload = $response.Content | ConvertFrom-Json
-    if ($payload.serviceVersion -ne "2.0.0" -or $payload.schemaVersion -ne 1 -or !$payload.capabilities.sqlite) {
+    if ($payload.serviceVersion -ne "2.0.0" -or $payload.schemaVersion -ne 2 -or !$payload.capabilities.sqlite) {
       Write-Host "PromptCard storage service is running an incompatible storage version."
       return $false
     }

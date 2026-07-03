@@ -29,7 +29,15 @@ The Vite middleware implementation for these endpoints lives in `vite/plugins/pr
 
 ## Image Assets
 
-Free-canvas images are uploaded through `/storage-api/assets`. Project JSON stores the returned `assetId`, never Base64 image data. Original and cropped nodes can therefore share one durable file without increasing project write size; cropped nodes add only normalized crop coordinates and their source node reference.
+Free-canvas images and floating screenshot captures are uploaded through `/storage-api/assets`. Project JSON and Recent Capture metadata store the returned `assetId`, never Base64 image data. Original and cropped nodes can therefore share one durable file without increasing project write size; cropped nodes add only normalized crop coordinates and their source node reference.
+
+## Recent Captures
+
+Recent Capture metadata is stored through `/storage-api/recent-captures` and exposed in the frontend facade as `storage.recentCaptures`. Durable records use `RecentCaptureItem`; media UI converts them to `RecentCaptureItemViewModel` before rendering.
+
+The Media screen loads Recent Captures from the storage service instead of fixtures. It also listens for the `recent-captures:changed` browser event so a new floating-toolbar screenshot appears without reloading the whole app. Screenshot previews resolve their image URL with `storage.assets.url(assetId)`.
+
+Raw Recent Capture records are capture inbox items only. They are not automatically added to the Prompt Library, Agent context, or a project canvas. The screenshot post-capture action can place the same `assetId` on the current free canvas when an active canvas context is available.
 
 ## Project Normalization
 
@@ -43,7 +51,7 @@ Project reads normalize data before returning it to the UI. Normalization includ
 
 ## Change Guidance
 
-Storage changes should include tests for revision conflicts, Trash behavior, migration, and project normalization. Avoid writing project or preset data directly from UI components.
+Storage changes should include tests for revision conflicts, Trash behavior, migration, Recent Capture metadata, asset diagnostics, and project normalization. Avoid writing project, preset, or Recent Capture data directly from UI components.
 
 Quick-message changes do not require a storage-service schema change. They should be verified through preset-store migration tests, Prompt Library category filtering tests, quick-message note-retirement tests, and Free Canvas insertion tests.
 

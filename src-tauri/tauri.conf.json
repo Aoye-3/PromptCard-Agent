@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "PromptCard Manager Dev Shell",
         "width": 1440,
         "height": 960,
@@ -20,6 +21,23 @@
         "dragDropEnabled": false,
         "resizable": true,
         "fullscreen": false
+      },
+      {
+        "label": "capture-toolbar",
+        "title": "PromptCard Capture",
+        "url": "/?window=capture-toolbar",
+        "width": 228,
+        "height": 64,
+        "minWidth": 228,
+        "minHeight": 64,
+        "maxWidth": 228,
+        "maxHeight": 64,
+        "dragDropEnabled": false,
+        "resizable": false,
+        "fullscreen": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
       }
     ],
     "security": {

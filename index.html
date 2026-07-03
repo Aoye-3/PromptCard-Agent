@@ -42,11 +42,21 @@
       }
 
       .boot-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
         margin-bottom: 20px;
         font-size: 26px;
         font-weight: 800;
         font-style: italic;
         letter-spacing: 0;
+      }
+
+      .boot-logo {
+        width: 44px;
+        height: 44px;
+        flex: none;
+        border-radius: 12px;
       }
 
       .boot-row {
@@ -104,7 +114,10 @@
     <div id="root">
       <div class="boot-screen" role="status" aria-live="polite">
         <div class="boot-panel">
-          <div class="boot-brand">PMAgent</div>
+          <div class="boot-brand">
+            <img class="boot-logo" src="/promptcard-manager-icon.png" alt="PMAgent logo" />
+            <span>PMAgent</span>
+          </div>
           <div class="boot-row">
             <div class="boot-spinner" aria-hidden="true"></div>
             <span>正在启动工作台...</span>

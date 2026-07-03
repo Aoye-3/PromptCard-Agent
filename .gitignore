@@ -9,6 +9,8 @@ lerna-debug.log*
 
 # Dependencies
 node_modules
+.npm-cache/
+.codegraph/
 .pnp
 .pnp.js
 agent-runtime/backend/.venv/

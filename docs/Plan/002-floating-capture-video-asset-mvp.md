@@ -10,7 +10,7 @@ Active
 
 ## Last Updated
 
-2026-07-02
+2026-07-03
 
 ## Timezone
 
@@ -52,6 +52,11 @@ The running desktop app should have:
 - The page title shown after entering the Media page is `近期捕获`.
 - Media exists at the same app navigation level as Projects, Prompt Library, and Settings.
 - Media is reachable from the global bottom navigation bar.
+- Clicking a media card opens a focused media analysis dialog rather than navigating away from the `近期捕获` page.
+- The media analysis dialog is split into a left media dossier and a right Agent workspace:
+  - Left: one media dossier card, with media preview taking about 60% height, prompt box about 30%, and note area about 10%.
+  - Right: Agent input and conversation output for visual analysis, style reverse engineering, and prompt reverse engineering.
+- The first Agent in this dialog is a style analysis Agent backed by a vision model. It receives only the explicitly selected media item and user-entered prompt/note context.
 
 Toolbar modes:
 
@@ -76,6 +81,8 @@ Recent Captures flow:
 Open Recent Captures
   -> browse captured screenshots and recordings in batches
   -> add prompt, note, source platform, source URL, category, and reference role
+  -> click a media card to open the media analysis dialog
+  -> optionally ask the style analysis Agent to reverse-engineer style, prompt, or visual structure
   -> register selected item into Prompt Library
   -> or place selected item on current canvas
   -> or mark as generated result / inspiration reference
@@ -101,6 +108,13 @@ Canvas behavior:
 - A visible play button starts playback.
 - Clicking pause/stop returns to a calm canvas state.
 
+Media analysis dialog behavior:
+
+- Image assets support style reverse engineering, prompt reverse engineering, and sending the selected media into an Agent conversation.
+- Video assets support timestamped frame extraction, timeline marks, ordered multi-frame review, and storyboard inference from extracted frames.
+- Video storyboard inference should keep frame timestamps visible so the user can trace every inferred shot back to the source clip.
+- Agent analysis output is reviewable text first. It does not automatically register to Prompt Library, overwrite capture metadata, or enter Agent-readable global context.
+
 ## Product Boundaries
 
 Recent Captures and Prompt Library must stay distinct.
@@ -112,6 +126,8 @@ Recent Captures and Prompt Library must stay distinct.
 | Canvas | Active visual work surface | Project/workspace context only | Explicitly placed images, videos, text, shot material |
 
 Recent Captures should be cheap to add to and easy to prune. Prompt Library should remain deliberate.
+
+The media analysis dialog is an explicit, per-capture Agent interaction. Opening or analyzing one media item does not make the entire Recent Captures inbox Agent-readable. Analysis results remain drafts until the user applies them to capture metadata, registers them to Prompt Library, or creates project/shot records.
 
 Navigation placement:
 
@@ -131,11 +147,13 @@ The implementation order for this plan is:
 
 ```text
 1. Build the Media / Recent Captures frontend UI layer.
-2. Add and refine the floating capture toolbar.
-3. Add screenshot selection and save captures into Recent Captures.
-4. Connect information flow between Prompt Library, Recent Captures, and Canvas.
-5. Add screen recording as video assets.
-6. Add optional no-audio GIF export only after video capture is stable.
+2. Add the media detail analysis dialog shell for selected captures.
+3. Add and refine the floating capture toolbar.
+4. Add screenshot selection and save captures into Recent Captures.
+5. Connect information flow between Prompt Library, Recent Captures, Canvas, and reviewable Agent analysis output.
+6. Add screen recording as video assets.
+7. Add video frame extraction, timeline marks, and multi-frame storyboard inference.
+8. Add optional no-audio GIF export only after video capture is stable.
 ```
 
 The first useful deliverable is the `媒体` page shell with the `近期捕获` title, empty state, media grid/list, metadata editor affordances, and placeholder actions. Capture can be wired into it after the page exists.
@@ -179,6 +197,8 @@ Candidate components:
 | Clipboard text/image | Tauri `clipboard-manager` plugin plus browser clipboard events | Browser paste/drop first, native clipboard as desktop fallback. |
 | Screenshot capture | `xcap` | Rust, Apache-2.0, cross-platform screenshot and region capture. |
 | Video recording | Start with WebM/MP4 asset model; evaluate `xcap`/`scap` for native capture | Add after screenshot loop is stable. |
+| Visual media analysis | Existing Agent runtime boundary plus a vision-model adapter | Keep request scope to the selected capture and explicit user text. |
+| Video frame extraction | Start behind a small media-processing service boundary | Output timestamped frame assets that remain linked to the source recording. |
 | GIF export | `gif` crate for simple no-audio GIF | Optional export only; avoid `gifski` unless AGPL/commercial licensing is accepted. |
 | Local save | Tauri `dialog`/`fs` plugin | Browser download can be a temporary fallback. |
 
@@ -244,6 +264,38 @@ interface RecentCaptureItem {
 }
 ```
 
+Media analysis should be represented as reviewable output linked to a capture, not as an automatic Prompt Library write.
+
+```ts
+type MediaAnalysisKind =
+  | 'styleReverseEngineering'
+  | 'promptReverseEngineering'
+  | 'freeformVisionChat'
+  | 'videoStoryboardInference'
+
+interface RecentCaptureAnalysisDraft {
+  id: string
+  captureId: string
+  kind: MediaAnalysisKind
+  inputPrompt?: string
+  outputText: string
+  structuredOutput?: unknown
+  createdAt: string
+  acceptedAt?: string
+  registeredPromptId?: string
+  linkedShotIds?: string[]
+}
+
+interface VideoFrameMark {
+  id: string
+  captureId: string
+  timestampMs: number
+  frameAssetId?: string
+  userLabel?: string
+  userNote?: string
+}
+```
+
 Prompt Library registration should produce a curated prompt/media record from a `RecentCaptureItem`, not mutate Prompt Library silently.
 
 Canvas media node extension:
@@ -293,22 +345,97 @@ interface FreeCanvasVideoMeta {
 
 **Acceptance Criteria:**
 
-- [ ] `媒体` is visible in the bottom navigation bar.
-- [ ] Entering `媒体` opens a page whose main title is `近期捕获`.
-- [ ] User can open the page without entering a specific project.
-- [ ] Empty state clearly supports future capture intake.
-- [ ] Media grid/list and metadata editor UI are present.
-- [ ] Placeholder actions do not perform destructive or misleading work.
-- [ ] Recent Captures is not included in Agent-readable Prompt Library context.
+- [x] `媒体` is visible in the bottom navigation bar.
+- [x] Entering `媒体` opens a page whose main title is `近期捕获`.
+- [x] User can open the page without entering a specific project.
+- [x] Empty state clearly supports future capture intake.
+- [x] Media grid/list and metadata editor UI are present.
+- [x] Placeholder actions do not perform destructive or misleading work.
+- [x] Recent Captures is not included in Agent-readable Prompt Library context.
 
 **Verification:**
 
-- [ ] UI/component tests cover route rendering and bottom-nav entry where practical.
-- [ ] Manual check: navigate Projects -> Media -> Prompt Library -> Settings.
-- [ ] Manual check: page title reads `近期捕获`.
+- [x] UI/component tests cover route rendering and bottom-nav entry where practical.
+- [x] Manual check: navigate Projects -> Media -> Prompt Library -> Me/Settings.
+- [x] Manual check: page title reads `近期捕获`.
+- [x] `npm.cmd run build` succeeds.
+
+## Phase 2: Media Detail Analysis Dialog Shell
+
+**Goal:** Let a selected Recent Capture open into a focused media dossier and visual-analysis Agent workspace.
+
+**Scope:**
+
+- Clicking a media card opens a modal dialog over the `近期捕获` page.
+- The dialog uses a two-column layout:
+  - Left column: media dossier card.
+  - Right column: Agent input, analysis actions, and conversation/output area.
+- Left media dossier card proportions:
+  - Media preview: about 60% of the card height.
+  - Prompt box: about 30% of the card height.
+  - Tail note/remark area: about 10% of the card height.
+- The right Agent workspace includes explicit actions for:
+  - Style reverse engineering.
+  - Send to Agent conversation.
+  - Prompt reverse engineering.
+- Phase 2 can ship as UI shell first, with disabled or placeholder analysis actions if the vision model boundary is not ready.
+- The selected media item is the only default Agent input. Other Recent Captures and Prompt Library records are not implicitly included.
+- Agent output remains reviewable draft text until the user explicitly copies, applies, registers, or saves it.
+
+**Acceptance Criteria:**
+
+- [ ] Clicking a media card opens the analysis modal without leaving the Media page.
+- [ ] The left side displays the selected media, prompt text area, and note area in the intended 60/30/10 information hierarchy.
+- [ ] The right side displays an Agent input area and action affordances for style analysis and prompt reverse engineering.
+- [ ] Closing the modal returns to the same `近期捕获` list/detail state.
+- [ ] Placeholder Agent actions do not imply completed vision analysis when the backend is not connected.
+- [ ] Raw Recent Captures are still not added to global Agent context automatically.
+
+**Verification:**
+
+- [ ] Component tests cover opening and closing the modal from a media card.
+- [ ] Component tests cover the media dossier, prompt box, note area, Agent input, and disabled/placeholder action rendering.
+- [ ] Manual check: open a media card, type into Agent input, close modal, reopen the same media card.
 - [ ] `npm.cmd run build` succeeds.
 
-## Phase 2: Floating Toolbar Shell
+## Phase 3: Visual Analysis Agent Integration
+
+**Goal:** Connect the media analysis dialog to a vision-capable Agent that can infer visual style and reverse-engineer prompts.
+
+**Scope:**
+
+- Add a narrow vision-analysis service boundary for selected media assets.
+- Send selected image media plus user-entered prompt/note context to the style analysis Agent.
+- Support structured analysis outputs:
+  - Style traits.
+  - Visual composition.
+  - Subject and scene description.
+  - Lighting and color analysis.
+  - Camera/framing hints.
+  - Reconstructed prompt draft.
+  - Negative prompt or avoidance notes when useful.
+- Keep generated analysis as draft output until user approval.
+- Allow the user to copy analysis into the capture prompt/note fields or register it into Prompt Library explicitly.
+- Do not expose unselected Recent Captures to the Agent.
+
+**Acceptance Criteria:**
+
+- [ ] User can run style reverse engineering on a selected image capture.
+- [ ] User can ask the Agent a free-form question about the selected media.
+- [ ] User can generate a reverse-engineered prompt draft from the selected media.
+- [ ] Agent requests include only the selected media item and explicitly provided text context.
+- [ ] Agent output can be copied or applied by explicit user action.
+- [ ] Agent output is not silently registered to Prompt Library.
+
+**Verification:**
+
+- [ ] Unit tests cover analysis request payload shaping and privacy boundaries.
+- [ ] Unit tests cover structured analysis result normalization.
+- [ ] Manual check: run style analysis on a selected screenshot and inspect request scope.
+- [ ] Manual check: apply/copy generated prompt draft only after explicit action.
+- [ ] `npm.cmd run build` succeeds.
+
+## Phase 4: Floating Toolbar Shell
 
 **Goal:** Add the always-on-top capture entry point after the Media page exists.
 
@@ -337,7 +464,7 @@ interface FreeCanvasVideoMeta {
 - [ ] Manual check on Windows first.
 - [ ] Follow-up manual checks on macOS/Linux before claiming cross-platform completion.
 
-## Phase 3: Screenshot Selection To Recent Captures
+## Phase 5: Screenshot Selection To Recent Captures
 
 **Goal:** Ship the first useful capture loop: toolbar screenshot to the `近期捕获` page.
 
@@ -373,7 +500,7 @@ interface FreeCanvasVideoMeta {
 - [ ] Manual check: screenshot to canvas, reload, image remains.
 - [ ] `npm.cmd run build` succeeds.
 
-## Phase 4: Three-Way Information Flow
+## Phase 6: Three-Way Information Flow
 
 **Goal:** Connect Prompt Library, Recent Captures, and Canvas without blurring their responsibilities.
 
@@ -407,7 +534,7 @@ interface FreeCanvasVideoMeta {
 - [ ] Manual check: place capture on canvas, reload, image remains.
 - [ ] Manual check: Agent context includes registered Prompt Library item, not raw Recent Captures.
 
-## Phase 5: Recording To Recent Captures As Video Asset
+## Phase 7: Recording To Recent Captures As Video Asset
 
 **Goal:** Add recording only after the Media page, toolbar, screenshot flow, and three-way information flow are stable.
 
@@ -437,7 +564,45 @@ interface FreeCanvasVideoMeta {
 - [ ] Permission denial path is understandable.
 - [ ] `npm.cmd run build` succeeds.
 
-## Phase 6: Video Asset On Canvas
+## Phase 8: Video Frame Timeline And Storyboard Inference
+
+**Goal:** Turn selected recordings into timestamped visual evidence that the Agent can analyze as an ordered sequence.
+
+**Scope:**
+
+- Add video-specific controls inside the media analysis dialog.
+- Let the user create frame marks at multiple timestamps.
+- Show a compact timeline with visible timestamp labels.
+- Extract selected frames into ordered image references linked to the source video.
+- Send ordered frames, timestamps, and optional user notes to the visual analysis Agent.
+- Support storyboard inference from the ordered frame set:
+  - Shot boundaries.
+  - Scene changes.
+  - Subject/action continuity.
+  - Camera movement hints.
+  - Suggested shot descriptions.
+  - Candidate prompt text for each inferred shot.
+- Keep inferred storyboard output as draft text or draft shot records until explicit user approval.
+- Preserve traceability from every inferred shot back to source video timestamp(s).
+
+**Acceptance Criteria:**
+
+- [ ] User can add multiple timestamp marks to a selected video capture.
+- [ ] The dialog shows frame marks in chronological order on a timeline.
+- [ ] User can extract marked frames as ordered analysis inputs.
+- [ ] User can ask the Agent to infer storyboard structure from the ordered frames.
+- [ ] Inferred storyboard output includes timestamp references.
+- [ ] Inferred storyboard output is not silently written to project shots, Prompt Library, or Canvas.
+
+**Verification:**
+
+- [ ] Unit tests cover timestamp normalization and chronological frame ordering.
+- [ ] Unit tests cover video-frame analysis request payload shaping.
+- [ ] Manual check: mark frames from a short recording and run storyboard inference.
+- [ ] Manual check: inferred shots can be reviewed before any save/register action.
+- [ ] `npm.cmd run build` succeeds.
+
+## Phase 9: Video Asset On Canvas
 
 **Goal:** Let recordings live on the canvas without autoplay.
 
@@ -465,7 +630,7 @@ interface FreeCanvasVideoMeta {
 - [ ] Manual check: place recording from Recent Captures, play, pause, reload.
 - [ ] `npm.cmd run build` succeeds.
 
-## Phase 7: Optional No-Audio GIF Export
+## Phase 10: Optional No-Audio GIF Export
 
 **Goal:** Provide GIF only where it makes sense: short, silent loops.
 
@@ -497,6 +662,9 @@ interface FreeCanvasVideoMeta {
 | GIF expectation conflicts with audio | High | Treat GIF as silent export only; use video assets for audio. |
 | Capture permissions differ across OSes | High | Start Windows-first, document macOS/Linux checks before claiming complete. |
 | Video files exceed storage limits | Medium | Align storage limits and add duration/FPS/resolution caps. |
+| Vision analysis leaks broader workspace context | High | Send only the selected capture and explicit user text to the vision Agent. |
+| Vision/model cost or latency surprises users | Medium | Make analysis user-triggered, visible, cancellable, and draft-only. |
+| Storyboard inference overstates uncertain frame interpretation | Medium | Keep timestamps visible and require user approval before creating shots. |
 | Canvas becomes noisy with autoplay | Medium | Default video nodes to idle; require explicit play. |
 | Inspiration references and generated results mix together | High | Require `purpose` metadata on capture registration. |
 | Native capture library changes | Medium | Hide capture behind a small service boundary. |
@@ -508,10 +676,14 @@ interface FreeCanvasVideoMeta {
   1. Bottom-nav `媒体` entry.
   2. `近期捕获` page shell.
   3. Empty state, media grid/list, and metadata editor UI.
-  4. Floating toolbar shell.
-  5. Screenshot selection saved into Recent Captures.
-  6. Three-way flow between Prompt Library, Recent Captures, and Canvas.
+  4. Media card detail analysis dialog shell.
+  5. Style analysis Agent UI affordances with safe placeholder behavior.
+  6. Floating toolbar shell.
+  7. Screenshot selection saved into Recent Captures.
+  8. Three-way flow between Prompt Library, Recent Captures, Canvas, and reviewable Agent analysis output.
+- Do not start with vision-model execution before the media analysis dialog has clear selected-capture scope and draft-only output behavior.
 - Do not start with recording before the `媒体` / `近期捕获` UI and screenshot flow are usable.
+- Do not start with video storyboard inference before recordings can be stored and timestamped frames can be traced to source video.
 - Do not start with video node work before recording exists and Recent Captures can place items on canvas.
 - Do not start with audio. It adds permissions, device selection, and sync complexity.
 - Do not start with GIF. It is useful, but it is not the source format.
@@ -522,19 +694,34 @@ interface FreeCanvasVideoMeta {
 
 ### Checkpoint 1: Media Page Shell
 
-- [ ] Bottom navigation includes `媒体`.
-- [ ] `媒体` opens a top-level page titled `近期捕获`.
-- [ ] Page can be opened without entering a project.
-- [ ] Empty state, grid/list shell, and metadata editor affordances are present.
-- [ ] Raw Recent Captures are not Agent-visible.
+- [x] Bottom navigation includes `媒体`.
+- [x] `媒体` opens a top-level page titled `近期捕获`.
+- [x] Page can be opened without entering a project.
+- [x] Empty state, grid/list shell, and metadata editor affordances are present.
+- [x] Raw Recent Captures are not Agent-visible.
 
-### Checkpoint 2: Floating Toolbar
+### Checkpoint 2: Media Detail Analysis Dialog
+
+- [ ] Clicking a media card opens the dialog.
+- [ ] Left media dossier uses media/prompt/note hierarchy.
+- [ ] Right Agent input and analysis actions are visible.
+- [ ] Placeholder actions stay honest when vision analysis is not connected.
+- [ ] Closing the dialog returns to the same Recent Captures state.
+
+### Checkpoint 3: Visual Analysis Agent
+
+- [ ] Style reverse engineering runs on the selected image only.
+- [ ] Free-form Agent questions use the selected media and explicit user text.
+- [ ] Prompt reverse engineering returns reviewable draft text.
+- [ ] Draft output is not silently written into Prompt Library, project shots, or global Agent context.
+
+### Checkpoint 4: Floating Toolbar
 
 - [ ] Toolbar launches with the desktop app.
 - [ ] Toolbar stays small and always on top.
 - [ ] Screenshot button enters capture state.
 
-### Checkpoint 3: Screenshot To Recent Captures
+### Checkpoint 5: Screenshot To Recent Captures
 
 - [ ] Region selection works.
 - [ ] Screenshot lands in Recent Captures.
@@ -543,14 +730,14 @@ interface FreeCanvasVideoMeta {
 - [ ] Save to local works.
 - [ ] Optional place-on-canvas works.
 
-### Checkpoint 4: Recent Captures Review
+### Checkpoint 6: Recent Captures Review
 
 - [ ] Captures can be browsed in batches.
 - [ ] User can add prompt text and notes.
 - [ ] User can classify purpose and role.
 - [ ] Raw Recent Captures are not Agent-visible.
 
-### Checkpoint 5: Three-Way Information Flow
+### Checkpoint 7: Three-Way Information Flow
 
 - [ ] User can register selected captures.
 - [ ] Prompt Library record contains curated media and metadata.
@@ -559,7 +746,7 @@ interface FreeCanvasVideoMeta {
 - [ ] Agent can read the registered Prompt Library item.
 - [ ] Agent cannot read unregistered Recent Captures.
 
-### Checkpoint 6: Recording As Video Asset
+### Checkpoint 8: Recording As Video Asset
 
 - [ ] Toolbar opens recording mode.
 - [ ] Short recording saves to Recent Captures.
@@ -568,7 +755,14 @@ interface FreeCanvasVideoMeta {
 - [ ] Recording can be placed on canvas.
 - [ ] Video playback is explicit and non-autoplaying.
 
-### Checkpoint 7: Audio And GIF Decision
+### Checkpoint 9: Video Frame Timeline And Storyboard Inference
+
+- [ ] User can add timestamp marks to a recording.
+- [ ] Marked frames are shown in chronological order.
+- [ ] Agent storyboard inference includes timestamp references.
+- [ ] Inferred shots remain draft output until approved.
+
+### Checkpoint 10: Audio And GIF Decision
 
 - [ ] Confirm target video format for audio recordings.
 - [ ] Confirm OS permission behavior.

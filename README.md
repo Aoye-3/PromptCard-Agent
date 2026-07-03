@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./public/promptcard-manager-icon.png" alt="PromptCard-Manager icon" width="180" />
+  <img src="./public/promptcard-manager-icon.png" alt="PMAgent logo" width="180" />
 </p>
 
 <h1 align="center">PromptCard-Manager</h1>

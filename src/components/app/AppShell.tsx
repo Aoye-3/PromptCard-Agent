@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
-import { Bell, Bot, Folder, Grid2X2, Moon, Plus, Smile, Trash2, Users } from 'lucide-react'
+import { Bell, Bot, Folder, Grid2X2, Image, Moon, Plus, Smile, Trash2, Users } from 'lucide-react'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 import type { MainTab, ProjectMode, SaveStatus } from '@/features/app/app-types'
+import { useI18n } from '@/i18n'
 
 export const AppShell = ({
   activeTab,
@@ -27,13 +28,19 @@ export const AppShell = ({
   onShowProjectTrash: () => void
   showProjectUtilities: boolean
   children: ReactNode
-}) => (
+}) => {
+  const { t } = useI18n()
+
+  return (
   <div className="min-h-screen bg-white font-sans text-gray-950">
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between bg-white/92 px-6 backdrop-blur">
-      <div className="min-w-0">
-        <div className="text-xl font-black italic leading-5 tracking-tight">PMAgent</div>
-        <div className="mt-0.5 max-w-[48vw] truncate text-[11px] leading-3 text-gray-400">
-          {activeTab === 'projects' && projectMode === 'builder' && activeProject ? activeProject.title : '自动提示词工作台'}
+      <div className="flex min-w-0 items-center gap-2">
+        <img src="/promptcard-manager-icon.png" alt="PMAgent logo" className="h-9 w-9 shrink-0 rounded-lg" />
+        <div className="min-w-0">
+          <div className="text-xl font-black italic leading-5 tracking-tight">PMAgent</div>
+          <div className="mt-0.5 max-w-[48vw] truncate text-[11px] leading-3 text-gray-400">
+            {activeTab === 'projects' && projectMode === 'builder' && activeProject ? activeProject.title : '自动提示词工作台'}
+          </div>
         </div>
       </div>
       <div className="pointer-events-none absolute left-1/2 top-3 flex -translate-x-1/2 gap-1">
@@ -93,15 +100,17 @@ export const AppShell = ({
     )}
 
     <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-100 bg-white/95 px-6 pb-3 pt-2 backdrop-blur">
-      <div className="mx-auto grid max-w-5xl grid-cols-4 items-center">
+      <div className="mx-auto grid max-w-5xl grid-cols-5 items-center">
         <BottomTab active={activeTab === 'projects'} label="项目" onClick={() => setActiveTab('projects')} icon={<Folder className="h-6 w-6" />} />
+        <BottomTab active={activeTab === 'media'} label={t('mediaNav')} onClick={() => setActiveTab('media')} icon={<Image className="h-6 w-6" />} />
         <BottomTab active={activeTab === 'library'} label="Prompt库" onClick={() => setActiveTab('library')} icon={<Users className="h-6 w-6" />} />
         <BottomTab active={activeTab === 'agents'} label="Agent面板" onClick={() => setActiveTab('agents')} icon={<Bot className="h-6 w-6" />} />
         <BottomTab active={activeTab === 'me'} label="我的" onClick={() => setActiveTab('me')} icon={<Smile className="h-6 w-6" />} />
       </div>
     </nav>
   </div>
-)
+  )
+}
 
 
 const IconButton = ({ label, onClick, children }: { label: string; onClick?: () => void; children: ReactNode }) => (
@@ -111,7 +120,7 @@ const IconButton = ({ label, onClick, children }: { label: string; onClick?: () 
 )
 
 const BottomTab = ({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) => (
-  <button className={`mx-auto flex items-center gap-2 rounded-full px-4 py-2 text-sm font-bold transition ${active ? 'text-black' : 'text-gray-400 hover:text-gray-700'}`} onClick={onClick}>
+  <button className={`mx-auto flex min-h-[44px] flex-col items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-bold transition sm:flex-row sm:gap-2 sm:rounded-full sm:px-4 sm:py-2 sm:text-sm ${active ? 'text-black' : 'text-gray-400 hover:text-gray-700'}`} onClick={onClick}>
     <span className={active ? 'text-amber-300' : ''}>{icon}</span>
     {label}
   </button>

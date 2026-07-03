@@ -12,14 +12,16 @@ Large UI surfaces are split under `src/components/app/`:
 - `StoryboardBuilderScreen.tsx`: storyboard sequence/shot editor.
 - `MeScreen.tsx`: local profile/settings and dev server shutdown.
 - `ProjectModals.tsx`: history, card type, create-project, and rename modals.
+- `src/features/media/MediaScreen.tsx`: Recent Captures shell for captured screenshots and recordings before they are registered or placed on canvas.
 
 `src/App.tsx` remains a meaningful orchestration surface. Treat it carefully during refactors: prefer extracting behavior into smaller components, domain helpers, or stores without changing persistence or navigation semantics in the same change.
 
 ## Application Shell
 
-The bottom navigation exposes four primary areas:
+The bottom navigation exposes five primary areas:
 
 - **Projects**: project home, card builder, and storyboard builder.
+- **Media**: `近期捕获` / Recent Captures review queue for media intake, metadata review, and placeholder archive/register/place-on-canvas actions.
 - **Prompt Library**: embedded Prompt library management UI.
 - **Agent Dashboard**: unified Agent management page with DeepSeek model service configuration, default model, ToolUse visibility, skills, runtime status, diagnostics chat, and Prompt Library proposal review.
 - **Me**: profile/settings area, export action, language setting, and development server shutdown.

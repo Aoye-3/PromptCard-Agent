@@ -9,6 +9,7 @@ import { StoryboardBuilderScreen } from './components/app/StoryboardBuilderScree
 import FreeCanvasBuilderScreen from './components/canvas/FreeCanvasBuilderScreen'
 import { MeScreen } from './components/app/MeScreen'
 import { TemplateLibraryScreen } from './components/app/TemplateLibraryScreen'
+import { MediaScreen } from './features/media/MediaScreen'
 import type { BuilderModePreviewSnapshot } from './components/app/builder-preview-contract'
 import { AddCardModal, CreateProjectModal, HistoryModal, RenameProjectModal } from './components/app/ProjectModals'
 import { useCardStore } from './stores/card.store'
@@ -974,7 +975,9 @@ function App() {
     { type: 'custom', label: cardTypeLabel('custom'), color: 'bg-gray-100 text-gray-700' }
   ] as const
 
-  const content = activeTab === 'library' ? (
+  const content = activeTab === 'media' ? (
+    <MediaScreen />
+  ) : activeTab === 'library' ? (
     <PromptLibrary embedded />
   ) : activeTab === 'agents' ? (
     <AgentDashboard />

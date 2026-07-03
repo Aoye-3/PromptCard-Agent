@@ -2,6 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AppShell } from '@/components/app/AppShell'
 import { I18nProvider } from '@/i18n'
+import { MediaAnalysisDialog } from './MediaAnalysisDialog'
+import { recentCaptureFixtures } from './media-fixtures'
 import { MediaScreen } from './MediaScreen'
 
 describe('MediaScreen', () => {
@@ -14,7 +16,8 @@ describe('MediaScreen', () => {
 
     expect(markup).toContain('data-media-screen')
     expect(markup).toContain('近期捕获')
-    expect(markup).toContain('还没有近期捕获')
+    expect(markup).toContain('Neon alley style frame')
+    expect(markup).toContain('Camera move timing study')
     expect(markup).toContain('捕获收件箱')
     expect(markup).toContain('提示词文本')
     expect(markup).toContain('用户备注')
@@ -49,5 +52,34 @@ describe('MediaScreen', () => {
 
     expect(markup).toContain('grid-cols-5')
     expect(markup).toContain('媒体')
+  })
+
+  it('renders the media analysis dialog shell for a selected capture', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <MediaAnalysisDialog capture={recentCaptureFixtures[0]} onClose={() => undefined} />
+      </I18nProvider>
+    )
+
+    expect(markup).toContain('data-media-analysis-dialog')
+    expect(markup).toContain('data-media-dossier')
+    expect(markup).toContain('data-media-analysis-preview')
+    expect(markup).toContain('data-media-analysis-prompt')
+    expect(markup).toContain('data-media-analysis-note')
+    expect(markup).toContain('data-media-agent-workspace')
+    expect(markup).toContain('data-media-analysis-output')
+    expect(markup.match(/data-media-analysis-action/g)?.length).toBe(3)
+    expect(markup).toContain('视觉分析尚未接入')
+    expect(markup).toContain('其他 Recent Captures 不会默认进入 Agent 上下文')
+  })
+
+  it('does not render the media analysis dialog when closed', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <MediaAnalysisDialog capture={null} onClose={() => undefined} />
+      </I18nProvider>
+    )
+
+    expect(markup).not.toContain('data-media-analysis-dialog')
   })
 })

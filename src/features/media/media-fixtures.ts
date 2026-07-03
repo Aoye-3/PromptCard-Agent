@@ -1,3 +1,38 @@
 import type { RecentCaptureItemViewModel } from './media-types'
 
-export const recentCaptureFixtures: RecentCaptureItemViewModel[] = []
+export const recentCaptureFixtures: RecentCaptureItemViewModel[] = [
+  {
+    id: 'capture-style-frame-001',
+    assetId: 'asset-style-frame-001',
+    kind: 'screenshot',
+    status: 'recent',
+    purpose: 'inspirationReference',
+    role: 'style',
+    title: 'Neon alley style frame',
+    prompt: 'Wide cinematic frame, wet pavement, neon signage, reflective noir lighting.',
+    userNote: 'Use as a style reference only. Keep it out of Agent context until registered.',
+    sourcePlatform: 'Local capture',
+    sourceUrl: '',
+    contentType: 'image/png',
+    sizeLabel: '1.2 MB',
+    dimensionsLabel: '1920 x 1080',
+    capturedAtLabel: 'Today 10:24'
+  },
+  {
+    id: 'capture-motion-study-002',
+    assetId: 'asset-motion-study-002',
+    kind: 'screenRecording',
+    status: 'recent',
+    purpose: 'shotOutput',
+    role: 'composition',
+    title: 'Camera move timing study',
+    prompt: 'Slow push-in from over-the-shoulder framing into a close facial reaction.',
+    userNote: 'Candidate recording for later frame timeline and storyboard inference.',
+    sourcePlatform: 'Screen recording',
+    sourceUrl: '',
+    contentType: 'video/webm',
+    sizeLabel: '4.8 MB',
+    dimensionsLabel: '1280 x 720',
+    capturedAtLabel: 'Today 10:31'
+  }
+]

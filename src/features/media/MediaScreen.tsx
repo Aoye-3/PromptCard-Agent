@@ -1,5 +1,7 @@
 import { Camera, Grid2X2, ListFilter, ShieldCheck } from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useI18n } from '@/i18n'
+import { MediaAnalysisDialog } from './MediaAnalysisDialog'
 import { RecentCaptureDetailPanel } from './RecentCaptureDetailPanel'
 import { RecentCaptureInbox } from './RecentCaptureInbox'
 import { useRecentCaptures } from './use-recent-captures'
@@ -7,6 +9,16 @@ import { useRecentCaptures } from './use-recent-captures'
 export const MediaScreen = () => {
   const { t } = useI18n()
   const { captures, selectedCapture, selectedCaptureId, setSelectedCaptureId } = useRecentCaptures()
+  const [analysisCaptureId, setAnalysisCaptureId] = useState<string | null>(null)
+  const analysisCapture = useMemo(
+    () => captures.find(capture => capture.id === analysisCaptureId) || null,
+    [analysisCaptureId, captures]
+  )
+
+  const handleSelectCapture = (captureId: string) => {
+    setSelectedCaptureId(captureId)
+    setAnalysisCaptureId(captureId)
+  }
 
   return (
     <section data-media-screen className="min-h-[calc(100vh-112px)] bg-[#f7f7f5] px-4 py-5 sm:px-6">
@@ -55,7 +67,7 @@ export const MediaScreen = () => {
           <RecentCaptureInbox
             captures={captures}
             selectedCaptureId={selectedCaptureId}
-            onSelectCapture={setSelectedCaptureId}
+            onSelectCapture={handleSelectCapture}
           />
           <RecentCaptureDetailPanel capture={selectedCapture} />
         </div>
@@ -65,6 +77,7 @@ export const MediaScreen = () => {
           {t('mediaAgentVisibilityNotice')}
         </div>
       </div>
+      <MediaAnalysisDialog capture={analysisCapture} onClose={() => setAnalysisCaptureId(null)} />
     </section>
   )
 }

@@ -254,7 +254,25 @@ const translations = {
     mediaPurposeInspirationReference: '灵感参考',
     mediaPurposeGeneratedResult: '生成结果',
     mediaPurposePromptAttachment: '提示词附件',
-    mediaPurposeShotOutput: '镜头产出'
+    mediaPurposeShotOutput: '镜头产出',
+    mediaAnalysisDialogAria: '媒体分析工作区',
+    mediaAnalysisDialogKicker: '媒体分析',
+    mediaAnalysisDialogCloseAria: '关闭媒体分析',
+    mediaAnalysisPreviewLabel: '媒体预览',
+    mediaAnalysisPromptDraftLabel: '提示词草稿',
+    mediaAnalysisNoteLabel: '备注',
+    mediaAnalysisWorkspaceTitle: 'Agent 分析工作区',
+    mediaAnalysisWorkspaceDescription: '视觉分析尚未接入。这里仅定义选中素材的输入范围，不会读取其他近期捕获或 Prompt 库记录。',
+    mediaAnalysisAgentInputLabel: 'Agent 输入',
+    mediaAnalysisAgentInputPlaceholder: '可以先写下想让视觉 Agent 分析的问题。',
+    mediaAnalysisActionsAria: '媒体分析操作',
+    mediaAnalysisActionStyle: '风格逆向',
+    mediaAnalysisActionSend: '发送到 Agent',
+    mediaAnalysisActionPrompt: '提示词逆向',
+    mediaAnalysisActionPendingTitle: '视觉分析尚未接入，现在仅为占位操作。',
+    mediaAnalysisOutputTitle: '分析输出',
+    mediaAnalysisOutputPlaceholder: '视觉模型接入后，风格分析、提示词逆向和自由对话结果会以可审核草稿文本留在这里。',
+    mediaAnalysisScopeNotice: '只会使用当前选中的捕获和你明确输入的文字。其他 Recent Captures 不会默认进入 Agent 上下文。'
   },
   en: {
     languageLabel: 'Language',
@@ -502,7 +520,25 @@ const translations = {
     mediaPurposeInspirationReference: 'inspiration reference',
     mediaPurposeGeneratedResult: 'generated result',
     mediaPurposePromptAttachment: 'prompt attachment',
-    mediaPurposeShotOutput: 'shot output'
+    mediaPurposeShotOutput: 'shot output',
+    mediaAnalysisDialogAria: 'Media analysis workspace',
+    mediaAnalysisDialogKicker: 'Media analysis',
+    mediaAnalysisDialogCloseAria: 'Close media analysis',
+    mediaAnalysisPreviewLabel: 'Media preview',
+    mediaAnalysisPromptDraftLabel: 'Prompt draft',
+    mediaAnalysisNoteLabel: 'Note',
+    mediaAnalysisWorkspaceTitle: 'Agent analysis workspace',
+    mediaAnalysisWorkspaceDescription: 'Vision analysis is not connected yet. This shell only defines the selected-capture input scope and does not read other Recent Captures or Prompt Library records.',
+    mediaAnalysisAgentInputLabel: 'Agent input',
+    mediaAnalysisAgentInputPlaceholder: 'Write the question you want the future vision Agent to analyze.',
+    mediaAnalysisActionsAria: 'Media analysis actions',
+    mediaAnalysisActionStyle: 'Style reverse engineering',
+    mediaAnalysisActionSend: 'Send to Agent',
+    mediaAnalysisActionPrompt: 'Prompt reverse engineering',
+    mediaAnalysisActionPendingTitle: 'Vision analysis is not connected yet; this is a placeholder action.',
+    mediaAnalysisOutputTitle: 'Analysis output',
+    mediaAnalysisOutputPlaceholder: 'After the vision model is connected, style analysis, prompt reverse engineering, and free-form conversation results will appear here as reviewable draft text.',
+    mediaAnalysisScopeNotice: 'Only the selected capture and text you explicitly enter are in scope. Other Recent Captures are not added to Agent context by default.'
   }
 } satisfies Record<UiLanguage, Record<string, TranslationValue>>
 

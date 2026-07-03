@@ -384,19 +384,19 @@ interface FreeCanvasVideoMeta {
 
 **Acceptance Criteria:**
 
-- [ ] Clicking a media card opens the analysis modal without leaving the Media page.
-- [ ] The left side displays the selected media, prompt text area, and note area in the intended 60/30/10 information hierarchy.
-- [ ] The right side displays an Agent input area and action affordances for style analysis and prompt reverse engineering.
-- [ ] Closing the modal returns to the same `近期捕获` list/detail state.
-- [ ] Placeholder Agent actions do not imply completed vision analysis when the backend is not connected.
-- [ ] Raw Recent Captures are still not added to global Agent context automatically.
+- [x] Clicking a media card opens the analysis modal without leaving the Media page.
+- [x] The left side displays the selected media, prompt text area, and note area in the intended 60/30/10 information hierarchy.
+- [x] The right side displays an Agent input area and action affordances for style analysis and prompt reverse engineering.
+- [x] Closing the modal returns to the same `近期捕获` list/detail state.
+- [x] Placeholder Agent actions do not imply completed vision analysis when the backend is not connected.
+- [x] Raw Recent Captures are still not added to global Agent context automatically.
 
 **Verification:**
 
-- [ ] Component tests cover opening and closing the modal from a media card.
-- [ ] Component tests cover the media dossier, prompt box, note area, Agent input, and disabled/placeholder action rendering.
-- [ ] Manual check: open a media card, type into Agent input, close modal, reopen the same media card.
-- [ ] `npm.cmd run build` succeeds.
+- [x] Component tests cover opening and closing the modal from a media card.
+- [x] Component tests cover the media dossier, prompt box, note area, Agent input, and disabled/placeholder action rendering.
+- [x] Manual check: open a media card, type into Agent input, close modal, reopen the same media card.
+- [x] `npm.cmd run build` succeeds.
 
 ## Phase 3: Visual Analysis Agent Integration
 
@@ -702,11 +702,11 @@ interface FreeCanvasVideoMeta {
 
 ### Checkpoint 2: Media Detail Analysis Dialog
 
-- [ ] Clicking a media card opens the dialog.
-- [ ] Left media dossier uses media/prompt/note hierarchy.
-- [ ] Right Agent input and analysis actions are visible.
-- [ ] Placeholder actions stay honest when vision analysis is not connected.
-- [ ] Closing the dialog returns to the same Recent Captures state.
+- [x] Clicking a media card opens the dialog.
+- [x] Left media dossier uses media/prompt/note hierarchy.
+- [x] Right Agent input and analysis actions are visible.
+- [x] Placeholder actions stay honest when vision analysis is not connected.
+- [x] Closing the dialog returns to the same Recent Captures state.
 
 ### Checkpoint 3: Visual Analysis Agent
 

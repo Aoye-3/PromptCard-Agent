@@ -21,7 +21,7 @@ Large UI surfaces are split under `src/components/app/`:
 The bottom navigation exposes five primary areas:
 
 - **Projects**: project home, card builder, and storyboard builder.
-- **Media**: `近期捕获` / Recent Captures review queue for media intake, metadata review, and placeholder archive/register/place-on-canvas actions.
+- **Media**: `近期捕获` / Recent Captures review queue for media intake, metadata review, media analysis dialog shell, and placeholder archive/register/place-on-canvas actions.
 - **Prompt Library**: embedded Prompt library management UI.
 - **Agent Dashboard**: unified Agent management page with DeepSeek model service configuration, default model, ToolUse visibility, skills, runtime status, diagnostics chat, and Prompt Library proposal review.
 - **Me**: profile/settings area, export action, language setting, and development server shutdown.

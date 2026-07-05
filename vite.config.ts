@@ -28,6 +28,11 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (proxyPath) => proxyPath.replace(/^\/agent-health/, '/health')
       },
+      '/storage-api/health': {
+        target: storageUrl,
+        changeOrigin: true,
+        rewrite: () => '/health'
+      },
       '/agent-api': {
         target: `${agentUrl}/api`,
         changeOrigin: true,

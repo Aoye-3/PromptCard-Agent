@@ -8,6 +8,26 @@ afterEach(() => {
 })
 
 describe('storageServiceClient', () => {
+  test('reports storage health without throwing', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(storageServiceClient.health()).resolves.toBe(true)
+    expect(fetchMock).toHaveBeenCalledWith('/storage-api/health', expect.objectContaining({
+      cache: 'no-cache',
+      headers: { Accept: 'application/json' }
+    }))
+  })
+
+  test('returns false when storage health is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+
+    await expect(storageServiceClient.health()).resolves.toBe(false)
+  })
+
   test('maps structured HTTP errors', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       detail: { code: 'invalid_asset', message: 'Bad image', detail: { reason: 'signature' } }

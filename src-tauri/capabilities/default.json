@@ -6,5 +6,13 @@
   "remote": {
     "urls": ["http://127.0.0.1:*", "http://localhost:*"]
   },
-  "permissions": ["core:default", "git-pull-source"]
+  "permissions": [
+    "core:default",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-close",
+    "core:window:allow-is-visible",
+    "git-pull-source"
+  ]
 }

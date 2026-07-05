@@ -61,7 +61,7 @@ Runtime manifest shape:
 }
 ```
 
-Storage reuse requires service version `2.0.0`, schema version `1`, SQLite capability, and the expected data directory. Frontend reuse also fetches the Vite entry module and rejects a server that exposes raw CommonJS React modules instead of optimized dependencies.
+Storage reuse requires service version `2.0.0`, schema version `2`, SQLite capability, and the expected data directory. Frontend reuse also fetches the Vite entry module and rejects a server that exposes raw CommonJS React modules instead of optimized dependencies.
 
 The manifest health URLs are the source of truth for local startup success. Historical `logs/*.log` files may exist from older runs, but the current hidden background startup path does not require redirected stdout/stderr logs.
 
@@ -73,6 +73,7 @@ Port selection behavior:
 - agent and storage use dynamic local ports during `dev:with-agent`.
 - explicit `PROMPTCARD_FRONTEND_PORT`, `PROMPTCARD_AGENT_PORT`, or `PROMPTCARD_STORAGE_PORT` values are strict; startup fails if the selected port is occupied.
 - Vite proxies `/agent-api` and `/storage-api` using `PROMPTCARD_AGENT_URL` and `PROMPTCARD_STORAGE_URL`, so frontend business code keeps same-origin relative routes.
+- Storage health is the one special storage proxy: `/storage-api/health` maps to `<storageUrl>/health`, while normal `/storage-api/*` calls map to `<storageUrl>/api/*`.
 
 ### Blank Browser After Startup
 

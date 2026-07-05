@@ -1,13 +1,15 @@
 import { useCallback, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { ArrowLeft, Plus } from 'lucide-react'
 import { getBuilderTemplateById, getBuilderTemplates } from '@/domain/builder-templates/builder-templates'
 import type { BuilderTemplateId } from '@/domain/builder-templates/builder-templates'
 import { BuilderModePreviewFrame } from './BuilderModePreviewFrame'
 import type { BuilderModePreviewSnapshot } from './builder-preview-contract'
 
 export const TemplateLibraryScreen = ({
+  onBack,
   onCreateFromTemplate
 }: {
+  onBack?: () => void
   onCreateFromTemplate: (templateId: BuilderTemplateId, snapshot?: BuilderModePreviewSnapshot) => void
 }) => {
   const templates = getBuilderTemplates()
@@ -59,7 +61,18 @@ export const TemplateLibraryScreen = ({
         </aside>
 
         <div className="min-w-0">
-          <div className="mb-4 flex justify-end">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            {onBack ? (
+              <button
+                type="button"
+                className="inline-flex items-center justify-center rounded-full bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200"
+                data-template-library-back
+                onClick={onBack}
+              >
+                <ArrowLeft className="h-4 w-4" />
+                返回项目
+              </button>
+            ) : <span />}
             <button
               className="inline-flex items-center justify-center rounded-full bg-black px-5 py-3 text-sm font-semibold text-white transition hover:bg-gray-800"
               onClick={() => onCreateFromTemplate(activeTemplate.id, activeSnapshot)}

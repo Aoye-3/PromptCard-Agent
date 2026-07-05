@@ -8,11 +8,20 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $DesktopShellExecutable = Join-Path $RepoRoot "src-tauri\target\debug\promptcard-manager-dev-shell.exe"
-$DesktopServicesScript = Join-Path $RepoRoot "scripts\start-desktop-dev-services.ps1"
+$StartDevWithAgentScript = Join-Path $RepoRoot "scripts\start-dev-with-agent.ps1"
 $LogsDir = if ($env:PROMPTCARD_LOGS_DIR) { $env:PROMPTCARD_LOGS_DIR } else { Join-Path $RepoRoot "logs" }
 $RuntimeManifestPath = if ($env:PROMPTCARD_DEV_RUNTIME_MANIFEST) { $env:PROMPTCARD_DEV_RUNTIME_MANIFEST } else { Join-Path $LogsDir "dev-runtime.json" }
+$DesktopServicesOutLog = Join-Path $LogsDir "desktop-services.out.log"
+$DesktopServicesErrLog = Join-Path $LogsDir "desktop-services.err.log"
+$ViteFrontendOutLog = Join-Path $LogsDir "vite-frontend.out.log"
+$ViteFrontendErrLog = Join-Path $LogsDir "vite-frontend.err.log"
+$TauriDevOutLog = Join-Path $LogsDir "tauri-dev.out.log"
+$TauriDevErrLog = Join-Path $LogsDir "tauri-dev.err.log"
 $TauriDevConfigPath = Join-Path $LogsDir "tauri.dev-runtime.conf.json"
 $DesktopProcessName = "promptcard-manager-dev-shell"
+$DesktopMainWindowTitle = "PromptCard Manager Dev Shell"
+$DesktopMinMainWindowWidth = 400
+$DesktopMinMainWindowHeight = 300
 $LaunchMutexName = "Local\PromptCardManagerDesktopShellLaunch"
 . (Join-Path $PSScriptRoot "dev-port-runtime.ps1")
 
@@ -35,11 +44,26 @@ function Wait-HttpHealthy($Name, $Url) {
   throw "$Name did not become healthy within $StartupTimeoutSeconds seconds: $Url"
 }
 
+function Start-HiddenLoggedCommand {
+  param(
+    [string]$Command,
+    [string]$StdoutPath,
+    [string]$StderrPath
+  )
+
+  $cmdLine = "$Command 1>`"$StdoutPath`" 2>`"$StderrPath`""
+  Start-Process `
+    -FilePath "cmd.exe" `
+    -ArgumentList @("/d", "/s", "/c", $cmdLine) `
+    -WorkingDirectory $RepoRoot `
+    -WindowStyle Hidden | Out-Null
+}
+
 function Wait-DevRuntimeHealthy {
   $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
   while ((Get-Date) -lt $deadline) {
     $runtime = Read-PromptCardDevRuntime $RuntimeManifestPath
-    if ($runtime -and $runtime.frontendUrl -and (Test-HttpOk $runtime.frontendUrl)) {
+    if ($runtime -and $runtime.frontendUrl -and (Test-PromptCardFrontend $runtime.frontendUrl)) {
       return $runtime
     }
     Start-Sleep -Milliseconds 300
@@ -47,11 +71,68 @@ function Wait-DevRuntimeHealthy {
   throw "Vite frontend did not become healthy within $StartupTimeoutSeconds seconds. Runtime manifest: $RuntimeManifestPath"
 }
 
+function Get-OrCreateDevRuntime {
+  $runtime = Read-PromptCardDevRuntime $RuntimeManifestPath
+  if ($runtime -and $runtime.frontendUrl -and (Test-PromptCardFrontend $runtime.frontendUrl)) {
+    return $runtime
+  }
+
+  Stop-StaleFrontendProcesses
+  return New-PromptCardDevRuntime `
+    -RepoRoot $RepoRoot `
+    -ManifestPath $RuntimeManifestPath `
+    -FrontendUrlOverride $env:PROMPTCARD_FRONTEND_URL `
+    -AgentHealthUrlOverride $env:PROMPTCARD_AGENT_HEALTH_URL `
+    -StorageHealthUrlOverride $env:PROMPTCARD_STORAGE_HEALTH_URL
+}
+
+function Stop-StaleFrontendProcesses {
+  $repoRootText = [string]$RepoRoot
+  $allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+  $matchedProcessIds = @{}
+
+  foreach ($process in $allProcesses) {
+    $commandLine = [string]$process.CommandLine
+    if (!$commandLine.Contains($repoRootText)) { continue }
+    if (
+      $commandLine.Contains("vite --strictPort") -or
+      $commandLine.Contains("vite\bin\vite.js") -or
+      $commandLine.Contains("npm-cli.js`" run dev") -or
+      $commandLine.Contains("npm.cmd run dev")
+    ) {
+      $matchedProcessIds[[int]$process.ProcessId] = $true
+    }
+  }
+
+  $changed = $true
+  while ($changed) {
+    $changed = $false
+    foreach ($process in $allProcesses) {
+      if ($matchedProcessIds.ContainsKey([int]$process.ProcessId)) { continue }
+      if ($matchedProcessIds.ContainsKey([int]$process.ParentProcessId)) {
+        $matchedProcessIds[[int]$process.ProcessId] = $true
+        $changed = $true
+      }
+    }
+  }
+
+  $processes = $allProcesses |
+    Where-Object { $matchedProcessIds.ContainsKey([int]$_.ProcessId) } |
+    Sort-Object CreationDate -Descending
+
+  foreach ($process in $processes) {
+    if ($process.ProcessId -eq $PID) { continue }
+    Write-Host "Stopping stale Vite frontend process (PID $($process.ProcessId)): $($process.Name)"
+    Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Write-TauriDevRuntimeConfig($Runtime) {
   New-Item -ItemType Directory -Force -Path (Split-Path $TauriDevConfigPath -Parent) | Out-Null
   $configPath = Join-Path $RepoRoot "src-tauri\tauri.conf.json"
   $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
   $config.build.devUrl = ([string]$Runtime.frontendUrl).TrimEnd("/")
+  $config.build.beforeDevCommand = "cmd /c exit 0"
   [System.IO.File]::WriteAllText($TauriDevConfigPath, ($config | ConvertTo-Json -Depth 20), [System.Text.UTF8Encoding]::new($false))
   return $TauriDevConfigPath
 }
@@ -81,20 +162,171 @@ function Start-DesktopShellExecutable {
   return $process
 }
 
+function Initialize-DesktopWindowInterop {
+  if ("PromptCard.DesktopWindowInterop" -as [type]) { return }
+
+  Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace PromptCard {
+  public static class DesktopWindowInterop {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT {
+      public int Left;
+      public int Top;
+      public int Right;
+      public int Bottom;
+    }
+
+    public sealed class WindowInfo {
+      public int ProcessId { get; set; }
+      public IntPtr Handle { get; set; }
+      public string Title { get; set; }
+      public string ClassName { get; set; }
+      public bool Visible { get; set; }
+      public bool Minimized { get; set; }
+      public int Left { get; set; }
+      public int Top { get; set; }
+      public int Width { get; set; }
+      public int Height { get; set; }
+      public int Area { get { return Width * Height; } }
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+
+    [DllImport("user32.dll")]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    public static WindowInfo[] GetTopLevelWindows(int[] processIds) {
+      var targets = new HashSet<int>(processIds);
+      var windows = new List<WindowInfo>();
+
+      EnumWindows((hWnd, lParam) => {
+        uint rawPid;
+        GetWindowThreadProcessId(hWnd, out rawPid);
+        var pid = (int)rawPid;
+        if (!targets.Contains(pid)) {
+          return true;
+        }
+
+        RECT rect;
+        GetWindowRect(hWnd, out rect);
+        var title = new StringBuilder(512);
+        var className = new StringBuilder(512);
+        GetWindowText(hWnd, title, title.Capacity);
+        GetClassName(hWnd, className, className.Capacity);
+
+        windows.Add(new WindowInfo {
+          ProcessId = pid,
+          Handle = hWnd,
+          Title = title.ToString(),
+          ClassName = className.ToString(),
+          Visible = IsWindowVisible(hWnd),
+          Minimized = IsIconic(hWnd),
+          Left = rect.Left,
+          Top = rect.Top,
+          Width = rect.Right - rect.Left,
+          Height = rect.Bottom - rect.Top
+        });
+
+        return true;
+      }, IntPtr.Zero);
+
+      return windows.ToArray();
+    }
+  }
+}
+"@
+}
+
+function Get-CurrentDesktopShellProcesses {
+  if (!(Test-Path -LiteralPath $DesktopShellExecutable)) { return @() }
+
+  $expectedPath = [System.IO.Path]::GetFullPath([string]$DesktopShellExecutable)
+  return Get-CimInstance Win32_Process -Filter "Name='promptcard-manager-dev-shell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.ExecutablePath -and
+        [System.StringComparer]::OrdinalIgnoreCase.Equals(
+          [System.IO.Path]::GetFullPath([string]$_.ExecutablePath),
+          $expectedPath
+        )
+    } |
+    Sort-Object CreationDate -Descending
+}
+
+function Get-DesktopShellWindows($Processes) {
+  $processIds = @($Processes | Select-Object -ExpandProperty ProcessId)
+  if ($processIds.Count -eq 0) { return @() }
+
+  Initialize-DesktopWindowInterop
+  return [PromptCard.DesktopWindowInterop]::GetTopLevelWindows([int[]]$processIds)
+}
+
+function Get-ExistingDesktopShellWindow {
+  $processes = @(Get-CurrentDesktopShellProcesses)
+  if ($processes.Count -eq 0) { return $null }
+
+  return Get-DesktopShellWindows $processes |
+    Where-Object {
+      $_.Visible -and
+        $_.Title -eq $DesktopMainWindowTitle -and
+        $_.Width -ge $DesktopMinMainWindowWidth -and
+        $_.Height -ge $DesktopMinMainWindowHeight
+    } |
+    Sort-Object Area -Descending |
+    Select-Object -First 1
+}
+
+function Stop-StaleDesktopShellProcesses($Processes) {
+  foreach ($process in $Processes) {
+    Write-Host "Stopping stale desktop shell process (PID $($process.ProcessId)); no main window was found."
+    Stop-Process -Id $process.ProcessId -Force -ErrorAction SilentlyContinue
+  }
+}
+
+function Show-DesktopShellWindow($Window) {
+  if (!$Window) { return $false }
+
+  Initialize-DesktopWindowInterop
+  $handle = [System.IntPtr]$Window.Handle
+  [PromptCard.DesktopWindowInterop]::ShowWindowAsync($handle, 9) | Out-Null
+  [PromptCard.DesktopWindowInterop]::SetForegroundWindow($handle) | Out-Null
+  return $true
+}
+
 function Wait-DesktopShellProcess($StartedAfter) {
   $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
-  $fallbackStarted = $false
   while ((Get-Date) -lt $deadline) {
-    $process = Get-CimInstance Win32_Process -Filter "Name='promptcard-manager-dev-shell.exe'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.CreationDate -ge $StartedAfter } |
-      Select-Object -First 1
-    if ($process) { return $process }
-
-    if (!$fallbackStarted -and (Test-DesktopShellCurrent -IgnoreForceRebuild)) {
-      Write-Host "Tauri dev build completed; starting current desktop shell directly..."
-      $fallback = Start-DesktopShellExecutable
-      $fallbackStarted = $true
-      return [pscustomobject]@{ ProcessId = $fallback.Id }
+    $mainWindow = Get-ExistingDesktopShellWindow
+    if ($mainWindow -and (Show-DesktopShellWindow $mainWindow)) {
+      return [pscustomobject]@{ ProcessId = $mainWindow.ProcessId }
     }
 
     Start-Sleep -Milliseconds 300
@@ -122,41 +354,60 @@ try {
     exit 0
   }
 
-  $existingShell = Get-Process -Name $DesktopProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
-  if ($existingShell) {
-    Write-Host "PromptCard Manager Dev Shell is already running (PID $($existingShell.Id))."
+  $existingWindow = Get-ExistingDesktopShellWindow
+  if ($existingWindow -and (Show-DesktopShellWindow $existingWindow)) {
+    Write-Host "PromptCard Manager Dev Shell is already running (PID $($existingWindow.ProcessId)); restored the existing window."
     exit 0
   }
 
-  Write-Host "[1/2] Starting or reusing local services..."
+  $staleShellProcesses = @(Get-CurrentDesktopShellProcesses)
+  if ($staleShellProcesses.Count -gt 0) {
+    Stop-StaleDesktopShellProcesses $staleShellProcesses
+  }
+
+  Write-Host "[1/3] Preparing local runtime..."
   $env:PROMPTCARD_DEV_RUNTIME_MANIFEST = $RuntimeManifestPath
-  Start-Process `
-    -FilePath "powershell" `
-    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$DesktopServicesScript`"") `
-    -WorkingDirectory $RepoRoot `
-    -WindowStyle Hidden | Out-Null
+  $runtime = Get-OrCreateDevRuntime
+  Set-PromptCardDevRuntimeEnvironment $runtime
+  $env:PROMPTCARD_REUSE_DEV_RUNTIME = "1"
+  $env:PROMPTCARD_DESKTOP_DEV = "1"
+
+  Write-Host "[2/3] Starting or reusing local services in the background..."
+  $servicesOutput = & powershell -NoProfile -ExecutionPolicy Bypass -File $StartDevWithAgentScript -ServicesOnly 2>&1
+  $servicesExitCode = $LASTEXITCODE
+  $servicesOutput | Set-Content -LiteralPath $DesktopServicesOutLog -Encoding UTF8
+  if ($servicesExitCode -ne 0) {
+    throw "Local services failed to start with exit code $servicesExitCode. See $DesktopServicesOutLog."
+  }
+
+  if (!(Test-PromptCardFrontend $runtime.frontendUrl)) {
+    Write-Host "Starting Vite frontend at $($runtime.frontendUrl)..."
+    Start-HiddenLoggedCommand `
+      -Command "npm.cmd run dev" `
+      -StdoutPath $ViteFrontendOutLog `
+      -StderrPath $ViteFrontendErrLog
+  }
+
   $runtime = Wait-DevRuntimeHealthy
   Set-PromptCardDevRuntimeEnvironment $runtime
   Write-Host "Frontend: $($runtime.frontendUrl)"
 
   $frontendUri = [System.Uri]$runtime.frontendUrl
   if ($frontendUri.Port -eq 3000 -and (Test-DesktopShellCurrent)) {
-    Write-Host "[2/2] Starting current desktop shell directly..."
+    Write-Host "[3/3] Starting current desktop shell directly..."
     $process = Start-DesktopShellExecutable
     Write-Host "PromptCard Manager Dev Shell opened (PID $($process.Id))."
     exit 0
   }
 
-  Write-Host "[2/2] Desktop shell requires rebuild; starting tauri dev..."
+  Write-Host "[3/3] Desktop shell requires rebuild; starting tauri dev..."
   Write-Host "The launcher will remain visible until the application window opens."
   $devConfigPath = Write-TauriDevRuntimeConfig $runtime
-  $env:PROMPTCARD_REUSE_DEV_RUNTIME = "1"
   $startedAfter = Get-Date
-  Start-Process `
-    -FilePath "npm.cmd" `
-    -ArgumentList @("run", "tauri:dev", "--", "--config", $devConfigPath) `
-    -WorkingDirectory $RepoRoot `
-    -WindowStyle Hidden | Out-Null
+  Start-HiddenLoggedCommand `
+    -Command "npm.cmd run tauri:dev -- --config `"$devConfigPath`"" `
+    -StdoutPath $TauriDevOutLog `
+    -StderrPath $TauriDevErrLog
   $process = Wait-DesktopShellProcess $startedAfter
   Write-Host "PromptCard Manager Dev Shell opened (PID $($process.ProcessId))."
 }

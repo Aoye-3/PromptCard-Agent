@@ -24,7 +24,44 @@ describe('launch-desktop-shell.ps1', () => {
     expect(script).toContain('$LaunchMutex.ReleaseMutex()')
   })
 
-  test('waits for frontend readiness and falls back to tauri dev when the shell is stale', async () => {
+  test('restores an existing desktop window instead of silently exiting', async () => {
+    const script = await readFile(scriptPath, 'utf8')
+
+    expect(script).toContain('Show-DesktopShellWindow')
+    expect(script).toContain('Get-ExistingDesktopShellWindow')
+    expect(script).toContain('DesktopWindowInterop')
+    expect(script).toContain('GetTopLevelWindows')
+    expect(script).toContain('ShowWindowAsync')
+    expect(script).toContain('SetForegroundWindow')
+    expect(script).not.toContain('MainWindowHandle')
+    expect(script).not.toContain('AppActivate')
+    expect(script).toContain('restored the existing window')
+  })
+
+  test('only treats a visible full-size main window as reusable', async () => {
+    const script = await readFile(scriptPath, 'utf8')
+
+    expect(script).toContain('$DesktopMainWindowTitle = "PromptCard Manager Dev Shell"')
+    expect(script).toContain('$DesktopMinMainWindowWidth = 400')
+    expect(script).toContain('$DesktopMinMainWindowHeight = 300')
+    expect(script).toContain('$_.Visible')
+    expect(script).toContain('$_.Title -eq $DesktopMainWindowTitle')
+    expect(script).toContain('$_.Width -ge $DesktopMinMainWindowWidth')
+    expect(script).toContain('$_.Height -ge $DesktopMinMainWindowHeight')
+  })
+
+  test('cleans stale current-repo shell processes before relaunching', async () => {
+    const script = await readFile(scriptPath, 'utf8')
+
+    expect(script).toContain('Get-CurrentDesktopShellProcesses')
+    expect(script).toContain('ExecutablePath')
+    expect(script).toContain('$DesktopShellExecutable')
+    expect(script).toContain('Stop-StaleDesktopShellProcesses')
+    expect(script).toContain('no main window was found')
+    expect(script).toContain('Stop-Process -Id $process.ProcessId -Force')
+  })
+
+  test('waits for frontend readiness and then waits for a real desktop main window', async () => {
     const script = await readFile(scriptPath, 'utf8')
 
     expect(script).toContain('Wait-DevRuntimeHealthy')
@@ -32,8 +69,50 @@ describe('launch-desktop-shell.ps1', () => {
     expect(script).toContain('Desktop shell requires rebuild; starting tauri dev')
     expect(script).toContain('Write-TauriDevRuntimeConfig')
     expect(script).toContain('Wait-DesktopShellProcess')
-    expect(script).toContain('Tauri dev build completed; starting current desktop shell directly')
-    expect(script).toContain('Test-DesktopShellCurrent -IgnoreForceRebuild')
+    expect(script).toContain('$mainWindow = Get-ExistingDesktopShellWindow')
+    expect(script).toContain('Show-DesktopShellWindow $mainWindow')
+  })
+
+  test('starts local services in the background before opening the desktop shell', async () => {
+    const script = await readFile(scriptPath, 'utf8')
+
+    expect(script).toContain('$StartDevWithAgentScript')
+    expect(script).toContain('-ServicesOnly')
+    expect(script).toContain('$servicesOutput = & powershell')
+    expect(script).toContain('Set-Content -LiteralPath $DesktopServicesOutLog')
+    expect(script).toContain('Local services failed to start')
+    expect(script).toContain('vite-frontend.err.log')
+    expect(script).toContain('tauri-dev.err.log')
+    expect(script).toContain('Start-HiddenLoggedCommand')
+    expect(script).toContain('Stop-StaleFrontendProcesses')
+    expect(script).toContain('Stopping stale Vite frontend process')
+    expect(script).toContain('$env:PROMPTCARD_DESKTOP_DEV = "1"')
+    expect(script).toContain('Starting or reusing local services in the background')
+    expect(script).toContain('Starting Vite frontend')
+  })
+
+  test('requires the frontend health check to identify the PromptCard app', async () => {
+    const runtimeScript = await readFile(path.resolve(__dirname, 'dev-port-runtime.ps1'), 'utf8')
+    const launchScript = await readFile(scriptPath, 'utf8')
+
+    expect(runtimeScript).toContain('function Test-PromptCardFrontend')
+    expect(runtimeScript).toContain('PromptCard-Agent')
+    expect(launchScript).toContain('Test-PromptCardFrontend $runtime.frontendUrl')
+    expect(launchScript).not.toContain('Test-HttpOk $runtime.frontendUrl')
+  })
+
+  test('neutralizes beforeDevCommand in dynamic Tauri dev config', async () => {
+    const script = await readFile(scriptPath, 'utf8')
+
+    expect(script).toContain('$config.build.beforeDevCommand = "cmd /c exit 0"')
+  })
+
+  test('supports a services-only mode for storage and agent startup', async () => {
+    const script = await readFile(path.resolve(__dirname, 'start-dev-with-agent.ps1'), 'utf8')
+
+    expect(script).toContain('[switch]$ServicesOnly')
+    expect(script).toContain('if ($ServicesOnly)')
+    expect(script).toContain('PromptCard local services are healthy.')
   })
 
   test('builds the Windows desktop shell without an extra console window', async () => {

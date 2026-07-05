@@ -49,7 +49,23 @@ function startHealthyFrontendServer() {
       return
     }
     response.writeHead(200, { 'content-type': 'text/html' })
-    response.end('<script type="module" src="/src/main.tsx"></script>')
+    response.end('<title>PromptCard-Agent</title><script type="module" src="/src/main.tsx"></script>')
+  })
+
+  return new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      servers.push(server)
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('Expected a TCP server address')
+      resolve(`http://127.0.0.1:${address.port}/`)
+    })
+  })
+}
+
+function startForeignFrontendServer() {
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'text/html' })
+    response.end('<title>FacetWrite</title><script type="module" src="/src/main.tsx"></script>')
   })
 
   return new Promise<string>((resolve) => {
@@ -130,9 +146,13 @@ async function expectScriptSupportsTestParameters() {
   expect(script).toContain('$RuntimeManifestPath')
   expect(script).toContain('$FrontendCommand')
   expect(script).toContain('New-PromptCardDevRuntime')
-  expect(script).toContain('PROMPTCARD_DEV_RUNTIME_MANIFEST')
-  expect(script).toContain('$payload.capabilities.sqlite')
-  expect(script).toContain('unoptimized CommonJS React modules')
+    expect(script).toContain('PROMPTCARD_DEV_RUNTIME_MANIFEST')
+    expect(script).toContain('$payload.capabilities.sqlite')
+    expect(script).toContain('unoptimized CommonJS React modules')
+    expect(script).toContain('Stop-StalePromptCardServiceProcesses')
+    expect(script).toContain('Stopping stale PromptCard service process')
+    expect(script).toContain('storage-service.err.log')
+    expect(script).toContain('agent-runtime.err.log')
 }
 
 describe('start-dev-with-agent.ps1', () => {
@@ -202,6 +222,40 @@ describe('start-dev-with-agent.ps1', () => {
       agentUrl,
       '-FrontendUrl',
       'http://127.0.0.1:1/',
+      '-RuntimeManifestPath',
+      runtimeManifestPath,
+      '-FrontendCommand',
+      marker.command,
+      '-HealthTimeoutSeconds',
+      '2'
+    ])
+
+    await expect(readFile(marker.markerPath, 'utf8')).resolves.toBe('started\r\n')
+    expect(result.code).toBe(0)
+  }, 15_000)
+
+  test('does not treat another Vite app as a healthy frontend', async () => {
+    await expectScriptSupportsTestParameters()
+    const [storageUrl, agentUrl, frontendUrl] = await Promise.all([
+      startHealthyServer(),
+      startHealthyServer(),
+      startForeignFrontendServer()
+    ])
+    const marker = await makeMarkerCommand('foreign-frontend-started.txt')
+    const runtimeManifestPath = await makeRuntimeManifestPath('foreign-frontend-runtime.json')
+
+    const result = await runPowerShell([
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      scriptPath,
+      '-StorageHealthUrl',
+      storageUrl,
+      '-AgentHealthUrl',
+      agentUrl,
+      '-FrontendUrl',
+      frontendUrl,
       '-RuntimeManifestPath',
       runtimeManifestPath,
       '-FrontendCommand',

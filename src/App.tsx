@@ -10,7 +10,9 @@ import FreeCanvasBuilderScreen from './components/canvas/FreeCanvasBuilderScreen
 import { MeScreen } from './components/app/MeScreen'
 import { TemplateLibraryScreen } from './components/app/TemplateLibraryScreen'
 import { MediaScreen } from './features/media/MediaScreen'
+import { CaptureBarScreen } from './features/capture/CaptureBarScreen'
 import { ScreenshotCaptureOverlay } from './features/capture/ScreenshotCaptureOverlay'
+import { closeCaptureToolbarWindow, openCaptureToolbarWindow, type CaptureToolbarStatus } from './features/capture/capture-toolbar-window'
 import type { BuilderModePreviewSnapshot } from './components/app/builder-preview-contract'
 import { AddCardModal, CreateProjectModal, HistoryModal, RenameProjectModal } from './components/app/ProjectModals'
 import { useCardStore } from './stores/card.store'
@@ -44,13 +46,21 @@ const DEFAULT_USER_SETTINGS: IUserSettings = {
   meta: {}
 }
 
-const AppStartupScreen = () => (
+const STORAGE_HEALTH_RETRY_MS = 250
+const STORAGE_HEALTH_MAX_ATTEMPTS = 32
+
+const wait = (durationMs: number) => new Promise(resolve => window.setTimeout(resolve, durationMs))
+
+const AppStartupScreen = ({ message }: { message: string }) => (
   <div className="app-startup-screen" role="status" aria-live="polite">
     <div className="app-startup-panel">
-      <div className="app-startup-brand">PMAgent</div>
+      <div className="app-startup-brand">
+        <img className="app-startup-logo" src="/promptcard-manager-icon.png" alt="PMAgent logo" />
+        <span>PMAgent</span>
+      </div>
       <div className="app-startup-row">
         <div className="app-startup-spinner" aria-hidden="true"></div>
-        <span>正在加载本地数据...</span>
+        <span>{message}</span>
       </div>
       <div className="app-startup-progress" aria-hidden="true"></div>
     </div>
@@ -82,6 +92,7 @@ function App() {
   const { init: initPresets, getByType: getPresetsByType, incrementUsage } = usePresetStore()
 
   const [activeTab, setActiveTab] = useState<MainTab>('projects')
+  const [projectSearchTerm, setProjectSearchTerm] = useState('')
   const [projectMode, setProjectMode] = useState<ProjectMode>('home')
   const [projects, setProjects] = useState<IPromptProject[]>([])
   const [projectTrash, setProjectTrash] = useState<TrashEntry<IPromptProject>[]>([])
@@ -103,6 +114,9 @@ function App() {
   const [activeEditMode, setActiveEditMode] = useState<'learn' | 'creative'>('creative')
   const [showSettings, setShowSettings] = useState(false)
   const [showScreenshotCapture, setShowScreenshotCapture] = useState(false)
+  const [captureToolbarStatus, setCaptureToolbarStatus] = useState<CaptureToolbarStatus>('closed')
+  const [captureToolbarError, setCaptureToolbarError] = useState('')
+  const [startupMessage, setStartupMessage] = useState('正在连接本地数据服务...')
   const [userSettings, setUserSettings] = useState<IUserSettings>(DEFAULT_USER_SETTINGS)
   const threeStageTemplateSettings = useMemo(
     () => normalizeThreeStageTemplateSettings(userSettings.meta?.threeStageTemplates),
@@ -257,19 +271,24 @@ function App() {
 
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return
-    let unlisten: (() => void) | null = null
+    let unlistenScreenshot: (() => void) | null = null
+    let unlistenToolbarClosed: (() => void) | null = null
     import('@tauri-apps/api/event')
-      .then(({ listen }) => listen('capture:screenshot-requested', () => {
-        setShowScreenshotCapture(true)
-      }))
-      .then(nextUnlisten => {
-        unlisten = nextUnlisten
+      .then(async ({ listen }) => {
+        unlistenScreenshot = await listen('capture:screenshot-requested', () => {
+          setShowScreenshotCapture(true)
+        })
+        unlistenToolbarClosed = await listen('capture:toolbar-closed', () => {
+          setCaptureToolbarStatus('closed')
+          setCaptureToolbarError('')
+        })
       })
       .catch(error => {
-        console.error('Failed to listen for screenshot capture requests:', error)
+        console.error('Failed to listen for capture toolbar events:', error)
       })
     return () => {
-      unlisten?.()
+      unlistenScreenshot?.()
+      unlistenToolbarClosed?.()
     }
   }, [])
 
@@ -302,6 +321,18 @@ function App() {
 
     const loadAppData = async () => {
       try {
+        setStartupMessage('正在连接本地数据服务...')
+        let storageReady = false
+        for (let attempt = 0; attempt < STORAGE_HEALTH_MAX_ATTEMPTS && !cancelled; attempt++) {
+          if (await storage.health()) {
+            storageReady = true
+            break
+          }
+          await wait(STORAGE_HEALTH_RETRY_MS)
+        }
+        if (cancelled) return
+
+        setStartupMessage(storageReady ? '正在加载本地数据...' : '本地数据服务启动较慢，正在进入应用...')
         const [savedProjects, trash, workspace, history, settings] = await Promise.all([
           storage.projects.getAll(),
           storage.projects.getTrash(),
@@ -736,6 +767,14 @@ function App() {
     setActiveProjectId(null)
   }
 
+  const handleBackFromTemplateLibrary = () => {
+    setActiveTab('projects')
+    setProjectMode('home')
+    setActiveProjectId(null)
+    setShowProjectTrash(false)
+    setShowTemplateLibrary(false)
+  }
+
   const handleUpdateStoryboard = (storyboard: IStoryboardProject) => {
     if (!activeProjectId) return
     markProjectEdited(activeProjectId)
@@ -825,6 +864,32 @@ function App() {
         threeStageTemplates: settings
       }
     })
+  }
+
+  const handleOpenCaptureToolbar = async () => {
+    setCaptureToolbarStatus('opening')
+    setCaptureToolbarError('')
+    try {
+      await openCaptureToolbarWindow()
+      setCaptureToolbarStatus('running')
+    } catch (error) {
+      console.error('Failed to open capture toolbar:', error)
+      setCaptureToolbarStatus('error')
+      setCaptureToolbarError(error instanceof Error ? error.message : '捕获栏启动失败。')
+    }
+  }
+
+  const handleCloseCaptureToolbar = async () => {
+    setCaptureToolbarStatus('closing')
+    setCaptureToolbarError('')
+    try {
+      await closeCaptureToolbarWindow()
+      setCaptureToolbarStatus('closed')
+    } catch (error) {
+      console.error('Failed to close capture toolbar:', error)
+      setCaptureToolbarStatus('error')
+      setCaptureToolbarError(error instanceof Error ? error.message : '捕获栏关闭失败。')
+    }
   }
 
   const handleCopyPrompt = async () => {
@@ -1016,7 +1081,7 @@ function App() {
   }
 
   if (!isHydrated) {
-    return <AppStartupScreen />
+    return <AppStartupScreen message={startupMessage} />
   }
 
   const saveStatusText = !userSettings.autoSave
@@ -1046,6 +1111,13 @@ function App() {
 
   const content = activeTab === 'media' ? (
     <MediaScreen />
+  ) : activeTab === 'capture' ? (
+    <CaptureBarScreen
+      status={captureToolbarStatus}
+      errorMessage={captureToolbarError}
+      onOpenToolbar={handleOpenCaptureToolbar}
+      onCloseToolbar={handleCloseCaptureToolbar}
+    />
   ) : activeTab === 'library' ? (
     <PromptLibrary embedded />
   ) : activeTab === 'agents' ? (
@@ -1061,7 +1133,7 @@ function App() {
       onExportData={handleExportData}
     />
   ) : showTemplateLibrary ? (
-    <TemplateLibraryScreen onCreateFromTemplate={handleCreateProjectFromTemplate} />
+    <TemplateLibraryScreen onBack={handleBackFromTemplateLibrary} onCreateFromTemplate={handleCreateProjectFromTemplate} />
   ) : projectMode === 'builder' && activeProject?.type === 'storyboard' && activeProject.storyboard ? (
     <StoryboardBuilderScreen
       activeProject={activeProject}
@@ -1130,6 +1202,7 @@ function App() {
       selectedProjectIds={selectedProjectIds}
       selectedProjectTrashIds={selectedProjectTrashIds}
       showProjectTrash={showProjectTrash}
+      searchTerm={projectSearchTerm}
       promptHistory={promptHistory}
       onCreateProject={handleCreateProject}
       onOpenProject={openProject}
@@ -1165,21 +1238,15 @@ function App() {
       saveStatus={saveStatus}
       saveStatusText={saveStatusText}
       activeProject={activeProject}
+      projectSearchTerm={projectSearchTerm}
+      onProjectSearchTermChange={setProjectSearchTerm}
       onCreateProject={handleCreateProject}
-      onOpenTemplateLibrary={() => {
-        setActiveTab('projects')
-        setProjectMode('home')
-        setActiveProjectId(null)
-        setShowProjectTrash(false)
-        setShowTemplateLibrary(true)
-      }}
       onShowProjectTrash={() => {
         setActiveTab('projects')
         setProjectMode('home')
         setShowTemplateLibrary(false)
         setShowProjectTrash(true)
       }}
-      showProjectUtilities={activeTab === 'projects' && projectMode === 'home'}
     >
       {content}
 

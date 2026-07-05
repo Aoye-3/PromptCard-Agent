@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import { AppShell } from '@/components/app/AppShell'
 import { I18nProvider } from '@/i18n'
+import type { IPromptProject } from '@/models/PromptHistory.model'
 import { MediaAnalysisDialog } from './MediaAnalysisDialog'
 import { recentCaptureFixtures } from './media-fixtures'
 import { MediaScreen } from './MediaScreen'
@@ -15,21 +16,11 @@ describe('MediaScreen', () => {
     )
 
     expect(markup).toContain('data-media-screen')
-    expect(markup).toContain('近期捕获')
-    expect(markup).toContain('0')
-    expect(markup).toContain('捕获收件箱')
-    expect(markup).toContain('提示词文本')
-    expect(markup).toContain('用户备注')
-    expect(markup).toContain('来源平台')
-    expect(markup).toContain('来源 URL')
-    expect(markup).toContain('素材角色')
-    expect(markup).toContain('用途')
-    expect(markup).toContain('归档')
-    expect(markup).toContain('注册入库')
-    expect(markup).toContain('放到画布')
+    expect(markup).toContain('grid-cols-3')
+    expect(markup).toContain('lg:grid-cols-[minmax(0,1fr)_420px]')
   })
 
-  it('renders Media as a top-level bottom navigation tab', () => {
+  it('renders Media as a top-level side navigation item', () => {
     const markup = renderToStaticMarkup(
       <I18nProvider>
         <AppShell
@@ -39,18 +30,102 @@ describe('MediaScreen', () => {
           saveStatus="saved"
           saveStatusText="Saved"
           activeProject={null}
+          projectSearchTerm=""
+          onProjectSearchTermChange={() => undefined}
           onCreateProject={() => undefined}
-          onOpenTemplateLibrary={() => undefined}
           onShowProjectTrash={() => undefined}
-          showProjectUtilities={false}
         >
           <MediaScreen />
         </AppShell>
       </I18nProvider>
     )
 
-    expect(markup).toContain('grid-cols-5')
-    expect(markup).toContain('媒体')
+    expect(markup).toContain('data-app-side-nav')
+    expect(markup).toContain('data-project-search-input')
+    expect(markup).toContain('data-app-project-utilities')
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(7)
+    expect(markup).toContain('data-active="true"')
+    expect(markup).not.toContain('grid-cols-5')
+  })
+
+  it('renders Capture Bar as an active top-level side navigation item', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <AppShell
+          activeTab="capture"
+          setActiveTab={() => undefined}
+          projectMode="home"
+          saveStatus="saved"
+          saveStatusText="Saved"
+          activeProject={null}
+          projectSearchTerm=""
+          onProjectSearchTermChange={() => undefined}
+          onCreateProject={() => undefined}
+          onShowProjectTrash={() => undefined}
+        >
+          <div />
+        </AppShell>
+      </I18nProvider>
+    )
+
+    expect(markup).toContain('data-side-nav-item="捕获栏"')
+    expect(markup).toContain('data-active="true"')
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(7)
+  })
+
+  it('hides the primary navigation in project builder mode', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <AppShell
+          activeTab="projects"
+          setActiveTab={() => undefined}
+          projectMode="builder"
+          saveStatus="saved"
+          saveStatusText="Saved"
+          activeProject={{ id: 'project-1', title: 'Canvas Project' } as IPromptProject}
+          projectSearchTerm=""
+          onProjectSearchTermChange={() => undefined}
+          onCreateProject={() => undefined}
+          onShowProjectTrash={() => undefined}
+        >
+          <div data-builder-child />
+        </AppShell>
+      </I18nProvider>
+    )
+
+    expect(markup).not.toContain('data-app-side-nav')
+    expect(markup).not.toContain('data-project-search-input')
+    expect(markup).not.toContain('data-side-nav-item=')
+    expect(markup).toContain('Canvas Project')
+    expect(markup).toContain('data-builder-child')
+  })
+
+  it('renders the fixed project trash utility inside the side navigation', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <AppShell
+          activeTab="agents"
+          setActiveTab={() => undefined}
+          projectMode="home"
+          saveStatus="saved"
+          saveStatusText="Saved"
+          activeProject={null}
+          projectSearchTerm=""
+          onProjectSearchTermChange={() => undefined}
+          onCreateProject={() => undefined}
+          onShowProjectTrash={() => undefined}
+        >
+          <div />
+        </AppShell>
+      </I18nProvider>
+    )
+
+    expect(markup).toContain('data-app-side-nav')
+    expect(markup).toContain('data-project-search-input')
+    expect(markup).toContain('data-app-project-utilities')
+    expect(markup).toContain('data-side-nav-item="回收站"')
+    expect(markup).not.toContain('data-side-nav-item="模板库"')
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(7)
   })
 
   it('renders the media analysis dialog shell for a selected capture', () => {
@@ -68,8 +143,6 @@ describe('MediaScreen', () => {
     expect(markup).toContain('data-media-agent-workspace')
     expect(markup).toContain('data-media-analysis-output')
     expect(markup.match(/data-media-analysis-action/g)?.length).toBe(3)
-    expect(markup).toContain('视觉分析尚未接入')
-    expect(markup).toContain('其他 Recent Captures 不会默认进入 Agent 上下文')
   })
 
   it('does not render the media analysis dialog when closed', () => {

@@ -8,6 +8,7 @@ export const ProjectHome = ({
   selectedProjectIds,
   selectedProjectTrashIds,
   showProjectTrash,
+  searchTerm,
   promptHistory,
   onOpenProject,
   onCreateProject,
@@ -30,6 +31,7 @@ export const ProjectHome = ({
   selectedProjectIds: string[]
   selectedProjectTrashIds: string[]
   showProjectTrash: boolean
+  searchTerm: string
   promptHistory: IPromptHistory[]
   onOpenProject: (project: IPromptProject) => void
   onCreateProject: () => void
@@ -49,10 +51,15 @@ export const ProjectHome = ({
 }) => {
   const selectedCount = selectedProjectIds.length
   const selectedTrashCount = selectedProjectTrashIds.length
-  const visibleProjects = showProjectTrash ? projectTrash.map(entry => entry.payload) : projects
+  const searchKeyword = searchTerm.trim().toLowerCase()
+  const sourceProjects = showProjectTrash ? projectTrash.map(entry => entry.payload) : projects
+  const visibleProjects = searchKeyword
+    ? sourceProjects.filter(project => projectMatchesSearch(project, searchKeyword))
+    : sourceProjects
+  const isSearchActive = searchKeyword.length > 0
 
   return (
-    <section className="px-6 pt-5">
+    <section className="px-5 py-6 sm:px-8 lg:px-10 xl:px-12">
       {!showProjectTrash && projects.length === 0 ? (
         <div className="mx-auto flex min-h-[68vh] max-w-2xl flex-col items-center justify-center text-center">
           <div className="mb-8 flex h-28 w-28 items-center justify-center rounded-[32px] bg-amber-50 text-amber-400">
@@ -70,10 +77,10 @@ export const ProjectHome = ({
           </div>
         </div>
       ) : (
-        <div className="mx-auto w-full max-w-6xl py-12">
-          <div className="mb-8 flex flex-col justify-between gap-6 lg:flex-row lg:items-center">
+        <div className="mr-auto w-full max-w-[1400px] py-5">
+          <div className="mb-7 flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
             <div>
-              <h1 className="text-3xl font-bold">{showProjectTrash ? 'Project trash' : 'Projects'}</h1>
+              <h1 className="text-4xl font-bold tracking-tight">{showProjectTrash ? 'Project trash' : 'Projects'}</h1>
               <p className="mt-2 text-sm text-gray-500">
         {showProjectTrash ? 'Restore projects or permanently delete them from local storage.' : 'Manage card, storyboard, three-stage, and free-canvas projects.'}
               </p>
@@ -118,33 +125,26 @@ export const ProjectHome = ({
           )}
 
           {visibleProjects.length === 0 ? (
-            <div className="rounded-[24px] border border-dashed border-gray-200 py-16 text-center text-sm text-gray-500">
-              {showProjectTrash ? 'Trash is empty.' : 'No projects yet.'}
+            <div className="rounded-[20px] border border-dashed border-gray-200 py-16 text-center text-sm text-gray-500">
+              {isSearchActive ? '未找到匹配项目。' : showProjectTrash ? 'Trash is empty.' : 'No projects yet.'}
             </div>
           ) : (
-            <div className="grid auto-rows-fr gap-4 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid auto-rows-fr gap-5 md:grid-cols-2 xl:grid-cols-3">
               {visibleProjects.map(project => {
                 const selected = showProjectTrash
                   ? selectedProjectTrashIds.includes(project.id)
                   : selectedProjectIds.includes(project.id)
-                const cardCount = project.pages.reduce((sum, page) => sum + page.cards.length, 0)
-  const meta = project.type === 'storyboard'
-    ? `${project.storyboard?.sequences.length || 0} sequences`
-    : project.type === 'three-stage'
-      ? '3 structured stages'
-      : project.type === 'free-canvas'
-        ? `${project.freeCanvas?.nodes.length || 0} canvas nodes`
-      : `${project.pages.length} pages / ${cardCount} cards`
-  const modeLabel = project.type === 'storyboard' ? 'Storyboard' : project.type === 'three-stage' ? 'Three-stage' : project.type === 'free-canvas' ? 'Free Canvas' : 'Card'
+                const meta = getProjectMeta(project)
+                const modeLabel = getProjectModeLabel(project)
 
                 return (
                   <article
                     key={project.id}
-                    className={`group flex min-h-[230px] flex-col rounded-[24px] border bg-white p-5 text-left shadow-[0_18px_45px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_70px_rgba(15,23,42,0.08)] ${
+                    className={`group flex min-h-[218px] flex-col rounded-[20px] border bg-white p-5 text-left shadow-[0_16px_42px_rgba(15,23,42,0.04)] transition hover:-translate-y-0.5 hover:shadow-[0_22px_62px_rgba(15,23,42,0.08)] ${
                       selected ? 'border-black' : 'border-gray-100'
                     }`}
                   >
-                    <div className="mb-5 flex items-start justify-between gap-4">
+                    <div className="mb-4 flex items-start justify-between gap-4">
                       <label className="flex items-center gap-3">
                         <input
                           type="checkbox"
@@ -152,8 +152,8 @@ export const ProjectHome = ({
                           checked={selected}
                           onChange={() => showProjectTrash ? onToggleProjectTrashSelection(project.id) : onToggleProjectSelection(project.id)}
                         />
-                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-500">
-                          <Folder className="h-7 w-7" />
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-500">
+                          <Folder className="h-6 w-6" />
                         </div>
                       </label>
                       {!showProjectTrash && (
@@ -167,11 +167,11 @@ export const ProjectHome = ({
                         </div>
                       )}
                     </div>
-                    <div className="mb-4 inline-flex w-fit rounded-full bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-500">
+                    <div className="mb-3 inline-flex w-fit rounded-full bg-gray-50 px-3 py-1 text-xs font-semibold text-gray-500">
                       {modeLabel} / {meta}
                     </div>
                     <h2 className="whitespace-normal break-words text-lg font-bold leading-snug text-gray-950">{project.title}</h2>
-                    <p className="mt-4 text-xs leading-5 text-gray-400">Updated {new Date(project.updatedAt).toLocaleString()} / rev {project.revision}</p>
+                    <p className="mt-3 text-xs leading-5 text-gray-400">Updated {new Date(project.updatedAt).toLocaleString()} / rev {project.revision}</p>
                     {!showProjectTrash && (
                       <button type="button" className="mt-auto inline-flex w-full items-center justify-center rounded-full bg-gray-950 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-gray-800" onClick={() => onOpenProject(project)}>
                         Open project
@@ -193,6 +193,33 @@ export const ProjectHome = ({
     </section>
   )
 }
+
+const getProjectModeLabel = (project: IPromptProject) => (
+  project.type === 'storyboard'
+    ? 'Storyboard'
+    : project.type === 'three-stage'
+      ? 'Three-stage'
+      : project.type === 'free-canvas'
+        ? 'Free Canvas'
+        : 'Card'
+)
+
+const getProjectMeta = (project: IPromptProject) => {
+  const cardCount = project.pages.reduce((sum, page) => sum + page.cards.length, 0)
+  return project.type === 'storyboard'
+    ? `${project.storyboard?.sequences.length || 0} sequences`
+    : project.type === 'three-stage'
+      ? '3 structured stages'
+      : project.type === 'free-canvas'
+        ? `${project.freeCanvas?.nodes.length || 0} canvas nodes`
+        : `${project.pages.length} pages / ${cardCount} cards`
+}
+
+const projectMatchesSearch = (project: IPromptProject, keyword: string) => [
+  project.title,
+  getProjectModeLabel(project),
+  getProjectMeta(project)
+].some(value => value.toLowerCase().includes(keyword))
 
 const SelectionBar = ({
   count,

@@ -66,6 +66,10 @@ async function migrateBrowserCacheOnce(): Promise<void> {
 }
 
 export const storage = {
+  health(): Promise<boolean> {
+    return storageServiceClient.health()
+  },
+
   assets: {
     upload(file: File): Promise<{ id: string; filename: string; contentType: string; size: number }> {
       return storageServiceClient.assets.upload(file)

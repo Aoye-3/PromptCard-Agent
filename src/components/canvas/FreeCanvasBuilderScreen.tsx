@@ -513,7 +513,7 @@ const FreeCanvasBuilderInner = ({
   return (
     <section
       data-free-canvas-screen
-      className="fixed inset-x-0 bottom-[56px] top-14 z-20 overflow-hidden bg-[#f7f8fb]"
+      className="fixed inset-x-0 bottom-0 top-14 z-20 overflow-hidden bg-[#f7f8fb]"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
     >

@@ -10,7 +10,7 @@ Active
 
 ## Last Updated
 
-2026-07-03
+2026-07-05
 
 ## Timezone
 
@@ -46,12 +46,15 @@ This creates a safer workflow:
 The running desktop app should have:
 
 - The main PromptCard Manager window.
-- A small always-on-top floating toolbar that does not take much screen space.
+- A top-level Capture Bar page that starts, closes, previews, and configures the floating capture toolbar.
+- A small always-on-top floating toolbar that does not take much screen space after the user starts it.
 - A top-level Media page for capture review and registration.
-- The formal bottom-navigation category name is `媒体`.
+- Capture Bar is the quick capture control surface; Media is the Recent Captures result inbox.
+- The desktop app does not create the floating toolbar at startup. Each launch starts with Capture Bar closed until the user opens it.
+- The formal primary-navigation category name is `媒体`.
 - The page title shown after entering the Media page is `近期捕获`.
 - Media exists at the same app navigation level as Projects, Prompt Library, and Settings.
-- Media is reachable from the global bottom navigation bar.
+- Media is reachable from the global left sidebar navigation.
 - Clicking a media card opens a focused media analysis dialog rather than navigating away from the `近期捕获` page.
 - The media analysis dialog is split into a left media dossier and a right Agent workspace:
   - Left: one media dossier card, with media preview taking about 60% height, prompt box about 30%, and note area about 10%.
@@ -62,7 +65,7 @@ Toolbar modes:
 
 - Screenshot.
 - Record, added after screenshot capture and Recent Captures are usable.
-- Hide/close.
+- Close.
 
 Screenshot flow:
 
@@ -132,14 +135,17 @@ The media analysis dialog is an explicit, per-capture Agent interaction. Opening
 Navigation placement:
 
 ```text
-Bottom navigation
+Left sidebar primary navigation
   -> Projects
   -> 媒体
+  -> Capture Bar
   -> Prompt Library
   -> Settings
 ```
 
 The `媒体` navigation item opens the `近期捕获` page. Recent Captures is a top-level workspace utility page, not a Prompt Library tab and not a per-project-only panel.
+
+The Capture Bar navigation item opens the toolbar control page. It contains a static toolbar preview, status, start/close actions, current settings, and the planned module menu. It does not directly edit Recent Captures metadata and does not replace the Media review workflow.
 
 ## Execution Order
 
@@ -148,7 +154,7 @@ The implementation order for this plan is:
 ```text
 1. Build the Media / Recent Captures frontend UI layer.
 2. Add the media detail analysis dialog shell for selected captures.
-3. Add and refine the floating capture toolbar.
+3. Add the Capture Bar control page and on-demand floating toolbar shell.
 4. Add screenshot selection and save captures into Recent Captures.
 5. Connect storage/event flow between Prompt Library, Recent Captures, and Canvas.
 6. Add screen recording as video assets.
@@ -194,7 +200,7 @@ Candidate components:
 
 | Capability | Preferred path | Notes |
 | --- | --- | --- |
-| Floating toolbar | Tauri multi-window / Window API | Small always-on-top, undecorated window. |
+| Floating toolbar | Tauri multi-window / Window API | Small always-on-top, undecorated window created on demand from Capture Bar. |
 | Global trigger | Tauri `global-shortcut` plugin | Optional after toolbar MVP; useful for screenshot hotkeys. |
 | Clipboard text/image | Tauri `clipboard-manager` plugin plus browser clipboard events | Browser paste/drop first, native clipboard as desktop fallback. |
 | Screenshot capture | `xcap` | Rust, Apache-2.0, cross-platform screenshot and region capture. |
@@ -331,7 +337,7 @@ interface FreeCanvasVideoMeta {
 **Scope:**
 
 - Add a top-level Media route/page at the same level as Projects, Prompt Library, and Settings.
-- Add `媒体` to the global bottom navigation bar.
+- Add `媒体` to the global left sidebar navigation.
 - Display page title `近期捕获`.
 - Add a batch-friendly media grid/list layout.
 - Add empty state for no captures yet.
@@ -347,7 +353,7 @@ interface FreeCanvasVideoMeta {
 
 **Acceptance Criteria:**
 
-- [x] `媒体` is visible in the bottom navigation bar.
+- [x] `媒体` is visible in the left sidebar navigation.
 - [x] Entering `媒体` opens a page whose main title is `近期捕获`.
 - [x] User can open the page without entering a specific project.
 - [x] Empty state clearly supports future capture intake.
@@ -357,7 +363,7 @@ interface FreeCanvasVideoMeta {
 
 **Verification:**
 
-- [x] UI/component tests cover route rendering and bottom-nav entry where practical.
+- [x] UI/component tests cover route rendering and primary navigation entry where practical.
 - [x] Manual check: navigate Projects -> Media -> Prompt Library -> Me/Settings.
 - [x] Manual check: page title reads `近期捕获`.
 - [x] `npm.cmd run build` succeeds.
@@ -402,22 +408,26 @@ interface FreeCanvasVideoMeta {
 
 ## Phase 3: Floating Toolbar Shell
 
-**Goal:** Add the always-on-top capture entry point after the Media page exists.
+**Goal:** Add the on-demand always-on-top capture entry point after the Media page exists.
 
 **Scope:**
 
-- Add a compact Tauri floating toolbar window.
+- Add a Capture Bar top-level page with status, static preview, start/close actions, current settings, and planned module list.
+- Add a compact Tauri floating toolbar window that is created only when the user starts it.
 - Keep it small, draggable, and visually quiet.
 - Buttons:
   - Screenshot.
   - Record disabled or marked as coming next.
-  - Hide/close.
+  - Close.
 - Do not block the main app window.
+- Do not create the toolbar at desktop startup.
 - Store toolbar position if low-cost; otherwise use a sane default.
 
 **Acceptance Criteria:**
 
-- [ ] Main app launches with the floating toolbar in desktop mode.
+- [ ] Main app launches without creating the floating toolbar.
+- [ ] User can open the Capture Bar page from the left sidebar.
+- [ ] User can start and close the toolbar from the Capture Bar page.
 - [ ] Toolbar stays above normal windows.
 - [ ] Toolbar does not appear as a large second app surface.
 - [ ] Screenshot button emits a capture intent.
@@ -425,7 +435,7 @@ interface FreeCanvasVideoMeta {
 
 **Verification:**
 
-- [ ] Tauri config/capability tests cover the extra window where practical.
+- [ ] Tauri config/capability tests cover the on-demand toolbar window where practical.
 - [ ] Manual check on Windows first.
 - [ ] Follow-up manual checks on macOS/Linux before claiming cross-platform completion.
 
@@ -674,15 +684,16 @@ interface FreeCanvasVideoMeta {
 ## Implementation Notes
 
 - The first implementation should prefer this narrow vertical slice:
-  1. Bottom-nav `媒体` entry.
+  1. Left-sidebar `媒体` entry.
   2. `近期捕获` page shell.
   3. Empty state, media grid/list, and metadata editor UI.
   4. Media card detail analysis dialog shell.
-  5. Floating toolbar shell.
-  6. Screenshot selection saved into Recent Captures.
-  7. Storage/event flow between Recent Captures, Prompt Library, and Canvas.
-  8. Recording, video canvas placement, and frame timeline evidence.
-  9. Visual Agent interactions with safe selected-media scope.
+  5. Left-sidebar Capture Bar entry and control page.
+  6. On-demand floating toolbar shell.
+  7. Screenshot selection saved into Recent Captures.
+  8. Storage/event flow between Recent Captures, Prompt Library, and Canvas.
+  9. Recording, video canvas placement, and frame timeline evidence.
+  10. Visual Agent interactions with safe selected-media scope.
 - Do not start with vision-model execution before capture, storage events, and canvas/media flows are stable.
 - Do not start with recording before the `媒体` / `近期捕获` UI and screenshot flow are usable.
 - Do not start with video storyboard inference before recordings can be stored and timestamped frames can be traced to source video.
@@ -696,7 +707,7 @@ interface FreeCanvasVideoMeta {
 
 ### Checkpoint 1: Media Page Shell
 
-- [x] Bottom navigation includes `媒体`.
+- [x] Left sidebar navigation includes `媒体`.
 - [x] `媒体` opens a top-level page titled `近期捕获`.
 - [x] Page can be opened without entering a project.
 - [x] Empty state, grid/list shell, and metadata editor affordances are present.
@@ -712,7 +723,9 @@ interface FreeCanvasVideoMeta {
 
 ### Checkpoint 3: Floating Toolbar
 
-- [ ] Toolbar launches with the desktop app.
+- [ ] Toolbar does not launch with the desktop app.
+- [ ] Capture Bar is available from the left sidebar.
+- [ ] Capture Bar can start and close the toolbar.
 - [ ] Toolbar stays small and always on top.
 - [ ] Screenshot button enters capture state.
 

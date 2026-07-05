@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="zh-CN">
   <head>
@@ -6,6 +5,10 @@
     <link rel="icon" type="image/png" href="/app-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PromptCard-Agent</title>
+    <script>
+      document.documentElement.dataset.window =
+        new URLSearchParams(window.location.search).get('window') || 'main'
+    </script>
     <!-- 引入Font Awesome解决图标不显示问题 -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
     <!-- 引入中文字体优化显示 -->
@@ -16,14 +19,19 @@
       html,
       body,
       #root {
+        width: 100%;
+        height: 100%;
         min-height: 100%;
       }
 
       body {
+        margin: 0;
         background: #f5f4ed;
       }
 
       .boot-screen {
+        position: fixed;
+        inset: 0;
         min-height: 100vh;
         display: flex;
         align-items: center;
@@ -92,6 +100,16 @@
         width: 42%;
         background: #c96442;
         animation: boot-progress 1.35s ease-in-out infinite;
+      }
+
+      html[data-window="capture-toolbar"],
+      html[data-window="capture-toolbar"] body,
+      html[data-window="capture-toolbar"] #root {
+        background: transparent;
+      }
+
+      html[data-window="capture-toolbar"] .boot-screen {
+        display: none;
       }
 
       @keyframes boot-spin {

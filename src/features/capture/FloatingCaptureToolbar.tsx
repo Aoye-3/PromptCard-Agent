@@ -19,11 +19,12 @@ export const FloatingCaptureToolbar = () => {
     }
   }
 
-  const handleHide = async () => {
+  const handleClose = async () => {
     try {
-      await getCurrentWindow().hide()
+      await emitTo('main', 'capture:toolbar-closed', { source: 'capture-toolbar', closedAt: Date.now() })
+      await getCurrentWindow().close()
     } catch (error) {
-      console.error('Failed to hide capture toolbar:', error)
+      console.error('Failed to close capture toolbar:', error)
     }
   }
 
@@ -60,9 +61,9 @@ export const FloatingCaptureToolbar = () => {
         <button
           type="button"
           className="flex h-9 w-9 items-center justify-center rounded-md text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 active:scale-[0.98]"
-          aria-label="Hide toolbar"
-          title="Hide"
-          onClick={handleHide}
+          aria-label="Close toolbar"
+          title="Close"
+          onClick={handleClose}
         >
           <X className="h-4 w-4" />
         </button>

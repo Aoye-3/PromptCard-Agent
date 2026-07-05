@@ -14,5 +14,5 @@ PromptCard-Manager is a productivity tool, so the UI should stay focused, scanna
 ## Component Guidance
 
 - Keep persistence decisions in stores or service helpers, not presentation components.
-- Preserve the bottom navigation contract unless the product navigation model intentionally changes.
+- Preserve the left-sidebar navigation contract unless the product navigation model intentionally changes.
 - Extract from `src/App.tsx` only when the extraction has a clear ownership boundary.

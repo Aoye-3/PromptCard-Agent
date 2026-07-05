@@ -4,6 +4,15 @@ These endpoints exist only in the Vite development server.
 
 Implementation lives in `vite/plugins/promptcard-dev-storage.ts`; `vite.config.ts` only registers the plugins.
 
+Vite also owns same-origin development proxies for the frontend:
+
+- `/agent-health -> <agentUrl>/health`
+- `/agent-api/* -> <agentUrl>/api/*`
+- `/storage-api/health -> <storageUrl>/health`
+- `/storage-api/* -> <storageUrl>/api/*`
+
+`/storage-api/health` is intentionally registered before the generic `/storage-api` proxy. The storage service exposes health at its root `/health`, while durable storage business routes live under `/api`.
+
 ## Prompt Library
 
 ```text

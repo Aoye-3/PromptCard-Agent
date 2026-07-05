@@ -51,6 +51,14 @@ describe('BuilderModePreviewFrame', () => {
     expect(markup).not.toContain('fixed inset-0')
   })
 
+  it('renders the template library back action when provided', () => {
+    const markup = renderWithI18n(
+      <TemplateLibraryScreen onBack={() => undefined} onCreateFromTemplate={() => undefined} />
+    )
+
+    expect(markup).toContain('data-template-library-back')
+  })
+
   it('renders the free canvas panel switcher for Agent and Prompt library preview', () => {
     const markup = renderWithI18n(
       <BuilderModePreviewFrame

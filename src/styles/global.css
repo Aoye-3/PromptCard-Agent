@@ -86,6 +86,9 @@ body {
 }
 
 .app-startup-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -103,10 +106,20 @@ body {
 }
 
 .app-startup-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 20px;
   font-size: 26px;
   font-weight: 800;
   font-style: italic;
+}
+
+.app-startup-logo {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 12px;
 }
 
 .app-startup-row {

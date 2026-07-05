@@ -6,27 +6,35 @@ The frontend is a React single-page application with Vite, TypeScript, Tailwind 
 
 Large UI surfaces are split under `src/components/app/`:
 
-- `AppShell.tsx`: top bar, bottom navigation, and shell utilities.
+- `AppShell.tsx`: fixed left sidebar navigation, project search, persistent trash entry, capture-bar entry, and builder header.
 - `ProjectHome.tsx`: project list, create/open/delete/rename entry points, and project-file save action.
 - `CardBuilderScreen.tsx`: card workspace builder and embedded Agent collaboration rail.
 - `StoryboardBuilderScreen.tsx`: storyboard sequence/shot editor.
 - `MeScreen.tsx`: local profile/settings and dev server shutdown.
 - `ProjectModals.tsx`: history, card type, create-project, and rename modals.
 - `src/features/media/MediaScreen.tsx`: Recent Captures shell for captured screenshots and recordings before they are registered or placed on canvas.
+- `src/features/capture/CaptureBarScreen.tsx`: Capture Bar control page for starting, closing, previewing, and planning toolbar modules.
 
 `src/App.tsx` remains a meaningful orchestration surface. Treat it carefully during refactors: prefer extracting behavior into smaller components, domain helpers, or stores without changing persistence or navigation semantics in the same change.
 
 ## Application Shell
 
-The bottom navigation exposes five primary areas:
+The desktop shell uses a fixed left sidebar for primary navigation. The sidebar exposes six primary areas:
 
 - **Projects**: project home, card builder, and storyboard builder.
 - **Media**: `近期捕获` / Recent Captures review queue for media intake, metadata review, media analysis dialog shell, and placeholder archive/register/place-on-canvas actions.
+- **Capture Bar**: floating toolbar control page for starting and closing the capture toolbar, previewing the compact toolbar, and listing planned capture modules.
 - **Prompt Library**: embedded Prompt library management UI.
 - **Agent Dashboard**: unified Agent management page with DeepSeek model service configuration, default model, ToolUse visibility, skills, runtime status, diagnostics chat, and Prompt Library proposal review.
 - **Me**: profile/settings area, export action, language setting, and development server shutdown.
 
 The app uses `MainTab` for top-level navigation and `ProjectMode` for project home versus builder state.
+
+The sidebar search input is enabled only on the Projects home view and filters the project list. Other top-level pages render the same input in a disabled state so it does not imply cross-app search.
+
+The Projects utility area currently keeps **Trash** pinned in the left sidebar for every non-builder page. Clicking it calls the existing project-trash handler, returns to the Projects home flow, and opens the trash view. The direct **Template Library** sidebar entry is intentionally hidden for now and remains a planned navigation item rather than an active surface.
+
+The Capture Bar is intentionally separate from Media. Capture Bar owns toolbar launch, close, preview, and module configuration; Media remains the results inbox for Recent Captures. The desktop shell does not create the floating capture toolbar at app startup. Users start it from the Capture Bar page when needed, and closing it destroys the toolbar window instead of merely hiding it.
 
 ## Project Screens
 
@@ -79,4 +87,4 @@ This is intended for local app testing convenience. It is not a production API.
 - Keep user-visible project and Prompt library behavior stable when extracting from `src/App.tsx`.
 - Avoid moving persistence decisions into presentation components.
 - Prefer domain helpers, store methods, or service-level helpers for cross-screen workflows.
-- Preserve the bottom navigation contract unless the product navigation model is intentionally changed.
+- Preserve the left-sidebar navigation contract unless the product navigation model is intentionally changed.

@@ -22,7 +22,7 @@ Frontend project and preset storage calls use `/storage-api/*`, proxied to the s
 
 ## Floating Screenshot Capture Data
 
-The floating capture toolbar is a separate Tauri window rendered from the same frontend bundle with `?window=capture-toolbar`. Its screenshot button emits `capture:screenshot-requested` to the `main` window. The record button is intentionally disabled for the current MVP.
+The Capture Bar page in the main app creates the floating capture toolbar on demand. The toolbar is a separate Tauri window rendered from the same frontend bundle with `?window=capture-toolbar`; it is not created at desktop startup. Its screenshot button emits `capture:screenshot-requested` to the `main` window. The record button is intentionally disabled for the current MVP.
 
 The main app listens for the event and opens a full-screen screenshot selection overlay. The overlay requests a screen/window stream with the WebView `getDisplayMedia` picker, renders the selected source into a video preview, lets the user drag a region, crops that region to a PNG blob, uploads the blob through `storage.assets.upload`, and creates a Recent Capture record through `storage.recentCaptures.create`.
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The builder template library is the frontend display surface for prompt-building modes. It is a page inside the Projects area, not a modal, so the app header, bottom navigation, and project utilities remain visible. It is not the Prompt Library preset store and it should not own editor state.
+The builder template library is the frontend display surface for prompt-building modes. It is a page inside the Projects area, not a modal, and it is not the Prompt Library preset store. The direct sidebar entry is currently hidden and tracked as a planned navigation item; keep the page implementation available for future re-entry without coupling it to editor state.
 
 Current builder templates live in `src/domain/builder-templates/builder-templates.ts`. Each template represents a parent prompt-building mode module, such as card builder, storyboard builder, or three-stage builder. A parent mode can declare child modules that compose its workflow.
 

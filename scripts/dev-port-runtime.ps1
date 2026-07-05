@@ -93,6 +93,23 @@ function Get-PromptCardOrigin {
   return "$($uri.Scheme)://$($uri.Host):$($uri.Port)"
 }
 
+function Test-PromptCardFrontend {
+  param([string]$Url)
+
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing $Url -TimeoutSec 2
+    if ($response.StatusCode -ne 200) { return $false }
+
+    $content = [string]$response.Content
+    if ($content -notmatch '<title>\s*PromptCard-Agent\s*</title>') { return $false }
+    if ($content -notmatch "src=[`"']/src/main\.tsx(?:\?[^`"']*)?[`"']") { return $false }
+    return $true
+  }
+  catch {
+    return $false
+  }
+}
+
 function New-PromptCardDevRuntime {
   param(
     [string]$RepoRoot,

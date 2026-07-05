@@ -112,7 +112,26 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return payload as T
 }
 
+async function isHealthy(): Promise<boolean> {
+  const controller = new AbortController()
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), 750)
+  try {
+    const response = await fetch('/storage-api/health', {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+      cache: 'no-cache'
+    })
+    return response.ok
+  } catch {
+    return false
+  } finally {
+    globalThis.clearTimeout(timeoutId)
+  }
+}
+
 export const storageServiceClient = {
+  health: isHealthy,
+
   assets: {
     async upload(file: File): Promise<{ id: string; filename: string; contentType: string; size: number }> {
       const contentType = inferAssetContentType(file)

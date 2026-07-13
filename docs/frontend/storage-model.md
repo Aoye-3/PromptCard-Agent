@@ -4,9 +4,20 @@ Frontend persistence is exposed through `src/utils/storage.ts`.
 
 `src/utils/storage.ts` is intentionally a facade: it preserves the existing app-facing API while delegating project and Prompt Library durability to the local storage service through `src/storage/storage-service-client.ts`.
 
+In the desktop dev shell, the storage service writes to the protected profile data directory selected by `scripts/start-desktop-dev-services.ps1`. Frontend code should continue to use `/storage-api/*` and must not assume a repository-local `data/` path.
+
 ## Browser Storage
 
 `localforage` is no longer the durable source for projects, workspace, or Prompt Library presets. It remains available for UI-only cache, prompt history, settings, templates, and one-time migration of legacy browser data.
+
+The following browser-side records remain outside the filesystem profile for now:
+
+- localforage `history`, `templates`, `settings`, `cards`, `examples`, and legacy migration flags.
+- localStorage `prompt_card_config` for the older AI settings panel.
+- localStorage `promptcard-ui-language`.
+- localStorage `promptcard-agent-sessions-v1`.
+
+Future settings work may migrate these records, but source update logic must already treat them as user-owned data.
 
 `settings.meta.freeCanvasQuickTextPresets` is a legacy compatibility source only. On Prompt Library initialization, old Free Canvas quick messages are migrated into `/storage-api/presets` records using the existing `IPreset` shape, with `category: "quick-message"` and `meta.quickMessage.legacyId` for idempotency. Legacy note fields may be read during normalization but are intentionally discarded during migration. New quick-message writes use the Prompt Library preset store and do not write back to settings.
 

@@ -9,7 +9,7 @@ The desktop dev shell is a Tauri window for local self-use while the source tree
 - Leaves the floating capture toolbar closed by default; users open it from the Capture Bar page when needed.
 - Loads the `frontendUrl` recorded in `logs/dev-runtime.json`, so Vite hot reload still reflects source edits even when port `3000` is already occupied.
 - Exits the whole Tauri app and stops the local storage service, Agent Runtime, and Vite frontend when the main desktop window closes.
-- Shows a desktop-only source update action under the Me screen settings.
+- Shows a desktop-only Update screen in the left sidebar for checking, previewing, backing up, and applying fast-forward source updates.
 
 The main webview sets `dragDropEnabled: false`. Windows requires this for Explorer file drags to reach the React HTML5 handlers used by the free canvas. Re-enabling Tauri's native interception would require a separate native path-to-asset bridge.
 
@@ -72,42 +72,39 @@ The legacy Tauri `beforeDevCommand` still points at:
 npm.cmd run desktop:dev-services
 ```
 
-The desktop launcher avoids that path for dynamic-port launches by writing `logs/tauri.dev-runtime.conf.json`. Direct `npm.cmd run tauri:dev` still uses the static Tauri config and the legacy `beforeDevCommand`. For self-use development, both paths default to repository-local data and runtime paths so the same data can be backed up through Git. Startup details, including the actual frontend, Agent Runtime, and storage URLs, are recorded in `logs/dev-runtime.json`.
+The desktop launcher avoids that path for dynamic-port launches by writing `logs/tauri.dev-runtime.conf.json`. Direct `npm.cmd run tauri:dev` still uses the static Tauri config and the legacy `beforeDevCommand`. Both paths use the protected desktop profile for storage, logs, and Agent Runtime state. Startup details, including the actual frontend, Agent Runtime, and storage URLs, are recorded in `logs/dev-runtime.json`.
 
 ## Data Profile
 
-The desktop shell defaults to the existing repository-local development data:
+The desktop shell defaults to a protected profile inside the current workspace:
 
 ```text
-data/promptcard.sqlite3
-data/assets/
-agent-runtime/.deer-flow
+logs/desktop-profile/
+  data/
+    promptcard.sqlite3
+    assets/
+  backups/
+  logs/
+  agent-runtime/
+    .deer-flow/
+  config/
+    desktop-shell.json
+    update-source.json
 ```
 
-The complete `data/` directory is intentionally committed and pushed to the private GitHub repository during self-use development. This includes active projects, Prompt Library data, archives, and trash files. Agent Runtime state under `agent-runtime/.deer-flow/` remains local and ignored.
-
-For future distribution testing, set:
-
-```powershell
-$env:PROMPTCARD_DESKTOP_USE_APPDATA_PROFILE = "1"
-```
-
-That optional mode uses:
-
-```text
-logs/desktop-profile
-```
-
-It passes profile paths to the existing services with environment variables:
+`scripts/start-desktop-dev-services.ps1` passes profile paths to the local services with environment variables:
 
 ```text
 PROMPTCARD_STORAGE_DATA_DIR=<desktop-profile>\data
 DEER_FLOW_HOME=<desktop-profile>\agent-runtime\.deer-flow
 PROMPTCARD_LIBRARY_FILE=<desktop-profile>\data\prompt-library-presets.json
 PROMPTCARD_LOGS_DIR=<desktop-profile>\logs
+PROMPTCARD_DESKTOP_PROFILE_ROOT=<desktop-profile>
 ```
 
-Plain `npm.cmd run dev:with-agent` keeps the same repository-local development behavior.
+Legacy repository-local `data/` and `agent-runtime/.deer-flow/` are compatibility seed sources only. On first profile startup, missing profile files can be copied from those locations, but the startup path must not overwrite existing profile files and must not delete legacy files.
+
+Plain `npm.cmd run dev:with-agent` can still use repository-local defaults unless the caller provides the same profile environment variables. The desktop shell path is the maintained profile boundary.
 
 ## Shutdown Behavior
 
@@ -121,27 +118,63 @@ Plain terminal development remains manual: when you start services with `npm.cmd
 
 ## Source Update
 
-The desktop-only source update button invokes the Tauri command `git_pull_source`.
+The left-sidebar Update screen owns guarded source updates. It stores its update source metadata in:
 
-The command:
+```text
+logs/desktop-profile/config/update-source.json
+```
 
-1. Resolves the source root from `src-tauri`.
-2. Verifies the source root is a Git worktree.
-3. Rejects the update when `git status --porcelain` reports uncommitted changes.
-4. Runs `git pull --ff-only`.
+The command set is:
+
+1. `update_get_config` reads Profile update config and fills missing values from the current Git remote and branch.
+2. `update_save_config` writes the selected GitHub URL, remote name, and branch into the Profile config.
+3. `update_check` runs `git ls-remote` against the configured branch and records the latest remote commit.
+4. `update_preview` runs `git fetch --no-tags <repoUrl> <branch>`, diffs `HEAD..FETCH_HEAD`, and classifies changed paths.
+5. `update_apply` requires a clean worktree, blocks protected or manual-review paths, creates a Profile backup, then runs `git merge --ff-only FETCH_HEAD`.
 
 It uses the system Git credentials. The app does not store GitHub tokens or PATs.
+
+Automatic update currently covers AppShell, desktop shell, storage service, Agent Runtime backend, AgentHarness, runtime scripts, runtime Docker files, and bundled public Agent skills through this allowlist:
+
+```text
+src/
+src-tauri/
+promptcard_storage/
+scripts/
+docs/
+public/
+vite/
+agent-runtime/backend/
+agent-runtime/scripts/
+agent-runtime/docker/
+agent-runtime/skills/public/
+```
+
+The update classifier continues to block or require manual review for local-only runtime data and configuration:
+
+```text
+logs/desktop-profile/
+data/
+backups/
+.env*
+API-Key.txt
+agent-runtime/.deer-flow/
+agent-runtime/.agent/
+agent-runtime/config.yaml
+```
+
+The legacy Tauri command `git_pull_source` remains for compatibility with old desktop builds, but product UI should use the Update screen.
 
 ## Current Limits
 
 - This is a development shell, not an installer.
-- It does not perform dependency installation after pulling source changes.
-- It does not migrate data during `git pull`.
+- It does not perform dependency installation after source updates; the Update screen reports when dependency manifests changed.
+- It does not migrate data during source updates.
 - The Capture Bar page currently starts and closes the screenshot toolbar only. Recording, audio capture, GIF export, video canvas nodes, frame extraction, Storyboard inference, visual Agent analysis, and global shortcuts remain planned modules.
 - Screenshot capture uses the WebView screen-capture picker and requires the user to grant screen/window capture before drag-selecting a region.
 - Toolbar position persistence is not implemented yet.
-- Desktop profile mode is opt-in for now. If it is enabled and an existing service is already healthy but points at a different data directory, startup fails instead of silently reusing it.
-- Before public distribution, remove personal data from the source tree and switch the default profile to AppData.
+- If an existing service is already healthy but points at a different data directory, startup should fail instead of silently reusing it.
+- Before public distribution, keep personal data out of the source tree and switch the default profile to the packaged app's approved user-data directory.
 
 ## Application Icon
 

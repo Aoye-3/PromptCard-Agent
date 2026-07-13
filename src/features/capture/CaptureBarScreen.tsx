@@ -112,7 +112,7 @@ export const CaptureBarScreen = ({
             </div>
 
             <div className="flex min-h-[260px] items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50">
-              <div className="flex h-12 items-center gap-1 rounded-lg border border-gray-200 bg-white/95 px-2 shadow-[0_16px_42px_rgba(15,23,42,0.16)]">
+              <div className="flex h-12 items-center gap-1 rounded-lg border border-gray-200 bg-white/95 px-2 shadow-[0_6px_18px_rgba(15,23,42,0.08)]">
                 <PreviewButton label="拖动" icon={<GripHorizontal className="h-4 w-4" />} muted />
                 <PreviewButton label="截图" icon={<Camera className="h-4 w-4" />} active />
                 <PreviewButton label="录屏计划中" icon={<Video className="h-4 w-4" />} disabled />

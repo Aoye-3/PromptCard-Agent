@@ -20,7 +20,7 @@ if not exist node_modules (
 echo Starting Tauri desktop shell with editable source...
 echo Window:   PromptCard Manager Dev Shell
 echo Frontend: resolved automatically; see logs\dev-runtime.json after launch
-echo Data:     repository-local data folder
+echo Data:     protected profile under logs\desktop-profile by default
 echo.
 echo The launcher stays visible until the desktop window opens.
 echo Normal launches reuse the current shell; Rust or Tauri changes trigger one rebuild.

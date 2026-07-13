@@ -85,6 +85,13 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+html[data-window="capture-toolbar"],
+html[data-window="capture-toolbar"] body,
+html[data-window="capture-toolbar"] #root {
+  background: transparent !important;
+  overflow: hidden;
+}
+
 .app-startup-screen {
   position: fixed;
   inset: 0;

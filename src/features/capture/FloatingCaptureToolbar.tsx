@@ -29,8 +29,8 @@ export const FloatingCaptureToolbar = () => {
   }
 
   return (
-    <main className="flex h-screen w-screen items-center justify-center bg-transparent p-2" data-floating-capture-toolbar>
-      <div className="flex h-12 items-center gap-1 rounded-lg border border-gray-200 bg-white/95 px-2 shadow-[0_16px_42px_rgba(15,23,42,0.2)]">
+    <main className="flex h-screen w-screen items-center justify-center bg-transparent" data-floating-capture-toolbar>
+      <div className="flex h-12 items-center gap-1 rounded-lg border border-gray-200 bg-white/95 px-2 shadow-[0_6px_18px_rgba(15,23,42,0.08)]">
         <button
           type="button"
           className="flex h-9 w-8 cursor-grab items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700"

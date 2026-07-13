@@ -43,7 +43,7 @@ describe('MediaScreen', () => {
     expect(markup).toContain('data-app-side-nav')
     expect(markup).toContain('data-project-search-input')
     expect(markup).toContain('data-app-project-utilities')
-    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(7)
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(8)
     expect(markup).toContain('data-active="true"')
     expect(markup).not.toContain('grid-cols-5')
   })
@@ -70,7 +70,7 @@ describe('MediaScreen', () => {
 
     expect(markup).toContain('data-side-nav-item="捕获栏"')
     expect(markup).toContain('data-active="true"')
-    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(7)
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(8)
   })
 
   it('hides the primary navigation in project builder mode', () => {
@@ -125,7 +125,32 @@ describe('MediaScreen', () => {
     expect(markup).toContain('data-app-project-utilities')
     expect(markup).toContain('data-side-nav-item="回收站"')
     expect(markup).not.toContain('data-side-nav-item="模板库"')
-    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(7)
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(8)
+  })
+
+  it('renders Update as a top-level side navigation item', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <AppShell
+          activeTab="updates"
+          setActiveTab={() => undefined}
+          projectMode="home"
+          saveStatus="saved"
+          saveStatusText="Saved"
+          activeProject={null}
+          projectSearchTerm=""
+          onProjectSearchTermChange={() => undefined}
+          onCreateProject={() => undefined}
+          onShowProjectTrash={() => undefined}
+        >
+          <div />
+        </AppShell>
+      </I18nProvider>
+    )
+
+    expect(markup).toContain('data-side-nav-item="更新"')
+    expect(markup).toContain('data-active="true"')
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(8)
   })
 
   it('renders the media analysis dialog shell for a selected capture', () => {

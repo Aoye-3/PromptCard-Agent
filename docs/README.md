@@ -6,6 +6,7 @@ This is the single entry point for the maintained project documentation. Histori
 
 - [Project Overview](./00-project-overview.md)
 - [Architecture](./architecture/README.md)
+- [Data Storage And Update System](./architecture/data-storage-and-update-system.md)
 - [Architecture Decisions](./decisions/README.md)
 - [Tech Stack](./tech-stack/README.md)
 - [API](./api/README.md)
@@ -20,7 +21,7 @@ This is the single entry point for the maintained project documentation. Histori
 
 PromptCard-Manager is a local-first Vite, React, TypeScript application with an optional Python Agent Runtime under `agent-runtime/`. Project and Prompt Library durable data is owned by the local `promptcard-storage` service; the frontend only keeps runtime UI state and compatibility-only browser migration markers.
 
-The Tauri desktop dev shell opens the same Vite app in a native window while keeping the source tree editable. Self-use development defaults to repository-local data so the private GitHub repository can back up the complete `data/` directory. The optional desktop profile currently defaults to ignored repository-local `logs/desktop-profile`; see [Desktop Dev Shell](./operations/desktop-dev-shell.md) and [Local App Data Layout](./database/local-app-data-layout.md).
+The Tauri desktop dev shell opens the same Vite app in a native window while keeping the source tree editable. Desktop runtime data defaults to the protected ignored profile under `logs/desktop-profile`, while legacy repository `data/` remains a compatibility seed source only. See [Desktop Dev Shell](./operations/desktop-dev-shell.md), [Local App Data Layout](./database/local-app-data-layout.md), and [ADR-004](./decisions/ADR-004-protected-profile-data-boundary.md).
 
 ## Product Vision
 
@@ -59,5 +60,6 @@ When code changes, update the nearest documentation category in the same change.
 - Treat `workspaceContext.snapshot` as the per-request current workspace view. Do not use selected cards, current rows, or focused fields as the thread identity unless a future spec explicitly changes the product model.
 - Keep permission scopes narrow: `prompt-library-agent` is the only Prompt Library write proposal surface; `workspace-chatbot-agent` is for project-local card, storyboard, and three-stage edits.
 - Keep Free Canvas quick messages in the Prompt Library preset model (`category: "quick-message"`); see [ADR-001](./decisions/ADR-001-prompt-library-quick-messages.md).
+- Keep user projects, Prompt Library data, media assets, backups, logs, and Agent Runtime state inside the protected profile boundary; see [ADR-004](./decisions/ADR-004-protected-profile-data-boundary.md).
 - Any ToolUse expansion needs documentation of the visible UI affordance, runtime tool permission, and proposal or approval boundary.
 - Update this README plus the closest architecture/API/frontend/backend docs whenever Agent routing, storage, model configuration, or project workflows change.

@@ -27,3 +27,10 @@ Use numbered filenames:
 001-cross-platform-clipboard-asset-workbench.md
 002-next-plan-name.md
 ```
+
+## Active Plans
+
+- [001: Cross-Platform Clipboard Asset Workbench](./001-cross-platform-clipboard-asset-workbench.md)
+- [002: Floating Capture Video Asset MVP](./002-floating-capture-video-asset-mvp.md)
+- [003: Agent Positioning And Harness Engineering](./003-agent-positioning-and-harness-engineering.md)
+- [004: Update Module Integration](./004-update-module-integration.md)

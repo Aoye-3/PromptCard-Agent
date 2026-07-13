@@ -1,4 +1,12 @@
 [[permission]]
 identifier = "git-pull-source"
-description = "Allows the desktop dev shell to run git pull --ff-only in the source worktree."
-commands.allow = ["git_pull_source", "shutdown_local_services"]
+description = "Allows the desktop dev shell to inspect and apply guarded source updates in the current Git worktree."
+commands.allow = [
+  "git_pull_source",
+  "shutdown_local_services",
+  "update_get_config",
+  "update_save_config",
+  "update_check",
+  "update_preview",
+  "update_apply"
+]

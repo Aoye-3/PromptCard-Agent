@@ -2,7 +2,7 @@
 
 ## Overview
 
-PromptCard-Manager is a local-first prompt building application with an optional Agent Runtime. The frontend is a Vite, React, TypeScript, Tailwind, and Zustand app. Project and Prompt Library durable data is owned by the local `promptcard-storage` service, which writes SQLite records under `data/` and exposes revision-aware HTTP APIs.
+PromptCard-Manager is a local-first prompt building application with an optional Agent Runtime. The frontend is a Vite, React, TypeScript, Tailwind, and Zustand app. Project and Prompt Library durable data is owned by the local `promptcard-storage` service, which writes SQLite records under the protected desktop profile data root and exposes revision-aware HTTP APIs.
 
 The optional Agent Runtime is a Python service mounted under `agent-runtime/`. The frontend does not call it directly. Instead, Vite proxies runtime traffic through stable frontend routes so the browser can keep one origin during development. Local startup resolves concrete ports at launch time and records them in `logs/dev-runtime.json`; the architecture depends on route boundaries, not fixed port numbers.
 
@@ -21,11 +21,12 @@ flowchart TD
   RuntimeManifest["Dev Runtime Manifest<br/>logs/dev-runtime.json"]
   StorageService["promptcard-storage<br/>dynamic 127.0.0.1 port"]
   Vite["Vite Dev Server<br/>vite.config.ts<br/>vite/plugins"]
-  Database["SQLite<br/>data/promptcard.sqlite3"]
-  Assets["Image Assets<br/>data/assets/"]
+  Profile["Protected Desktop Profile<br/>logs/desktop-profile"]
+  Database["SQLite<br/>profile/data/promptcard.sqlite3"]
+  Assets["Media Assets<br/>profile/data/assets/"]
   RuntimeBoundary["PromptCard Runtime API<br/>/api/promptcard/runtime/*"]
   Runtime["DeerFlow Runtime Internals<br/>agent-runtime/backend<br/>dynamic 127.0.0.1 port"]
-  DeepSeekConfig["DeepSeek Model Config<br/>agent-runtime/.deer-flow/promptcard-model-config.json"]
+  DeepSeekConfig["DeepSeek Model Config<br/>profile/agent-runtime/.deer-flow/promptcard-model-config.json"]
   DeepSeek["DeepSeek<br/>https://api.deepseek.com"]
 
   User --> App
@@ -41,8 +42,9 @@ flowchart TD
   RuntimeManifest --> StorageService
   RuntimeManifest --> Runtime
   Vite --> StorageService
-  StorageService --> Database
-  StorageService --> Assets
+  StorageService --> Profile
+  Profile --> Database
+  Profile --> Assets
   Components --> Stores
   Stores --> RuntimeService["agent-runtime-service.ts"]
   RuntimeService --> Vite
@@ -59,7 +61,7 @@ flowchart TD
 - **Frontend domain helpers**: `src/domain/` owns pure project normalization, storyboard row/sequence operations, and three-stage field definitions/output builders.
 - **State stores**: `src/stores/` owns card workspace state, Prompt library presets, Agent runtime state, and related ordering/persistence helpers.
 - **Storage facade and adapters**: `src/utils/storage.ts` preserves the app-facing storage API; `src/storage/storage-service-client.ts` calls the local storage service for project and Prompt Library durable writes; project normalization is delegated to `src/domain/projects/`.
-- **Local storage service**: `promptcard_storage/` owns revision-aware project and Prompt Library persistence. `SqliteStore` is the CRUD and transaction facade; internal initializer, asset, and backup collaborators own one-time JSON migration, image files/diagnostics, and consistent snapshots.
+- **Local storage service**: `promptcard_storage/` owns revision-aware project and Prompt Library persistence under the active profile `data/` directory. `SqliteStore` is the CRUD and transaction facade; internal initializer, asset, and backup collaborators own one-time JSON migration, asset files/diagnostics, and consistent snapshots.
 - **Agent service layer**: `src/services/agent-runtime-service.ts` is a thin client for the PromptCard Runtime Boundary under `/agent-api/promptcard/runtime/*`, including message routing, catalog/status reads, and DeepSeek model configuration.
 - **Development middleware**: `vite/plugins/promptcard-dev-storage.ts` exposes local-only endpoints for Prompt library data, project data, and dev server shutdown; `vite.config.ts` wires those plugins into Vite.
 - **Agent Runtime**: `agent-runtime/` contains the PromptCard boundary router/adapter plus DeerFlow-derived internals, DeepSeek model configuration, public skills, ToolUse catalog, and scripts for local runtime testing.
@@ -93,7 +95,7 @@ The Agent Dashboard model service page calls the PromptCard Runtime Boundary ins
 - `PUT /agent-api/promptcard/runtime/model-config`
 - `POST /agent-api/promptcard/runtime/model-config/test`
 
-The backend persists the DeepSeek-only configuration to `agent-runtime/.deer-flow/promptcard-model-config.json`, masks API keys in responses, and merges saved values into the active runtime model settings. The browser never sends test requests directly to DeepSeek.
+The backend persists the DeepSeek-only configuration under `DEER_FLOW_HOME`, normally `logs/desktop-profile/agent-runtime/.deer-flow/promptcard-model-config.json`, masks API keys in responses, and merges saved values into the active runtime model settings. The browser never sends test requests directly to DeepSeek.
 
 ### Local Storage Service Flow
 
@@ -113,6 +115,7 @@ The local startup scripts provide one frontend origin and dynamic internal servi
 
 - `scripts/dev-port-runtime.ps1` chooses available local ports and writes `logs/dev-runtime.json`.
 - `scripts/start-dev-with-agent.ps1` exports `PROMPTCARD_FRONTEND_PORT`, `PROMPTCARD_AGENT_URL`, `PROMPTCARD_STORAGE_URL`, and `PROMPTCARD_STORAGE_HEALTH_URL`.
+- `scripts/start-desktop-dev-services.ps1` derives `PROMPTCARD_STORAGE_DATA_DIR`, `DEER_FLOW_HOME`, `PROMPTCARD_LOGS_DIR`, and `PROMPTCARD_LIBRARY_FILE` from the protected desktop profile.
 - `vite.config.ts` uses those variables for the frontend port and proxy targets.
 - `promptcard_storage.__main__` reads `PROMPTCARD_STORAGE_HOST` and `PROMPTCARD_STORAGE_PORT`.
 - the Agent Runtime reads `GATEWAY_HOST`, `GATEWAY_PORT`, `GATEWAY_CORS_ORIGINS`, and `PROMPTCARD_STORAGE_HEALTH_URL`.

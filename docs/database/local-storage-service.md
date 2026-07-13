@@ -1,6 +1,14 @@
 # Local Storage Service
 
-`promptcard_storage` is the sole durable owner of projects, Prompt Library presets, Trash state, image asset metadata, and Recent Capture metadata. Runtime records are stored in `data/promptcard.sqlite3`; asset bytes remain under `data/assets/`.
+`promptcard_storage` is the sole durable owner of projects, Prompt Library presets, Trash state, asset metadata, asset bytes, and Recent Capture metadata. Runtime records are stored under the configured `PROMPTCARD_STORAGE_DATA_DIR`, which the desktop dev shell derives from the protected profile by default:
+
+```text
+logs/desktop-profile/data/
+  promptcard.sqlite3
+  assets/
+```
+
+The repository-local `data/` fallback remains a compatibility path for direct service startup and legacy migration, not the preferred desktop runtime location.
 
 ## SQLite Contract
 
@@ -23,12 +31,12 @@ Legacy JSON remains unchanged after migration and is never written again. The Vi
 
 ## Maintenance
 
-Use the maintenance module while the storage service is stopped:
+Use the maintenance module while the storage service is stopped. Point `--data-dir` at the active profile data directory:
 
 ```powershell
-python -m promptcard_storage.maintenance --data-dir data backup backups/manual-backup
-python -m promptcard_storage.maintenance --data-dir data diagnose-assets
-python -m promptcard_storage.maintenance --data-dir data restore backups/manual-backup
+python -m promptcard_storage.maintenance --data-dir logs\desktop-profile\data backup logs\desktop-profile\backups\manual-backup
+python -m promptcard_storage.maintenance --data-dir logs\desktop-profile\data diagnose-assets
+python -m promptcard_storage.maintenance --data-dir logs\desktop-profile\data restore logs\desktop-profile\backups\manual-backup
 ```
 
 Backups use the SQLite backup API and include the database, assets, and a manifest. Restore validates schema and database integrity and creates a pre-restore snapshot when current storage exists.

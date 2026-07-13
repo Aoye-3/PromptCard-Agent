@@ -18,6 +18,7 @@ $ViteFrontendErrLog = Join-Path $LogsDir "vite-frontend.err.log"
 $TauriDevOutLog = Join-Path $LogsDir "tauri-dev.out.log"
 $TauriDevErrLog = Join-Path $LogsDir "tauri-dev.err.log"
 $TauriDevConfigPath = Join-Path $LogsDir "tauri.dev-runtime.conf.json"
+$DesktopShellBuildStampPath = Join-Path $LogsDir "desktop-shell-build.stamp.json"
 $DesktopProcessName = "promptcard-manager-dev-shell"
 $DesktopMainWindowTitle = "PromptCard Manager Dev Shell"
 $DesktopMinMainWindowWidth = 400
@@ -143,14 +144,58 @@ function Test-DesktopShellCurrent {
   if ((!$IgnoreForceRebuild -and $ForceRebuild) -or !(Test-Path -LiteralPath $DesktopShellExecutable)) { return $false }
 
   $executableTime = (Get-Item -LiteralPath $DesktopShellExecutable).LastWriteTimeUtc
-  $inputs = @(
+  $inputs = Get-DesktopShellSourceFiles
+  if ($inputs | Where-Object { $_.LastWriteTimeUtc -gt $executableTime } | Select-Object -First 1) { return $false }
+  if (!(Test-Path -LiteralPath $DesktopShellBuildStampPath)) { return $false }
+
+  try {
+    $stamp = Get-Content -LiteralPath $DesktopShellBuildStampPath -Raw | ConvertFrom-Json
+    return $stamp.sourceFingerprint -eq (Get-DesktopShellSourceFingerprint)
+  }
+  catch {
+    return $false
+  }
+}
+
+function Get-DesktopShellSourceFiles {
+  @(
     Get-ChildItem -LiteralPath (Join-Path $RepoRoot "src-tauri\src") -Recurse -File
     Get-Item -LiteralPath (Join-Path $RepoRoot "src-tauri\tauri.conf.json")
     Get-Item -LiteralPath (Join-Path $RepoRoot "src-tauri\capabilities\default.json")
+    Get-Item -LiteralPath (Join-Path $RepoRoot "src-tauri\capabilities\capture-toolbar.json")
     Get-Item -LiteralPath (Join-Path $RepoRoot "src-tauri\Cargo.toml")
     Get-Item -LiteralPath (Join-Path $RepoRoot "src-tauri\build.rs")
   )
-  return !($inputs | Where-Object { $_.LastWriteTimeUtc -gt $executableTime } | Select-Object -First 1)
+}
+
+function Get-DesktopShellSourceFingerprint {
+  $hashInput = Get-DesktopShellSourceFiles |
+    Sort-Object FullName |
+    ForEach-Object {
+      $fullPath = [System.IO.Path]::GetFullPath([string]$_.FullName)
+      $relativePath = $fullPath.Substring(([string]$RepoRoot).Length).TrimStart("\", "/")
+      $fileHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+      "$relativePath=$fileHash"
+    }
+
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes(($hashInput -join "`n"))
+  $sha256 = [System.Security.Cryptography.SHA256]::Create()
+  try {
+    return [System.BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace("-", "").ToLowerInvariant()
+  }
+  finally {
+    $sha256.Dispose()
+  }
+}
+
+function Write-DesktopShellBuildStamp {
+  New-Item -ItemType Directory -Force -Path (Split-Path $DesktopShellBuildStampPath -Parent) | Out-Null
+  $stamp = [pscustomobject]@{
+    sourceFingerprint = Get-DesktopShellSourceFingerprint
+    executablePath = [string]$DesktopShellExecutable
+    createdAt = (Get-Date).ToUniversalTime().ToString("o")
+  }
+  [System.IO.File]::WriteAllText($DesktopShellBuildStampPath, ($stamp | ConvertTo-Json -Depth 4), [System.Text.UTF8Encoding]::new($false))
 }
 
 function Start-DesktopShellExecutable {
@@ -409,6 +454,7 @@ try {
     -StdoutPath $TauriDevOutLog `
     -StderrPath $TauriDevErrLog
   $process = Wait-DesktopShellProcess $startedAfter
+  Write-DesktopShellBuildStamp
   Write-Host "PromptCard Manager Dev Shell opened (PID $($process.ProcessId))."
 }
 finally {

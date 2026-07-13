@@ -1,44 +1,76 @@
 # Local App Data Layout
 
-The current self-use desktop dev shell defaults to repository-local data so the complete `data/` directory can be backed up through the private GitHub repository. This currently includes active data, archives, and trash files.
-
-This alternate desktop profile is optional. Use it only when `PROMPTCARD_DESKTOP_USE_APPDATA_PROFILE=1` is set. The default optional profile root stays inside ignored repository-local `logs/` so development state remains on the current workspace drive; set `PROMPTCARD_DESKTOP_PROFILE_ROOT` explicitly for distribution experiments.
-
-## Desktop Dev Profile
-
-Optional profile root:
+PromptCard separates editable source files from protected user data. The desktop dev shell now defaults runtime state to an ignored profile directory under the current repository:
 
 ```text
 logs/desktop-profile
 ```
 
+This keeps all generated state inside the opened workspace while giving Git source updates a clear boundary. See [ADR-004](../decisions/ADR-004-protected-profile-data-boundary.md).
+
+## Protected Desktop Profile
+
 Directory contract:
 
 ```text
-dev-profile/
+logs/desktop-profile/
   data/
     promptcard.sqlite3
+    promptcard.sqlite3-wal
+    promptcard.sqlite3-shm
     assets/
+  backups/
+  logs/
   agent-runtime/
     .deer-flow/
       data/
       promptcard-model-config.json
-  logs/
-  backups/
   config/
     desktop-shell.json
+    update-source.json
 ```
+
+The profile root can still be overridden with `PROMPTCARD_DESKTOP_PROFILE_ROOT`, but it should stay inside the current workspace unless a packaged distribution explicitly owns the migration.
+
+## Environment Contract
+
+`scripts/start-desktop-dev-services.ps1` owns the profile environment:
+
+- `PROMPTCARD_DESKTOP_PROFILE_ROOT`: selected profile root.
+- `PROMPTCARD_STORAGE_DATA_DIR`: profile `data/`.
+- `PROMPTCARD_LOGS_DIR`: profile `logs/`.
+- `DEER_FLOW_HOME`: profile `agent-runtime/.deer-flow/`.
+- `PROMPTCARD_LIBRARY_FILE`: profile `data/prompt-library-presets.json`.
+
+The storage service must treat `PROMPTCARD_STORAGE_DATA_DIR` as the durable data root. Its repository-local fallback exists for compatibility only.
+
+## Compatibility Seeding
+
+Legacy repository paths remain read-only migration sources:
+
+```text
+data/
+agent-runtime/.deer-flow/
+```
+
+On first protected-profile startup, missing profile files can be copied from those legacy locations. The copy is conservative:
+
+- existing profile files are not overwritten;
+- legacy repository files are not deleted;
+- SQLite, WAL files, asset files, and Agent Runtime state stay together inside the profile after seeding.
 
 ## File Ownership
 
-- `data/promptcard.sqlite3`: active and deleted projects, Prompt Library presets, revisions, ordering, asset metadata, and migration records.
+- `data/promptcard.sqlite3`: active and deleted projects, Prompt Library presets, revisions, ordering, asset metadata, Recent Capture metadata, and migration records.
+- `data/assets/`: uploaded PNG, JPEG, WebP, MP4, and WebM assets referenced by `assetId`.
 - Legacy JSON files are preserved as read-only migration sources and are no longer runtime write targets.
-- `data/assets/`: uploaded PNG, JPEG, and WebP source images referenced by free-canvas `assetId` values.
-- `agent-runtime/.deer-flow/data/`: Agent Runtime SQLite state.
-- `agent-runtime/.deer-flow/promptcard-model-config.json`: local Agent model configuration.
+- `agent-runtime/.deer-flow/`: local Agent Runtime state, memory, thread data, uploads, outputs, and model config.
 - `logs/`: desktop-launched storage and Agent Runtime logs.
 - `backups/`: automatic JSON migration backups and SQLite-consistent manual or pre-restore snapshots.
 - `config/desktop-shell.json`: desktop shell profile metadata.
+- `config/update-source.json`: sidebar Update module repository URL, remote name, branch, and last check metadata.
+
+Browser storage remains outside this filesystem profile. `localforage` still owns UI-only cache, prompt history, templates, settings, and legacy migration flags; `localStorage` still owns language, Agent sessions, and the older AI settings record.
 
 ## Update Boundary
 
@@ -47,36 +79,38 @@ Source updates affect the Git worktree:
 ```text
 src/
 promptcard_storage/
-agent-runtime/
+agent-runtime/backend/
+agent-runtime/scripts/
+agent-runtime/docker/
+agent-runtime/skills/public/
 scripts/
 docs/
 src-tauri/
+vite/
+package.json
+package-lock.json
 ```
 
-SQLite, WAL files, assets, and generated backups are excluded from Git. Back up the database and assets through the storage maintenance command rather than copying a live database or relying on source control.
+Profile data is not part of a source update. The sidebar Update module stores its source configuration in the profile, previews remote changes with Git, blocks protected or manual-review paths, creates a Profile backup, then applies source changes only with `git merge --ff-only FETCH_HEAD`.
 
-## Distribution Boundary
+`agent-runtime/config.yaml` is not automatically applied yet. It remains a manual-review file until runtime configuration is split into a source template and a Profile-owned local override.
 
-The repository-local full-data backup policy is for private self-use only. Before distributing the application:
-
-1. Remove personal project, library, archive, and trash data from the source tree.
-2. Restore an ignore policy that prevents user data from entering release commits.
-3. Make the AppData profile the default runtime data location.
-4. Verify packaged builds do not contain local Agent Runtime state or credentials.
+The legacy desktop `git_pull_source` action remains only for compatibility with old desktop builds. Product UI should use the guarded Update screen.
 
 ## Schema Rule
 
-The SQLite store uses schema version `1`. Future schema changes should:
+The SQLite store currently uses schema version `2`. Future schema changes should:
 
 1. Detect the existing schema version at startup.
-2. Create a consistent backup under `backups/`.
+2. Create a consistent backup under profile `backups/`.
 3. Apply the migration in a transaction.
 4. Record the new version in `schema_migrations` only after verification succeeds.
 
-## Image Assets
+## Distribution Boundary
 
-- `data/assets/`: uploaded PNG, JPEG, and WebP source images used by free-canvas image nodes.
-- Asset filenames are generated by the storage service and are referenced from projects through `assetId`.
-- Cropped image nodes do not create additional image files. They reuse the source asset and persist a normalized crop rectangle.
-- Assets are not automatically deleted when a node or project is moved to Trash, so project restoration cannot produce broken image references.
-- `data/assets/` is local user data and is excluded from Git.
+The repository-local protected profile is for editable desktop development. Before distributing the application:
+
+1. Move the default profile to the packaged app's approved user-data directory.
+2. Keep user data outside release commits and source archives.
+3. Verify packaged builds do not contain local Agent Runtime state or credentials.
+4. Preserve the same profile contract so storage and update code do not need a second data model.

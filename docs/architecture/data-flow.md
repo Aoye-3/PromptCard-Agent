@@ -6,7 +6,7 @@ Project data is represented by `IPromptProject`. Card projects mainly use `pages
 
 Three-stage projects use a page-based form model under `threeStage.pages`. Each page contains ordered independent `form` items for character, storyboard, video-prompt, and optional object boards. The legacy top-level `threeStage.character`, `threeStage.storyboard`, `threeStage.videoPrompt`, `selectedStage`, and `selectedFieldId` fields remain compatibility mirrors and are synchronized from the selected page/form during normalization and UI updates.
 
-Loading now goes through the local `promptcard_storage` service. Active and Trash project rows live in `data/promptcard.sqlite3`; the old project JSON files are read-only migration sources. Browser project cache is imported once through an idempotent migration endpoint and is not used as an ongoing project source.
+Loading now goes through the local `promptcard_storage` service. Active and Trash project rows live in the configured profile database, normally `logs/desktop-profile/data/promptcard.sqlite3`; the old repository `data/` files are read-only compatibility seeds. Browser project cache is imported once through an idempotent migration endpoint and is not used as an ongoing project source.
 
 Project normalization is pure domain logic in `src/domain/projects/project-normalization.ts`. It is responsible for defaulting legacy card projects, migrating legacy flat storyboard rows into the sequence model, creating missing three-stage payloads, repairing known display-text mojibake, and sorting by recent activity. UI components and stores should call the storage facade instead of duplicating this logic.
 
@@ -16,7 +16,7 @@ Three-stage page normalization and mutations are pure helpers in `src/domain/thr
 
 Prompt Library presets use `IPreset`. UI and Agent approval flows should call preset store methods instead of writing storage directly.
 
-The local storage service owns Prompt Library rows in `data/promptcard.sqlite3`. The old Prompt JSON files are read-only migration sources. A completely empty database is seeded by the service from the bundled preset JSON, and the frontend no longer seeds durable presets.
+The local storage service owns Prompt Library rows in the profile SQLite database. The old Prompt JSON files are read-only migration sources. A completely empty database is seeded by the service from the bundled preset JSON, and the frontend no longer seeds durable presets.
 
 Frontend project and preset storage calls use `/storage-api/*`, proxied to the storage service. The older Vite dev JSON endpoints are read-only compatibility helpers; their write methods return `410`.
 
@@ -28,7 +28,13 @@ The main app listens for the event and opens a full-screen screenshot selection 
 
 After creation, the overlay dispatches `recent-captures:changed` so the Media screen reloads its capture list. The post-capture action bar can copy the image, save it locally, dismiss the overlay, or place the same `assetId` on the current free canvas when the active project context supports image nodes. Canvas placement references the existing asset file; it does not duplicate bytes.
 
-Recent Capture metadata is stored in SQLite beside projects and presets. Screenshot assets remain under `data/assets/`, and asset diagnostics treats Recent Capture `assetId` values as live references.
+Recent Capture metadata is stored in SQLite beside projects and presets. Screenshot assets remain under the profile `data/assets/`, and asset diagnostics treats Recent Capture `assetId` values as live references.
+
+## Protected Profile Boundary
+
+The desktop dev shell derives storage paths from `PROMPTCARD_DESKTOP_PROFILE_ROOT`, defaulting to `logs/desktop-profile`. Storage, Agent Runtime state, logs, backups, and desktop shell metadata are therefore user data even though the default profile is still inside the current workspace.
+
+Source updates must treat the profile as out of scope. The sidebar Update module checks source revisions, previews changed source paths, creates a Profile backup, and applies source changes with a fast-forward Git merge without editing profile data. The legacy `git_pull_source` command remains only for compatibility with old desktop builds.
 
 ## Agent Collaboration Data
 

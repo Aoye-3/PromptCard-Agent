@@ -12,5 +12,7 @@ describe('FloatingCaptureToolbar', () => {
     expect(markup).toContain('disabled=""')
     expect(markup).toContain('aria-label="Close toolbar"')
     expect(markup).toContain('aria-label="Drag capture toolbar"')
+    expect(markup).toContain('shadow-[0_6px_18px_rgba(15,23,42,0.08)]')
+    expect(markup).not.toContain('p-2')
   })
 })

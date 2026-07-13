@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Bot, Camera, Folder, Grid2X2, Image, Plus, Search, Smile, Trash2, Users } from 'lucide-react'
+import { Bot, Camera, Folder, Grid2X2, Image, Plus, RefreshCw, Search, Smile, Trash2, Users } from 'lucide-react'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 import type { MainTab, ProjectMode, SaveStatus } from '@/features/app/app-types'
 import { useI18n } from '@/i18n'
@@ -44,6 +44,7 @@ export const AppShell = ({
     { tab: 'capture', label: '捕获栏', icon: <Camera className="h-5 w-5" /> },
     { tab: 'library', label: 'Prompt库', icon: <Users className="h-5 w-5" /> },
     { tab: 'agents', label: 'Agent面板', icon: <Bot className="h-5 w-5" /> },
+    { tab: 'updates', label: '更新', icon: <RefreshCw className="h-5 w-5" /> },
     { tab: 'me', label: '我的', icon: <Smile className="h-5 w-5" /> }
   ]
 

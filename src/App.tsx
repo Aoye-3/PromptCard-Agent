@@ -8,6 +8,7 @@ import { CardBuilderScreen } from './components/app/CardBuilderScreen'
 import { StoryboardBuilderScreen } from './components/app/StoryboardBuilderScreen'
 import FreeCanvasBuilderScreen from './components/canvas/FreeCanvasBuilderScreen'
 import { MeScreen } from './components/app/MeScreen'
+import { UpdateScreen } from './components/app/UpdateScreen'
 import { TemplateLibraryScreen } from './components/app/TemplateLibraryScreen'
 import { MediaScreen } from './features/media/MediaScreen'
 import { CaptureBarScreen } from './features/capture/CaptureBarScreen'
@@ -1122,6 +1123,8 @@ function App() {
     <PromptLibrary embedded />
   ) : activeTab === 'agents' ? (
     <AgentDashboard />
+  ) : activeTab === 'updates' ? (
+    <UpdateScreen />
   ) : activeTab === 'me' ? (
     <MeScreen
       language={language}

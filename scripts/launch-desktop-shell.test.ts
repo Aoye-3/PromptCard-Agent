@@ -15,6 +15,19 @@ describe('launch-desktop-shell.ps1', () => {
     expect(script).toContain('$DesktopShellExecutable')
   })
 
+  test('requires a source fingerprint stamp before reusing the debug executable', async () => {
+    const script = await readFile(scriptPath, 'utf8')
+
+    expect(script).toContain('$DesktopShellBuildStampPath')
+    expect(script).toContain('Get-DesktopShellSourceFingerprint')
+    expect(script).toContain('Get-DesktopShellSourceFiles')
+    expect(script).toContain('sourceFingerprint')
+    expect(script).toContain('Write-DesktopShellBuildStamp')
+    expect(script).toContain('src-tauri\\tauri.conf.json')
+    expect(script).toContain('src-tauri\\capabilities\\default.json')
+    expect(script).toContain('src-tauri\\capabilities\\capture-toolbar.json')
+  })
+
   test('serializes desktop launches to prevent duplicate toolbar windows', async () => {
     const script = await readFile(scriptPath, 'utf8')
 

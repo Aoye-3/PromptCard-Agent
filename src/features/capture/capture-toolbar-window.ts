@@ -2,6 +2,25 @@ export type CaptureToolbarStatus = 'closed' | 'opening' | 'running' | 'closing' 
 
 const CAPTURE_TOOLBAR_LABEL = 'capture-toolbar'
 const CAPTURE_TOOLBAR_URL = '/?window=capture-toolbar'
+export const CAPTURE_TOOLBAR_WINDOW_OPTIONS = {
+  title: 'PromptCard Capture',
+  url: CAPTURE_TOOLBAR_URL,
+  width: 228,
+  height: 64,
+  minWidth: 228,
+  minHeight: 64,
+  maxWidth: 228,
+  maxHeight: 64,
+  dragDropEnabled: false,
+  resizable: false,
+  fullscreen: false,
+  decorations: false,
+  transparent: true,
+  shadow: false,
+  backgroundColor: [0, 0, 0, 0] as [number, number, number, number],
+  alwaysOnTop: true,
+  skipTaskbar: true
+}
 
 const isDesktopShell = () => '__TAURI_INTERNALS__' in window
 
@@ -18,22 +37,7 @@ export const openCaptureToolbarWindow = async () => {
     return
   }
 
-  const toolbar = new WebviewWindow(CAPTURE_TOOLBAR_LABEL, {
-    title: 'PromptCard Capture',
-    url: CAPTURE_TOOLBAR_URL,
-    width: 228,
-    height: 64,
-    minWidth: 228,
-    minHeight: 64,
-    maxWidth: 228,
-    maxHeight: 64,
-    dragDropEnabled: false,
-    resizable: false,
-    fullscreen: false,
-    decorations: false,
-    alwaysOnTop: true,
-    skipTaskbar: true
-  })
+  const toolbar = new WebviewWindow(CAPTURE_TOOLBAR_LABEL, CAPTURE_TOOLBAR_WINDOW_OPTIONS)
 
   await new Promise<void>((resolve, reject) => {
     void toolbar.once('tauri://created', () => resolve())

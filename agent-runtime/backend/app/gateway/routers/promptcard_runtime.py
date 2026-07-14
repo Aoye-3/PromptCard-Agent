@@ -38,17 +38,17 @@ async def catalog(request: Request) -> dict[str, Any]:
     return await runtime_service.catalog(request)
 
 
-@router.get("/model-config")
+@router.get("/model-config", deprecated=True)
 async def model_config(request: Request) -> dict[str, Any]:
     return await runtime_service.get_model_config(request)
 
 
-@router.put("/model-config")
+@router.put("/model-config", deprecated=True)
 async def save_model_config(body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
     return await runtime_service.save_model_config(body, request)
 
 
-@router.post("/model-config/test")
+@router.post("/model-config/test", deprecated=True)
 async def test_model_config(body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
     return await runtime_service.test_model_config(body, request)
 

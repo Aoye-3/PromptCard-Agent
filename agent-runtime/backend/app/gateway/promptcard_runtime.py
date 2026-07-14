@@ -13,6 +13,14 @@ from fastapi import HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.gateway.deps import get_local_provider, get_thread_store
+from app.gateway.model_management.connection_store import (
+    CREDENTIAL_MASK,
+    ModelManagementError,
+    _atomic_write_json,
+    get_connection_store,
+)
+from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
+from app.gateway.model_management.migration import migrate_legacy_model_config
 from app.gateway.routers import agents, auth, models, skills, thread_runs, threads, tools
 from deerflow.config.app_config import get_app_config
 from deerflow.config.model_config import ModelConfig
@@ -268,29 +276,56 @@ def read_model_config(config: Any) -> dict[str, Any]:
         "temperature": float(getattr(model, "temperature", 0.3) or 0.3),
         "maxTokens": int(getattr(model, "max_tokens", 4096) or 4096),
     }
-    path = model_config_path()
-    if path.exists():
+    stored = _read_legacy_runtime_options()
+    base.update({key: value for key, value in stored.items() if key in base and key != "apiKey"})
+    store = _model_connection_store()
+    assignment = store.assignment("chat.primary")
+    if assignment is not None:
         try:
-            stored = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(stored, dict):
-                base.update({key: value for key, value in stored.items() if key in base})
-        except (OSError, json.JSONDecodeError):
-            pass
+            connection = store.get_connection_config(assignment["connectionId"])
+        except ModelManagementError:
+            connection = None
+        if connection is not None and connection.get("enabled", True):
+            base.update(
+                {
+                    "enabled": bool(connection.get("enabled", True)),
+                    "apiBase": str(connection["apiBase"]),
+                    "apiKey": str(store.credential_store.get(connection["id"]) or ""),
+                    "modelName": str(assignment["modelId"]),
+                }
+            )
     return base
 
 
 def persist_model_config(data: dict[str, Any]) -> None:
-    path = model_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "enabled": bool(data.get("enabled", True)),
         "apiBase": str(data.get("apiBase") or "https://api.deepseek.com").rstrip("/"),
-        "apiKey": str(data.get("apiKey") or ""),
         "modelName": str(data.get("modelName") or "deepseek-chat"),
         "temperature": float(data.get("temperature", 0.3)),
         "maxTokens": int(data.get("maxTokens", 4096)),
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    store = _model_connection_store()
+    assignment = store.assignment("chat.primary")
+    request = ConnectionRequest(
+        providerId="deepseek",
+        displayName="DeepSeek",
+        apiBase=payload["apiBase"],
+        enabled=payload["enabled"],
+        credential=str(data.get("apiKey") or ""),
+    )
+    if assignment is None:
+        connection = store.create_connection(request)
+    else:
+        connection = store.update_connection(assignment["connectionId"], request)
+    store.set_assignment(
+        "chat.primary",
+        AssignmentRequest(
+            connectionId=connection["id"],
+            modelId=payload["modelName"],
+        ),
+    )
+    _atomic_write_json(model_config_path(), payload)
 
 
 def apply_model_config_to_runtime(config: Any, data: dict[str, Any] | None = None) -> None:
@@ -338,7 +373,7 @@ def model_config_response(config: Any) -> dict[str, Any]:
         "enabled": bool(data.get("enabled", True)),
         "apiBase": str(data.get("apiBase") or "https://api.deepseek.com").rstrip("/"),
         "apiKeyConfigured": bool(api_key),
-        "apiKeyPreview": _mask_api_key(api_key) if api_key else None,
+        "apiKeyPreview": CREDENTIAL_MASK if api_key else None,
         "modelName": model_name,
         "temperature": float(data.get("temperature", 0.3)),
         "maxTokens": int(data.get("maxTokens", 4096)),
@@ -356,10 +391,21 @@ def _first_model(config: Any) -> Any | None:
     return models_list[0] if models_list else None
 
 
-def _mask_api_key(api_key: str) -> str:
-    if len(api_key) <= 8:
-        return "****"
-    return f"{api_key[:3]}...{api_key[-4:]}"
+def _model_connection_store():
+    store = get_connection_store()
+    migrate_legacy_model_config(model_config_path(), store)
+    return store
+
+
+def _read_legacy_runtime_options() -> dict[str, Any]:
+    path = model_config_path()
+    if not path.exists():
+        return {}
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return stored if isinstance(stored, dict) else {}
 
 
 def build_runtime_prompt(
@@ -448,7 +494,14 @@ def parse_agent_workspace_proposals(
     seen: set[str] = set()
     valid_ids = _workspace_ids(workspace_context)
     candidates = [match.group(1) for match in re.finditer(r"```json\s*([\s\S]*?)```", text, re.IGNORECASE)]
-    candidates.extend(match.group(1) for match in re.finditer(r'(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|three_stage_field_update)"[\s\S]*\})', text, re.IGNORECASE))
+    candidates.extend(
+        match.group(1)
+        for match in re.finditer(
+            r'(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|three_stage_field_update)"[\s\S]*\})',
+            text,
+            re.IGNORECASE,
+        )
+    )
 
     for candidate in candidates:
         try:

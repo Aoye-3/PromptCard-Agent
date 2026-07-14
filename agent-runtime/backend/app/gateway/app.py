@@ -20,6 +20,7 @@ from app.gateway.routers import (
     feedback,
     mcp,
     memory,
+    model_management,
     models,
     promptcard_runtime,
     runs,
@@ -344,6 +345,7 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
 
     # PromptCard-owned runtime boundary API is mounted at /api/promptcard/runtime
     app.include_router(promptcard_runtime.router)
+    app.include_router(model_management.router)
 
     # Artifacts API is mounted at /api/threads/{thread_id}/artifacts
     app.include_router(artifacts.router)

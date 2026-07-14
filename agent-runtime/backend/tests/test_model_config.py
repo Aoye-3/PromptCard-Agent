@@ -6,14 +6,44 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from app.gateway.model_management.connection_store import ModelConnectionStore
+from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
+from app.gateway.promptcard_runtime import (
+    PromptCardRuntimeMessageRequest,
+    PromptCardRuntimeService,
+    validate_thread_metadata,
+)
 from app.gateway.routers import promptcard_runtime
-from app.gateway.promptcard_runtime import PromptCardRuntimeMessageRequest, PromptCardRuntimeService, validate_thread_metadata
 
 
-def test_model_config_get_masks_api_key(tmp_path, monkeypatch):
+class MemoryCredentialStore:
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def set(self, connection_id: str, secret: str) -> None:
+        self.values[connection_id] = secret
+
+    def get(self, connection_id: str) -> str | None:
+        return self.values.get(connection_id)
+
+    def delete(self, connection_id: str) -> None:
+        self.values.pop(connection_id, None)
+
+
+@pytest.fixture
+def model_store(tmp_path, monkeypatch):
     monkeypatch.setenv("DEER_FLOW_HOME", str(tmp_path))
+    credentials = MemoryCredentialStore()
+    store = ModelConnectionStore(tmp_path / "model-connections.json", credentials)
+    monkeypatch.setattr("app.gateway.promptcard_runtime.get_connection_store", lambda: store)
+    return store, credentials
+
+
+def test_model_config_get_masks_api_key(model_store):
+    store, _ = model_store
+    _seed_chat_assignment(store, "sk-secret1234567890")
     app = FastAPI()
-    app.state.config = _config(api_key="sk-secret1234567890")
+    app.state.config = _config(api_key="")
     app.include_router(promptcard_runtime.router)
 
     with TestClient(app) as client:
@@ -22,12 +52,12 @@ def test_model_config_get_masks_api_key(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     assert payload["apiKeyConfigured"] is True
-    assert payload["apiKeyPreview"].startswith("sk-")
+    assert payload["apiKeyPreview"] == "********"
     assert "secret1234567890" not in str(payload)
 
 
-def test_model_config_put_persists_and_updates_runtime_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("DEER_FLOW_HOME", str(tmp_path))
+def test_model_config_put_persists_and_updates_runtime_config(tmp_path, model_store):
+    store, credentials = model_store
     app = FastAPI()
     app.state.config = _config(api_key="")
     app.include_router(promptcard_runtime.router)
@@ -49,11 +79,15 @@ def test_model_config_put_persists_and_updates_runtime_config(tmp_path, monkeypa
     assert response.json()["apiKeyConfigured"] is True
     assert app.state.config.models[0].api_key == "sk-newsecret1234567890"
     assert app.state.config.models[0].temperature == 0.2
+    assignment = store.assignment("chat.primary")
+    assert assignment is not None
+    assert credentials.get(assignment["connectionId"]) == "sk-newsecret1234567890"
+    assert "sk-newsecret1234567890" not in store.path.read_text(encoding="utf-8")
     assert (tmp_path / "promptcard-model-config.json").exists()
+    assert "apiKey" not in (tmp_path / "promptcard-model-config.json").read_text(encoding="utf-8")
 
 
-def test_model_config_test_reports_missing_api_key(tmp_path, monkeypatch):
-    monkeypatch.setenv("DEER_FLOW_HOME", str(tmp_path))
+def test_model_config_test_reports_missing_api_key(model_store):
     app = FastAPI()
     app.state.config = _config(api_key="")
     app.include_router(promptcard_runtime.router)
@@ -66,9 +100,11 @@ def test_model_config_test_reports_missing_api_key(tmp_path, monkeypatch):
     assert "API Key" in response.json()["message"]
 
 
-def test_send_message_uses_configured_default_model(monkeypatch):
+def test_send_message_uses_configured_default_model(monkeypatch, model_store):
+    store, _ = model_store
+    _seed_chat_assignment(store, "sk-secret")
     service = PromptCardRuntimeService()
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=_config(name="deepseek-v32", api_key="sk-secret"))))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=_config(api_key=""))))
 
     async def fake_create_thread(body, request):
         assert body.metadata == {
@@ -83,7 +119,7 @@ def test_send_message_uses_configured_default_model(monkeypatch):
     async def fake_wait_run(*, thread_id, body, request):
         assert thread_id == "thread-1"
         assert request is not None
-        assert body.context["model_name"] == "deepseek-v32"
+        assert body.context["model_name"] == "deepseek-chat"
         return {"messages": [{"role": "assistant", "content": "ok"}]}
 
     monkeypatch.setattr("app.gateway.promptcard_runtime.threads.create_thread", fake_create_thread)
@@ -193,4 +229,20 @@ def _config(name: str = "deepseek-chat", api_key: str = "sk-secret"):
         tools=[],
         token_usage=SimpleNamespace(enabled=True),
         get_model_config=lambda model_name: model if model_name == name else None,
+    )
+
+
+def _seed_chat_assignment(store: ModelConnectionStore, credential: str) -> None:
+    connection = store.create_connection(
+        ConnectionRequest(
+            providerId="deepseek",
+            displayName="DeepSeek",
+            apiBase="https://api.deepseek.com",
+            enabled=True,
+            credential=credential,
+        )
+    )
+    store.set_assignment(
+        "chat.primary",
+        AssignmentRequest(connectionId=connection["id"], modelId="deepseek-chat"),
     )

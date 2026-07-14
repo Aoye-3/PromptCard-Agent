@@ -45,6 +45,18 @@ describe('image generation domain', () => {
     expect(validationCodes({ ...validIntent, referenceImages })).toEqual(['too_many_references'])
   })
 
+  test('accepts exactly ten reference images', () => {
+    const referenceImages = Array.from({ length: 10 }, (_, index) => ({ id: `reference-${index}` }))
+
+    expect(validationCodes({ ...validIntent, referenceImages })).toEqual([])
+  })
+
+  test('rejects an unsupported generation mode', () => {
+    const intent = { ...validIntent, mode: 'unsupported' } as ImageGenerationIntent
+
+    expect(validationCodes(intent)).toEqual(['unsupported_mode'])
+  })
+
   test('rejects an unsupported resolution', () => {
     expect(validationCodes({ ...validIntent, resolution: '4K' })).toEqual(['unsupported_resolution'])
   })

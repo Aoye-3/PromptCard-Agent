@@ -75,4 +75,12 @@ describe('model management domain', () => {
       modelId: imageModel.id
     }, [chatModel, imageModel])).toEqual([])
   })
+
+  test('rejects an assignment when the catalog model is missing', () => {
+    expect(validateModelAssignment({
+      slot: 'image.primary',
+      connectionId: connection.id,
+      modelId: 'missing-model'
+    }, [chatModel, imageModel])).toEqual([{ code: 'model_not_found' }])
+  })
 })

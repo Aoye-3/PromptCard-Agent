@@ -52,7 +52,7 @@ describe('image generation domain', () => {
   })
 
   test('rejects an unsupported generation mode', () => {
-    const intent = { ...validIntent, mode: 'unsupported' } as ImageGenerationIntent
+    const intent = { ...validIntent, mode: 'unsupported' } as unknown as ImageGenerationIntent
 
     expect(validationCodes(intent)).toEqual(['unsupported_mode'])
   })

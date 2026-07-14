@@ -16,6 +16,7 @@ from app.gateway.deps import get_local_provider, get_thread_store
 from app.gateway.model_management.connection_store import (
     CREDENTIAL_MASK,
     ModelManagementError,
+    _atomic_write_bytes,
     _atomic_write_json,
     get_connection_store,
     validate_provider_endpoint,
@@ -314,6 +315,18 @@ def persist_model_config(data: dict[str, Any]) -> None:
         "maxTokens": int(data.get("maxTokens", 4096)),
     }
     store = _model_connection_store()
+    state_before = store.state_bytes()
+    assignment_before = store.assignment("chat.primary")
+    connection_id_before = (
+        assignment_before["connectionId"] if assignment_before is not None else None
+    )
+    credential_before = (
+        store.credential_store.get(connection_id_before)
+        if connection_id_before is not None
+        else None
+    )
+    options_path = model_config_path()
+    options_before = options_path.read_bytes() if options_path.exists() else None
     request = ConnectionRequest(
         providerId="deepseek",
         displayName="DeepSeek",
@@ -321,8 +334,28 @@ def persist_model_config(data: dict[str, Any]) -> None:
         enabled=payload["enabled"],
         credential=str(data.get("apiKey") or ""),
     )
-    store.save_legacy_chat(request, payload["modelName"])
-    _atomic_write_json(model_config_path(), payload)
+    saved_connection = store.save_legacy_chat(request, payload["modelName"])
+    try:
+        _atomic_write_json(options_path, payload)
+    except Exception:
+        try:
+            store.restore_state_bytes(state_before)
+            if options_before is None:
+                if options_path.exists():
+                    options_path.unlink()
+            else:
+                _atomic_write_bytes(options_path, options_before)
+            saved_connection_id = saved_connection["id"]
+            if connection_id_before is None:
+                if request.credential:
+                    store.credential_store.delete(saved_connection_id)
+            else:
+                store._restore_credential(connection_id_before, credential_before)
+                if saved_connection_id != connection_id_before and request.credential:
+                    store.credential_store.delete(saved_connection_id)
+        except Exception:
+            raise ModelManagementError("connection_store_unavailable") from None
+        raise ModelManagementError("connection_store_unavailable") from None
 
 
 def apply_model_config_to_runtime(config: Any, data: dict[str, Any] | None = None) -> None:

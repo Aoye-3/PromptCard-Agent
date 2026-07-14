@@ -192,6 +192,70 @@ def test_legacy_save_restores_state_and_credential_when_state_write_fails(model_
     assert "disk details" not in response.text
 
 
+@pytest.mark.parametrize("with_existing_connection", [True, False])
+def test_legacy_save_restores_every_boundary_when_options_write_fails(
+    model_store,
+    monkeypatch,
+    with_existing_connection,
+):
+    store, credentials = model_store
+    if with_existing_connection:
+        _seed_chat_assignment(store, "sk-original")
+    options_path = store.path.parent / "promptcard-model-config.json"
+    options_before = b'{"temperature":0.3,"maxTokens":4096}\r\n'
+    options_path.write_bytes(options_before)
+    state_before = store.state_bytes()
+    assignment_before = store.assignment("chat.primary")
+    credentials_before = dict(credentials.values)
+    config = _config(api_key="runtime-original")
+    runtime_before = (
+        config.models[0].name,
+        config.models[0].model,
+        config.models[0].api_key,
+        config.models[0].temperature,
+        config.models[0].max_tokens,
+    )
+
+    def partial_options_write(path, payload):
+        path.write_bytes(b"partial-options-without-secret")
+        raise OSError("sensitive disk failure")
+
+    monkeypatch.setattr(
+        "app.gateway.promptcard_runtime._atomic_write_json",
+        partial_options_write,
+    )
+    app = FastAPI()
+    app.state.config = config
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.put(
+            "/api/promptcard/runtime/model-config",
+            json={
+                "apiBase": "https://api.deepseek.com",
+                "apiKey": "sk-new-must-rollback",
+                "modelName": "deepseek-free-form",
+                "temperature": 0.9,
+                "maxTokens": 1234,
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "connection_store_unavailable"
+    assert "sensitive disk failure" not in response.text
+    assert store.state_bytes() == state_before
+    assert store.assignment("chat.primary") == assignment_before
+    assert credentials.values == credentials_before
+    assert options_path.read_bytes() == options_before
+    assert (
+        config.models[0].name,
+        config.models[0].model,
+        config.models[0].api_key,
+        config.models[0].temperature,
+        config.models[0].max_tokens,
+    ) == runtime_before
+
+
 def test_runtime_clears_mutated_secret_when_chat_assignment_is_absent(model_store):
     store, _ = model_store
     _seed_chat_assignment(store, "sk-secret")

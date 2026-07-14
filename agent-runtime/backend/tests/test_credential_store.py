@@ -6,7 +6,6 @@ import pytest
 from keyring.errors import KeyringError
 
 from app.gateway.model_management.credential_store import (
-    KEYRING_SERVICE_NAME,
     CredentialStore,
     CredentialStoreError,
     SystemKeyringCredentialStore,
@@ -51,17 +50,31 @@ class UnavailableKeyringBackend(MemoryKeyringBackend):
 def test_store_uses_stable_keyring_names_for_set_get_and_delete() -> None:
     backend = MemoryKeyringBackend()
     store: CredentialStore = SystemKeyringCredentialStore(backend=backend)
+    connection_id = "123e4567-e89b-12d3-a456-426614174000"
 
-    store.set("connection-42", "test-secret")
-    assert store.get("connection-42") == "test-secret"
-    store.delete("connection-42")
+    store.set(connection_id, "test-secret")
+    assert store.get(connection_id) == "test-secret"
+    store.delete(connection_id)
 
     assert backend.calls == [
-        ("set", KEYRING_SERVICE_NAME, "connection-42", "test-secret"),
-        ("get", KEYRING_SERVICE_NAME, "connection-42"),
-        ("delete", KEYRING_SERVICE_NAME, "connection-42"),
+        (
+            "set",
+            "dev.promptcard.manager.shell",
+            "connection:123e4567-e89b-12d3-a456-426614174000",
+            "test-secret",
+        ),
+        (
+            "get",
+            "dev.promptcard.manager.shell",
+            "connection:123e4567-e89b-12d3-a456-426614174000",
+        ),
+        (
+            "delete",
+            "dev.promptcard.manager.shell",
+            "connection:123e4567-e89b-12d3-a456-426614174000",
+        ),
     ]
-    assert store.get("connection-42") is None
+    assert store.get(connection_id) is None
 
 
 def test_store_rejects_empty_secret_before_calling_keyring() -> None:

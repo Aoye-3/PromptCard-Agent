@@ -5,7 +5,11 @@ from typing import Protocol
 import keyring
 from keyring.errors import KeyringError
 
-KEYRING_SERVICE_NAME = "promptcard-manager.model-credentials"
+KEYRING_SERVICE_NAME = "dev.promptcard.manager.shell"
+
+
+def _keyring_username(connection_id: str) -> str:
+    return f"connection:{connection_id}"
 
 
 class CredentialStore(Protocol):
@@ -39,18 +43,18 @@ class SystemKeyringCredentialStore:
         if not secret:
             raise ValueError("secret_must_not_be_empty")
         try:
-            self._backend.set_password(KEYRING_SERVICE_NAME, connection_id, secret)
+            self._backend.set_password(KEYRING_SERVICE_NAME, _keyring_username(connection_id), secret)
         except KeyringError:
             raise CredentialStoreError() from None
 
     def get(self, connection_id: str) -> str | None:
         try:
-            return self._backend.get_password(KEYRING_SERVICE_NAME, connection_id)
+            return self._backend.get_password(KEYRING_SERVICE_NAME, _keyring_username(connection_id))
         except KeyringError:
             raise CredentialStoreError() from None
 
     def delete(self, connection_id: str) -> None:
         try:
-            self._backend.delete_password(KEYRING_SERVICE_NAME, connection_id)
+            self._backend.delete_password(KEYRING_SERVICE_NAME, _keyring_username(connection_id))
         except KeyringError:
             raise CredentialStoreError() from None

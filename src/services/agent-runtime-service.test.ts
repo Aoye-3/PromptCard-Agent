@@ -342,74 +342,84 @@ describe('agent runtime proposal parsing', () => {
     })
   })
 
-  it('keeps the legacy model-config methods as a facade over generic model management routes', async () => {
+  it('persists legacy runtime options and returns them on a fresh read', async () => {
+    let persisted = {
+      enabled: true,
+      apiBase: 'https://api.deepseek.com',
+      apiKeyConfigured: true,
+      apiKeyPreview: '••••••••',
+      modelName: 'deepseek-chat',
+      temperature: 0.3,
+      maxTokens: 4096,
+      availableModels: ['deepseek-chat']
+    }
     const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
-      if (url.endsWith('/model-catalog')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            providers: [{ id: 'deepseek', displayName: 'DeepSeek', defaultApiBase: 'https://api.deepseek.com' }],
-            models: [{ id: 'deepseek-chat', providerId: 'deepseek', displayName: 'DeepSeek Chat', modality: 'chat' }]
-          })
-        }
+      if (!url.endsWith('/model-config')) throw new Error(`Unexpected request: ${url}`)
+      if (init?.method === 'PUT') {
+        persisted = { ...persisted, ...JSON.parse(String(init.body)) }
       }
-      if (url.endsWith('/model-connections') && (!init?.method || init.method === 'GET')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ connections: [{
-            id: 'connection-chat',
-            providerId: 'deepseek',
-            displayName: 'Primary chat',
-            apiBase: 'https://api.deepseek.com',
-            enabled: true,
-            credentialConfigured: true,
-            credentialMask: '••••••••',
-            createdAt: 1,
-            updatedAt: 2
-          }] })
-        }
-      }
-      if (url.endsWith('/model-assignments')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ assignments: [{ slot: 'chat.primary', connectionId: 'connection-chat', modelId: 'deepseek-chat' }] })
-        }
-      }
-      if (url.endsWith('/model-connections/connection-chat') && init?.method === 'PUT') {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            id: 'connection-chat', providerId: 'deepseek', displayName: 'Primary chat',
-            apiBase: 'https://api.deepseek.com', enabled: true, credentialConfigured: true,
-            credentialMask: '••••••••', createdAt: 1, updatedAt: 3
-          })
-        }
-      }
-      if (url.endsWith('/model-connections/connection-chat/test')) {
+      return { ok: true, status: 200, json: async () => persisted }
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+
+    await expect(agentRuntimeService.saveModelConfig({ temperature: 0.65, maxTokens: 8192 })).resolves.toMatchObject({
+      temperature: 0.65,
+      maxTokens: 8192
+    })
+    await expect(agentRuntimeService.getModelConfig()).resolves.toMatchObject({
+      temperature: 0.65,
+      maxTokens: 8192
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/agent-api/promptcard/runtime/model-config',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({ temperature: 0.65, maxTokens: 8192 })
+      })
+    )
+  })
+
+  it('tests unsaved legacy candidates without persisting them', async () => {
+    const persisted = {
+      enabled: true,
+      apiBase: 'https://api.deepseek.com',
+      apiKeyConfigured: true,
+      modelName: 'deepseek-chat',
+      temperature: 0.3,
+      maxTokens: 4096,
+      availableModels: ['deepseek-chat']
+    }
+    const candidate = {
+      apiKey: 'sk-unsaved',
+      apiBase: 'https://candidate.deepseek.com',
+      modelName: 'deepseek-reasoner',
+      temperature: 0.55,
+      maxTokens: 6144
+    }
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/model-config/test') && init?.method === 'POST') {
         return { ok: true, status: 200, json: async () => ({ success: true, message: 'Connection ok.' }) }
+      }
+      if (url.endsWith('/model-config') && !init?.method) {
+        return { ok: true, status: 200, json: async () => persisted }
       }
       throw new Error(`Unexpected request: ${url}`)
     })
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
-    await expect(agentRuntimeService.getModelConfig()).resolves.toMatchObject({
-      modelName: 'deepseek-chat',
-      apiKeyConfigured: true
-    })
-    await agentRuntimeService.saveModelConfig({ temperature: 0.2, maxTokens: 3000 })
-    await expect(agentRuntimeService.testModelConfig()).resolves.toEqual({
+    await expect(agentRuntimeService.testModelConfig(candidate)).resolves.toEqual({
       success: true,
       message: 'Connection ok.'
     })
+    await expect(agentRuntimeService.getModelConfig()).resolves.toMatchObject(persisted)
 
-    expect(fetchMock).toHaveBeenCalledWith('/agent-api/promptcard/runtime/model-catalog', expect.objectContaining({ credentials: 'include' }))
-    expect(fetchMock).toHaveBeenCalledWith('/agent-api/promptcard/runtime/model-connections', expect.objectContaining({ credentials: 'include' }))
-    expect(fetchMock).toHaveBeenCalledWith('/agent-api/promptcard/runtime/model-assignments', expect.objectContaining({ credentials: 'include' }))
-    expect(fetchMock).toHaveBeenCalledWith('/agent-api/promptcard/runtime/model-connections/connection-chat/test', expect.objectContaining({ method: 'POST' }))
-    expect(fetchMock.mock.calls.some(call => String(call[0]).includes('/model-config'))).toBe(false)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/agent-api/promptcard/runtime/model-config/test',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify(candidate) })
+    )
+    expect(fetchMock.mock.calls.some(call => (call[1] as RequestInit | undefined)?.method === 'PUT')).toBe(false)
   })
 })

@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import {
   INITIAL_MODEL_CREDENTIAL_DRAFT,
-  ModelManagementPanelContent
+  ModelManagementPanelContent,
+  recordModelConnectionTestResult
 } from './ModelManagementPanel'
 
 const snapshot = {
@@ -104,5 +105,31 @@ describe('ModelManagementPanel', () => {
 
   it('starts every fresh panel mount with an empty credential draft', () => {
     expect(INITIAL_MODEL_CREDENTIAL_DRAFT).toBe('')
+  })
+
+  it('replaces a stale successful connection test when the next request fails', () => {
+    const testResults = recordModelConnectionTestResult(
+      { 'connection-chat': { success: true, message: 'Connection ok.' } },
+      'connection-chat',
+      { success: false, message: '503 Service Unavailable' }
+    )
+    const markup = renderToStaticMarkup(
+      <ModelManagementPanelContent
+        snapshot={snapshot}
+        selectedConnectionId="connection-chat"
+        draft={{
+          providerId: 'deepseek', displayName: 'Primary chat',
+          apiBase: 'https://api.deepseek.com', enabled: true
+        }}
+        credentialDraft=""
+        busyAction={null}
+        testResults={testResults}
+        error="503 Service Unavailable"
+        actions={actions}
+      />
+    )
+
+    expect(markup).toContain('503 Service Unavailable')
+    expect(markup).not.toContain('Connection ok.')
   })
 })

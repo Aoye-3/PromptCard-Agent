@@ -97,13 +97,15 @@ export function ModelManagementPanel() {
     void loadSnapshot()
   }, [])
 
-  const runAction = async (name: string, action: () => Promise<void>) => {
+  const runAction = async (name: string, action: () => Promise<void>, onError?: (message: string) => void) => {
     setBusyAction(name)
     setError(null)
     try {
       await action()
     } catch (actionError) {
-      setError(errorMessage(actionError))
+      const message = errorMessage(actionError)
+      onError?.(message)
+      setError(message)
     } finally {
       setBusyAction(null)
     }
@@ -140,9 +142,14 @@ export function ModelManagementPanel() {
     },
     onTestConnection: connectionId => void runAction(`test:${connectionId}`, async () => {
       const result = await modelManagementClient.testConnection(connectionId)
-      setTestResults(current => ({ ...current, [connectionId]: result }))
+      setTestResults(current => recordModelConnectionTestResult(current, connectionId, result))
       const connections = await modelManagementClient.listConnections()
       setSnapshot(current => ({ ...current, connections }))
+    }, message => {
+      setTestResults(current => recordModelConnectionTestResult(current, connectionId, {
+        success: false,
+        message
+      }))
     }),
     onDeleteConnection: connectionId => void runAction('delete', async () => {
       await modelManagementClient.deleteConnection(connectionId)
@@ -447,3 +454,12 @@ const newConnectionDraft = (catalog: ModelCatalog): ModelConnectionInput => {
 }
 
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error)
+
+export const recordModelConnectionTestResult = (
+  current: Record<string, ModelConnectionTestResult>,
+  connectionId: string,
+  result: ModelConnectionTestResult
+): Record<string, ModelConnectionTestResult> => ({
+  ...current,
+  [connectionId]: result
+})

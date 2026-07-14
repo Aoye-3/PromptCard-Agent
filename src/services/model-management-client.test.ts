@@ -26,7 +26,8 @@ describe('model management client', () => {
         credentialMask: '••••••••',
         apiKey: 'must-never-reach-the-browser',
         createdAt: 1,
-        updatedAt: 2
+        updatedAt: 2,
+        lastTest: { ok: false, checkedAt: 3, message: 'Connection failed.' }
       }]
     }))
     const client = createModelManagementClient(fetchMock as unknown as typeof fetch)
@@ -36,7 +37,8 @@ describe('model management client', () => {
     expect(connection).toMatchObject({
       id: 'connection-1',
       credentialConfigured: true,
-      credentialMask: '••••••••'
+      credentialMask: '••••••••',
+      lastTest: { ok: false, checkedAt: 3, message: 'Connection failed.' }
     })
     expect(connection).not.toHaveProperty('apiKey')
   })

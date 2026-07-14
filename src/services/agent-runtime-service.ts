@@ -7,12 +7,6 @@ import type {
   AgentWorkspaceProposal,
   PromptLibraryWriteProposal
 } from '@/models/Agent.model'
-import {
-  modelManagementClient,
-  type ModelAssignment,
-  type ModelCatalog,
-  type ModelConnection
-} from '@/services/model-management-client'
 
 const AGENT_API_BASE = '/agent-api'
 const PROMPTCARD_RUNTIME_BASE = `${AGENT_API_BASE}/promptcard/runtime`
@@ -185,96 +179,26 @@ export const agentRuntimeService = {
       proposals: filterProposalsForPermissionScope(response.proposals, body.permissionScope)
     })),
 
-  getModelConfig: () => loadLegacyModelConfig(),
+  getModelConfig: () =>
+    requestJson<DeepSeekModelConfig>(`${PROMPTCARD_RUNTIME_BASE}/model-config`),
 
-  saveModelConfig: (body: DeepSeekModelConfigUpdate) => saveLegacyModelConfig(body),
+  saveModelConfig: (body: DeepSeekModelConfigUpdate) =>
+    requestJson<DeepSeekModelConfig>(`${PROMPTCARD_RUNTIME_BASE}/model-config`, {
+      method: 'PUT',
+      headers: jsonHeaders(),
+      body: JSON.stringify(body)
+    }),
 
-  testModelConfig: (_body: DeepSeekModelConfigUpdate = {}) => testLegacyModelConfig(),
+  testModelConfig: (body: DeepSeekModelConfigUpdate = {}) =>
+    requestJson<{ success: boolean; message: string }>(`${PROMPTCARD_RUNTIME_BASE}/model-config/test`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify(body)
+    }),
 
   parsePromptLibraryProposals,
   parseAgentWorkspaceProposals
 }
-
-const loadLegacyModelState = async () => {
-  const [catalog, connections, assignments] = await Promise.all([
-    modelManagementClient.getCatalog(),
-    modelManagementClient.listConnections(),
-    modelManagementClient.listAssignments()
-  ])
-  const assignment = assignments.find(item => item.slot === 'chat.primary')
-  const connection = assignment
-    ? connections.find(item => item.id === assignment.connectionId)
-    : undefined
-  return { catalog, connections, assignments, assignment, connection }
-}
-
-const loadLegacyModelConfig = async (): Promise<DeepSeekModelConfig> => {
-  const { catalog, assignment, connection } = await loadLegacyModelState()
-  return legacyModelConfig(catalog, connection, assignment)
-}
-
-const saveLegacyModelConfig = async (update: DeepSeekModelConfigUpdate): Promise<DeepSeekModelConfig> => {
-  const state = await loadLegacyModelState()
-  const modelId = update.modelName
-    || state.assignment?.modelId
-    || state.catalog.models.find(model => model.modality === 'chat')?.id
-    || ''
-  const model = state.catalog.models.find(item => item.id === modelId)
-  const provider = state.catalog.providers.find(item => item.id === (model?.providerId || state.connection?.providerId))
-  let connection = state.connection
-
-  if (connection) {
-    connection = await modelManagementClient.updateConnection(connection.id, {
-      providerId: connection.providerId,
-      displayName: connection.displayName,
-      apiBase: update.apiBase ?? connection.apiBase,
-      enabled: update.enabled ?? connection.enabled,
-      credential: update.apiKey,
-      clearCredential: update.apiKey === ''
-    })
-  } else if (provider && model) {
-    connection = await modelManagementClient.createConnection({
-      providerId: provider.id,
-      displayName: `${provider.displayName} chat`,
-      apiBase: update.apiBase || provider.defaultApiBase,
-      enabled: update.enabled ?? true,
-      credential: update.apiKey
-    })
-  }
-
-  let assignment = state.assignment
-  if (connection && modelId && (assignment?.connectionId !== connection.id || assignment.modelId !== modelId)) {
-    assignment = await modelManagementClient.updateAssignment('chat.primary', {
-      connectionId: connection.id,
-      modelId
-    })
-  }
-  return legacyModelConfig(state.catalog, connection, assignment, update)
-}
-
-const testLegacyModelConfig = async (): Promise<{ success: boolean; message: string }> => {
-  const { connection } = await loadLegacyModelState()
-  if (!connection?.credentialConfigured) {
-    return { success: false, message: 'Credential is not configured.' }
-  }
-  return modelManagementClient.testConnection(connection.id)
-}
-
-const legacyModelConfig = (
-  catalog: ModelCatalog,
-  connection?: ModelConnection,
-  assignment?: ModelAssignment,
-  update: DeepSeekModelConfigUpdate = {}
-): DeepSeekModelConfig => ({
-  enabled: update.enabled ?? connection?.enabled ?? false,
-  apiBase: update.apiBase ?? connection?.apiBase ?? '',
-  apiKeyConfigured: connection?.credentialConfigured ?? false,
-  apiKeyPreview: connection?.credentialMask,
-  modelName: update.modelName ?? assignment?.modelId ?? '',
-  temperature: update.temperature ?? 0.3,
-  maxTokens: update.maxTokens ?? 4096,
-  availableModels: catalog.models.filter(model => model.modality === 'chat').map(model => model.id)
-})
 
 export function extractAssistantText(payload: Record<string, unknown>): string {
   const candidates = [

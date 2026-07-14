@@ -33,8 +33,9 @@ export interface ModelCatalog {
 }
 
 export interface ModelConnectionTestState {
-  success: boolean
+  ok: boolean
   checkedAt: number
+  message: string
 }
 
 export interface ModelConnection {
@@ -167,7 +168,13 @@ const normalizeConnection = (value: unknown): ModelConnection => {
     createdAt: Number(connection.createdAt || 0),
     updatedAt: Number(connection.updatedAt || 0),
     ...(lastTest
-      ? { lastTest: { success: lastTest.success === true, checkedAt: Number(lastTest.checkedAt || 0) } }
+      ? {
+          lastTest: {
+            ok: lastTest.ok === true,
+            checkedAt: Number(lastTest.checkedAt || 0),
+            message: String(lastTest.message || '')
+          }
+        }
       : {})
   }
 }

@@ -10,7 +10,7 @@ Active
 
 ## Last Updated
 
-2026-07-05
+2026-07-14
 
 ## Timezone
 
@@ -55,7 +55,8 @@ The running desktop app should have:
 - The page title shown after entering the Media page is `近期捕获`.
 - Media exists at the same app navigation level as Projects, Prompt Library, and Settings.
 - Media is reachable from the global left sidebar navigation.
-- Clicking a media card opens a focused media analysis dialog rather than navigating away from the `近期捕获` page.
+- Selecting a media row updates the right-hand detail panel without opening a modal. Clicking the explicit Edit action opens the focused media analysis dialog without navigating away from the `近期捕获` page.
+- The row-level Remove record action deletes only revision-checked Recent Capture metadata. It does not delete shared asset bytes, Prompt media, or Canvas nodes.
 - The media analysis dialog is split into a left media dossier and a right Agent workspace:
   - Left: one media dossier card, with media preview taking about 60% height, prompt box about 30%, and note area about 10%.
   - Right: Agent input and conversation output for visual analysis, style reverse engineering, and prompt reverse engineering.
@@ -78,13 +79,24 @@ Click screenshot on floating toolbar
   -> optional: copy to clipboard / save to local / place on current canvas
 ```
 
+Clipboard image flow:
+
+```text
+Wechat / QQ screenshot copied to the clipboard
+  -> click the Capture Bar paste action or press Ctrl+V in its focused paste area
+  -> validate PNG / JPEG / WebP and read pixel dimensions
+  -> upload one physical asset
+  -> create a pastedMedia Recent Capture that references the same assetId
+```
+
 Recent Captures flow:
 
 ```text
 Open Recent Captures
   -> browse captured screenshots and recordings in batches
   -> add prompt, note, source platform, source URL, category, and reference role
-  -> click a media card to open the media analysis dialog
+  -> select a media row to inspect its detail panel
+  -> click Edit to open the media analysis dialog
   -> optionally ask the style analysis Agent to reverse-engineer style, prompt, or visual structure
   -> register selected item into Prompt Library
   -> or place selected item on current canvas
@@ -202,20 +214,20 @@ Candidate components:
 | --- | --- | --- |
 | Floating toolbar | Tauri multi-window / Window API | Small always-on-top, undecorated window created on demand from Capture Bar. |
 | Global trigger | Tauri `global-shortcut` plugin | Optional after toolbar MVP; useful for screenshot hotkeys. |
-| Clipboard text/image | Tauri `clipboard-manager` plugin plus browser clipboard events | Browser paste/drop first, native clipboard as desktop fallback. |
+| Clipboard image intake | `navigator.clipboard.read()` plus browser paste events | Capture Bar supports explicit read and Ctrl+V fallback for PNG, JPEG, and WebP. |
 | Screenshot capture | `xcap` | Rust, Apache-2.0, cross-platform screenshot and region capture. |
-| Video recording | Start with WebM/MP4 asset model; evaluate `xcap`/`scap` for native capture | Add after screenshot loop is stable. |
+| Video recording | `xcap::VideoRecorder` + Windows WASAPI loopback + Media Foundation | Last phase after the complete image chain passes Windows manual acceptance; H.264/AAC in MP4, no bundled FFmpeg. |
 | Visual media analysis | Existing Agent runtime boundary plus a vision-model adapter | Keep request scope to the selected capture and explicit user text. |
 | Video frame extraction | Start behind a small media-processing service boundary | Output timestamped frame assets that remain linked to the source recording. |
 | GIF export | `gif` crate for simple no-audio GIF | Optional export only; avoid `gifski` unless AGPL/commercial licensing is accepted. |
-| Local save | Tauri `dialog`/`fs` plugin | Browser download can be a temporary fallback. |
+| Local image save | Browser download from an explicit user action | Current image path; recording uses protected staging and atomic storage import instead of Base64/download handoff. |
 
 ## Data Model
 
 Keep the physical asset table as-is. Add logical capture and asset reference metadata.
 
 ```ts
-type CaptureKind = 'screenshot' | 'screenRecording' | 'pastedMedia' | 'uploadedMedia'
+type CaptureKind = 'screenshot' | 'pastedMedia' | 'screenRecording'
 
 type CaptureStatus =
   | 'recent'
@@ -263,8 +275,9 @@ interface RecentCaptureItem {
   durationMs?: number
   hasAudio?: boolean
   posterAssetId?: string
-  capturedAt: string
+  capturedAt: number
   registeredPromptId?: string
+  registeredAt?: number
   linkedProjectId?: string
   linkedCanvasNodeId?: string
   linkedShotId?: string
@@ -348,7 +361,7 @@ interface FreeCanvasVideoMeta {
   - Source URL.
   - Asset role: character, scene, prop, composition, lighting, color, style, mood, other.
   - Purpose: inspiration reference, generated result, prompt attachment, shot output.
-- Add placeholder actions for archive, register to Prompt Library, and place on canvas.
+- Add explicit actions for registration to Prompt Library and placement on Canvas; archive remains deferred.
 - Keep the first version UI-only if storage is not ready yet.
 
 **Acceptance Criteria:**
@@ -370,11 +383,11 @@ interface FreeCanvasVideoMeta {
 
 ## Phase 2: Media Detail Analysis Dialog Shell
 
-**Goal:** Let a selected Recent Capture open into a focused media dossier and visual-analysis Agent workspace.
+**Goal:** Let a selected Recent Capture open through an explicit Edit action into a focused media dossier and visual-analysis Agent workspace.
 
 **Scope:**
 
-- Clicking a media card opens a modal dialog over the `近期捕获` page.
+- Selecting a media row updates the detail panel; clicking its Edit action opens a modal dialog over the `近期捕获` page.
 - The dialog uses a two-column layout:
   - Left column: media dossier card.
   - Right column: Agent input, analysis actions, and conversation/output area.
@@ -392,7 +405,7 @@ interface FreeCanvasVideoMeta {
 
 **Acceptance Criteria:**
 
-- [x] Clicking a media card opens the analysis modal without leaving the Media page.
+- [x] Selecting a media row does not open a modal; clicking Edit opens the analysis modal without leaving the Media page.
 - [x] The left side displays the selected media, prompt text area, and note area in the intended 60/30/10 information hierarchy.
 - [x] The right side displays an Agent input area and action affordances for style analysis and prompt reverse engineering.
 - [x] Closing the modal returns to the same `近期捕获` list/detail state.
@@ -401,7 +414,7 @@ interface FreeCanvasVideoMeta {
 
 **Verification:**
 
-- [x] Component tests cover opening and closing the modal from a media card.
+- [x] Component tests cover the explicit analysis dialog shell and row action affordances.
 - [x] Component tests cover the media dossier, prompt box, note area, Agent input, and disabled/placeholder action rendering.
 - [x] Manual check: open a media card, type into Agent input, close modal, reopen the same media card.
 - [x] `npm.cmd run build` succeeds.
@@ -446,7 +459,9 @@ interface FreeCanvasVideoMeta {
 **Scope:**
 
 - Enter screenshot selection state from toolbar.
-- Show a full-screen overlay for drag selection.
+- Keep the toolbar visible in a preparation state until the hidden selector has loaded.
+- Capture the raw frame off the async runtime thread, then show and focus a gray full-screen overlay for drag selection.
+- Restore the toolbar on startup failure or a 30-second selector/capture timeout.
 - Convert selected region to a PNG asset.
 - Save the PNG into the existing physical asset store.
 - Create a `RecentCaptureItem` with `kind: 'screenshot'`.
@@ -466,14 +481,17 @@ interface FreeCanvasVideoMeta {
 - [ ] User can copy the screenshot to the clipboard.
 - [ ] User can save the screenshot to local file.
 - [ ] User can optionally place the screenshot on the current canvas.
+- [x] Capture Bar accepts PNG, JPEG, and WebP clipboard images through ClipboardItem and Ctrl+V fallback.
+- [x] Clipboard permission denial and empty/text-only clipboard states show an actionable error.
 
 **Verification:**
 
-- [ ] Unit tests cover screenshot metadata normalization.
+- [x] Unit tests cover screenshot metadata normalization.
+- [x] Unit/configuration tests cover toolbar preparation, hidden selector preload, activation, visible mask, and session phase transitions.
 - [ ] Manual check: screenshot to Recent Captures, reload, item remains.
 - [ ] Manual check: screenshot to clipboard, paste into another app.
 - [ ] Manual check: screenshot to canvas, reload, image remains.
-- [ ] `npm.cmd run build` succeeds.
+- [x] `npm.cmd run build` succeeds.
 
 ## Phase 5: Storage Events And Three-Way Information Flow
 
@@ -484,8 +502,7 @@ interface FreeCanvasVideoMeta {
 - Add or formalize the storage/event path that refreshes Recent Captures after a capture is created.
 - Add Recent Captures -> Prompt Library registration.
 - Add Recent Captures -> Canvas placement.
-- Add Canvas -> Recent Captures save/reference where useful.
-- Add Prompt Library -> Canvas placement where useful.
+- Keep Canvas -> Recent Captures and Prompt Library -> Canvas shortcuts outside this closed-loop phase unless separately requested.
 - Preserve physical asset reuse instead of duplicating files.
 - Preserve semantic separation:
   - Recent Captures is the raw media review layer.
@@ -494,20 +511,22 @@ interface FreeCanvasVideoMeta {
 
 **Acceptance Criteria:**
 
-- [ ] A newly created capture can appear in Recent Captures through the storage/event flow.
-- [ ] User can register a single capture to Prompt Library.
-- [ ] User can register multiple annotated captures in a batch.
-- [ ] Registered Prompt Library records include media, prompt text, role, and notes when present.
-- [ ] User can place a Recent Capture on the current canvas.
-- [ ] Placing on canvas does not automatically register the item to Prompt Library.
-- [ ] Prompt Library remains the only Agent-visible curated source.
-- [ ] Registration and placement are explicit and reviewable.
+- [x] A newly created capture can appear in Recent Captures through the storage/event flow.
+- [x] User can register a single capture to Prompt Library.
+- [x] User can register multiple captures as separate Prompts or one merged Prompt.
+- [x] Registered Prompt Library records include media, prompt text, role, notes, source fields, capture time, and origin when present.
+- [x] User can place a screenshot or pasted image on the current Free Canvas.
+- [x] Placing on canvas does not automatically register the item to Prompt Library.
+- [x] Prompt Library remains the only Agent-visible curated source.
+- [x] Registration and placement are explicit and reviewable.
+- [x] Prompt Library and Canvas reuse the Recent Capture `assetId`; no second upload or asset row is created.
 
 **Verification:**
 
-- [ ] Unit tests cover Recent Capture storage/event refresh behavior.
-- [ ] Unit tests cover Recent Capture to Prompt Library transformation.
-- [ ] Existing canvas image tests still pass.
+- [x] Unit tests cover Recent Capture storage/event refresh behavior.
+- [x] Unit and storage tests cover single, separate-batch, merged-batch, rollback, and metadata transformation.
+- [x] Existing canvas image tests still pass.
+- [x] Storage integration verifies one asset row and one physical file across Capture, Prompt, and Canvas.
 - [ ] Manual check: create or simulate a capture event and confirm the Media page refreshes.
 - [ ] Manual check: register capture, open Prompt Library, confirm media and metadata.
 - [ ] Manual check: place capture on canvas, reload, image remains.
@@ -515,16 +534,17 @@ interface FreeCanvasVideoMeta {
 
 ## Phase 6: Recording To Recent Captures As Video Asset
 
-**Goal:** Add recording only after the Media page, toolbar, screenshot flow, and three-way information flow are stable.
+**Goal:** Add Windows-native screen recording only after screenshot, clipboard intake, Prompt registration, and image `assetId` reuse pass the Windows manual acceptance gate.
 
 **Scope:**
 
-- Enter recording selection state from toolbar.
-- Record selected area.
-- Save recording to Recent Captures as a video asset.
-- Default no-audio path may output WebM or MP4 depending on implementation feasibility.
-- With-audio path must output video, not GIF.
-- Metadata includes duration, dimensions, capturedAt, origin, and `hasAudio`.
+- Reuse the screenshot selection coordinates and capture the toolbar display through `xcap::VideoRecorder`.
+- Capture Windows system audio through WASAPI loopback; microphone capture is out of scope.
+- Encode H.264 video and AAC audio through Windows Media Foundation and mux one MP4 without bundling FFmpeg.
+- Limit the first version to 30 FPS, 60 seconds, at most 1920x1080, and even output dimensions.
+- Stop with an explicit error when system audio is unavailable; do not silently produce a muted file.
+- Stage the encoded file under the repository storage root at `data/capture-staging`, then use a one-time token for atomic asset import. Do not transfer recording bytes as frontend Base64.
+- Persist `kind: "screenRecording"`, `contentType: "video/mp4"`, `durationMs`, and `hasAudio: true`.
 
 **Acceptance Criteria:**
 
@@ -532,14 +552,14 @@ interface FreeCanvasVideoMeta {
 - [ ] Recording is stored in Recent Captures.
 - [ ] Recording appears in the `近期捕获` page.
 - [ ] Recording can be annotated with prompt and notes.
-- [ ] No-audio recordings are marked `hasAudio: false`.
-- [ ] Audio recordings, when supported, are marked `hasAudio: true`.
-- [ ] GIF is not offered for audio recordings.
+- [ ] Recording includes Windows system audio and is marked `hasAudio: true`.
+- [ ] Missing system audio terminates with an actionable error and creates no silent recording.
+- [ ] Recording staging is atomically imported without sending large Base64 through the frontend.
 
 **Verification:**
 
 - [ ] Manual check: record 5 seconds, save to Recent Captures, reload, play preview.
-- [ ] Storage test covers video size limits.
+- [ ] Storage tests cover staging-token validation, atomic import, duration/size limits, and failure cleanup.
 - [ ] Permission denial path is understandable.
 - [ ] `npm.cmd run build` succeeds.
 
@@ -698,7 +718,7 @@ interface FreeCanvasVideoMeta {
 - Do not start with recording before the `媒体` / `近期捕获` UI and screenshot flow are usable.
 - Do not start with video storyboard inference before recordings can be stored and timestamped frames can be traced to source video.
 - Do not start with video node work before recording exists and Recent Captures can place items on canvas.
-- Do not start with audio. It adds permissions, device selection, and sync complexity.
+- Do not add microphone capture. The first recording phase includes only required Windows system audio through WASAPI loopback.
 - Do not start with GIF. It is useful, but it is not the source format.
 - Keep all generated assets inside the current workspace data directory.
 - Keep Recent Captures storage simple: it can be a lightweight collection that references existing assets.
@@ -715,7 +735,8 @@ interface FreeCanvasVideoMeta {
 
 ### Checkpoint 2: Media Detail Analysis Dialog
 
-- [x] Clicking a media card opens the dialog.
+- [x] Selecting a media row updates detail without opening the dialog.
+- [x] Clicking Edit opens the dialog.
 - [x] Left media dossier uses media/prompt/note hierarchy.
 - [x] Right Agent input and analysis actions are visible.
 - [x] Placeholder actions stay honest when vision analysis is not connected.
@@ -740,15 +761,16 @@ interface FreeCanvasVideoMeta {
 
 ### Checkpoint 5: Storage Events And Three-Way Flow
 
-- [ ] Capture creation refreshes Recent Captures through a storage/event flow.
-- [ ] Captures can be browsed in batches.
-- [ ] User can add prompt text and notes.
-- [ ] User can classify purpose and role.
-- [ ] Raw Recent Captures are not Agent-visible.
-- [ ] User can register selected captures.
-- [ ] Prompt Library record contains curated media and metadata.
-- [ ] User can place selected captures on canvas.
-- [ ] Prompt Library, Recent Captures, and Canvas reuse physical assets without needless file duplication.
+- [x] Capture creation refreshes Recent Captures through a storage/event flow.
+- [x] Captures can be browsed and selected in batches.
+- [x] User can add prompt text and notes.
+- [x] User can classify purpose and role.
+- [x] Raw Recent Captures are not added to Prompt Library or global Agent context automatically.
+- [x] User can register one item, separate batches, or a merged batch.
+- [x] Prompt Library record contains curated media and provenance metadata.
+- [x] User can place screenshot and pasted-image captures on Canvas.
+- [x] Prompt Library, Recent Captures, and Canvas reuse physical assets without needless file duplication.
+- [x] Remove record deletes only Recent Capture metadata and preserves shared Prompt/Canvas assets.
 - [ ] Agent can read the registered Prompt Library item.
 - [ ] Agent cannot read unregistered Recent Captures.
 

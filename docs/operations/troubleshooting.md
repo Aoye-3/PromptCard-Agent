@@ -124,6 +124,41 @@ Select-String -Path scripts\launch-desktop-shell.ps1 -Pattern 'PROMPTCARD_DESKTO
 
 `PROMPTCARD_DESKTOP_DEV=1` suppresses Vite's browser auto-open behavior for the desktop launcher path.
 
+## Screenshot Toolbar Disappears or the Desktop Stops Responding
+
+The maintained screenshot lifecycle is: toolbar preparation state, hidden selector preload, selector activation, native frame capture, then a visible gray drag layer. The selector must never remain as an uninitialized transparent always-on-top window.
+
+First inspect the native lifecycle log:
+
+```powershell
+Get-Content logs\desktop-shell.log -Tail 120
+```
+
+A successful start contains both entries with the same session ID:
+
+```text
+screenshot capture started; session=<id>
+screenshot capture ready; session=<id>; elapsed_ms=<duration>
+```
+
+Interpret missing stages as follows:
+
+- No `started`: the hidden selector did not activate. The 30-second watchdog should close it and restore the toolbar.
+- `started` without `ready`: native monitor resolution or `xcap` capture is blocked. The watchdog restores the toolbar; inspect the following failure/timeout line.
+- `ready` but no visible gray layer: check `capture-selection` focus/window events and verify the frontend production build succeeds.
+- Toolbar returns but remains disabled: verify `capture-toolbar.json` includes `core:event:allow-listen`; native restoration emits `capture:toolbar-restored`.
+
+Run the focused lifecycle checks after changing this path:
+
+```powershell
+npm.cmd test -- --run src/features/capture/FloatingCaptureToolbar.test.ts src/features/capture/ScreenshotCaptureOverlay.test.ts src-tauri/tauri-config.test.ts
+Push-Location src-tauri
+cargo test
+Pop-Location
+```
+
+Do not work around this failure by showing the selector before the source frame is captured: the gray layer would enter the screenshot. Do not only lengthen the watchdog; use the stage timings to locate selector-load or native-capture delay.
+
 ## Agent Runtime Is Disconnected
 
 ```powershell

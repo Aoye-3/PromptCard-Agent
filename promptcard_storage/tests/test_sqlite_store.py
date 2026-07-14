@@ -9,6 +9,8 @@ from promptcard_storage.store import (
     DuplicateItem,
     JsonCollectionStore,
     MigrationError,
+    MissingItem,
+    RevisionConflict,
 )
 
 
@@ -238,6 +240,181 @@ class SqliteStoreTest(unittest.TestCase):
         diagnostics = store.diagnose_assets()
 
         self.assertNotIn(asset["id"], diagnostics["unreferencedAssets"])
+
+    def test_deletes_recent_capture_without_deleting_its_asset(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        asset = store.save_asset("shot.png", "image/png", b"\x89PNG\r\n\x1a\nimage")
+        capture = store.create_recent_capture({
+            "id": "capture-delete",
+            "assetId": asset["id"],
+            "kind": "screenshot",
+            "contentType": "image/png",
+        })
+
+        delete_capture = getattr(store, "delete_recent_capture", None)
+        self.assertIsNotNone(delete_capture)
+        if delete_capture is None:
+            return
+        delete_capture(capture["id"], capture["revision"])
+
+        with self.assertRaises(MissingItem):
+            store.get_recent_capture(capture["id"])
+        self.assertTrue((self.data_dir / "assets" / asset["id"]).is_file())
+        self.assertIn(asset["id"], store.diagnose_assets()["unreferencedAssets"])
+
+    def test_rejects_deleting_a_stale_recent_capture(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        capture = store.create_recent_capture({"id": "capture-stale", "assetId": "asset-stale.png"})
+        current = store.update_recent_capture(capture["id"], {"title": "Updated"}, capture["revision"])
+
+        delete_capture = getattr(store, "delete_recent_capture", None)
+        self.assertIsNotNone(delete_capture)
+        if delete_capture is None:
+            return
+        with self.assertRaises(RevisionConflict):
+            delete_capture(capture["id"], capture["revision"])
+        self.assertEqual(store.get_recent_capture(capture["id"])["revision"], current["revision"])
+
+    def test_registers_recent_captures_as_separate_prompts_without_copying_assets(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        first_asset = store.save_asset("character.png", "image/png", b"\x89PNG\r\n\x1a\ncharacter")
+        second_asset = store.save_asset("scene.webp", "image/webp", b"RIFF\x04\x00\x00\x00WEBPscene")
+        first = store.create_recent_capture({
+            "id": "capture-character", "assetId": first_asset["id"], "kind": "pastedMedia",
+            "contentType": "image/png", "title": "Hero", "prompt": "A determined hero",
+            "role": "character", "sourcePlatform": "Clipboard", "origin": {"type": "clipboard"},
+        })
+        second = store.create_recent_capture({
+            "id": "capture-scene", "assetId": second_asset["id"], "kind": "pastedMedia",
+            "contentType": "image/webp", "title": "Station", "prompt": "An empty station",
+            "role": "scene", "sourcePlatform": "Clipboard", "origin": {"type": "clipboard"},
+        })
+
+        result = store.register_recent_captures_to_prompt_library({
+            "mode": "separate",
+            "captures": [
+                {"id": first["id"], "revision": first["revision"], "label": "Hero", "content": "A determined hero", "type": "subject"},
+                {"id": second["id"], "revision": second["revision"], "label": "Station", "content": "An empty station", "type": "scene"},
+            ],
+        })
+
+        self.assertEqual([item["type"] for item in result["presets"]], ["subject", "scene"])
+        self.assertEqual(
+            [item["meta"]["media"][0]["assetId"] for item in result["presets"]],
+            [first_asset["id"], second_asset["id"]],
+        )
+        self.assertEqual(result["presets"][0]["meta"]["recentCaptureSources"][0]["captureId"], first["id"])
+        self.assertEqual(result["captures"][0]["registeredPromptId"], result["presets"][0]["id"])
+        self.assertEqual(result["captures"][0]["status"], "registeredToPromptLibrary")
+        self.assertEqual(len(list((self.data_dir / "assets").iterdir())), 2)
+
+    def test_merges_recent_captures_into_one_prompt_with_all_media(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        assets = [
+            store.save_asset("one.png", "image/png", b"\x89PNG\r\n\x1a\none"),
+            store.save_asset("two.jpg", "image/jpeg", b"\xff\xd8\xfftwo"),
+        ]
+        captures = [store.create_recent_capture({
+            "id": f"capture-{index}", "assetId": asset["id"], "kind": "pastedMedia",
+            "contentType": asset["contentType"], "title": f"Capture {index}", "role": role,
+        }) for index, (asset, role) in enumerate(zip(assets, ["character", "lighting"]))]
+
+        result = store.register_recent_captures_to_prompt_library({
+            "mode": "merged",
+            "captures": [{"id": item["id"], "revision": item["revision"]} for item in captures],
+            "prompt": {"label": "Reference group", "content": "Use both references", "type": "custom"},
+        })
+
+        self.assertEqual(len(result["presets"]), 1)
+        self.assertEqual(result["presets"][0]["type"], "custom")
+        self.assertEqual([item["assetId"] for item in result["presets"][0]["meta"]["media"]], [asset["id"] for asset in assets])
+        self.assertTrue(all(item["registeredPromptId"] == result["presets"][0]["id"] for item in result["captures"]))
+
+    def test_registration_rolls_back_every_change_on_stale_capture(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        asset = store.save_asset("one.png", "image/png", b"\x89PNG\r\n\x1a\none")
+        first = store.create_recent_capture({"id": "first", "assetId": asset["id"]})
+        second = store.create_recent_capture({"id": "second", "assetId": asset["id"]})
+        store.update_recent_capture(second["id"], {"title": "newer"}, second["revision"])
+
+        with self.assertRaises(RevisionConflict):
+            store.register_recent_captures_to_prompt_library({
+                "mode": "separate",
+                "captures": [
+                    {"id": first["id"], "revision": first["revision"], "label": "One", "content": "One", "type": "custom"},
+                    {"id": second["id"], "revision": second["revision"], "label": "Two", "content": "Two", "type": "custom"},
+                ],
+            })
+
+        self.assertEqual(store.list_presets(), [])
+        self.assertIsNone(store.get_recent_capture(first["id"])["registeredPromptId"])
+
+    def test_registration_rejects_missing_assets_and_already_registered_captures(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        missing = store.create_recent_capture({"id": "missing", "assetId": "does-not-exist.png"})
+        with self.assertRaises(MissingItem):
+            store.register_recent_captures_to_prompt_library({
+                "mode": "separate",
+                "captures": [{"id": missing["id"], "revision": missing["revision"], "label": "Missing", "content": "Missing", "type": "custom"}],
+            })
+
+        asset = store.save_asset("one.png", "image/png", b"\x89PNG\r\n\x1a\none")
+        capture = store.create_recent_capture({"id": "registered", "assetId": asset["id"]})
+        store.register_recent_captures_to_prompt_library({
+            "mode": "separate",
+            "captures": [{"id": capture["id"], "revision": capture["revision"], "label": "One", "content": "One", "type": "custom"}],
+        })
+        current = store.get_recent_capture(capture["id"])
+        with self.assertRaises(ValueError):
+            store.register_recent_captures_to_prompt_library({
+                "mode": "separate",
+                "captures": [{"id": current["id"], "revision": current["revision"], "label": "Again", "content": "Again", "type": "custom"}],
+            })
+
+    def test_prompt_media_assets_remain_referenced_in_active_and_trash_presets(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        asset = store.save_asset("one.png", "image/png", b"\x89PNG\r\n\x1a\none")
+        created = store.create_preset({
+            "id": "media-preset", "type": "custom", "category": "custom", "label": "Media", "content": "Media",
+            "meta": {"media": [{"id": "media-one", "kind": "image", "source": "asset", "assetId": asset["id"]}]},
+        })
+        self.assertNotIn(asset["id"], store.diagnose_assets()["unreferencedAssets"])
+        store.trash_presets([created["id"]])
+        self.assertNotIn(asset["id"], store.diagnose_assets()["unreferencedAssets"])
+
+    def test_recent_capture_prompt_and_canvas_share_one_physical_asset(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        asset = store.save_asset("shared.png", "image/png", b"\x89PNG\r\n\x1a\nshared")
+        capture = store.create_recent_capture({
+            "id": "capture-shared", "assetId": asset["id"], "kind": "screenshot",
+            "contentType": "image/png", "title": "Shared", "prompt": "Shared prompt",
+        })
+        registered = store.register_recent_captures_to_prompt_library({
+            "mode": "separate",
+            "captures": [{
+                "id": capture["id"], "revision": capture["revision"],
+                "label": "Shared", "content": "Shared prompt", "type": "custom",
+            }],
+        })
+        current = registered["captures"][0]
+        project = store.create_project({
+            "id": "canvas-project", "title": "Canvas", "type": "free-canvas", "pages": [], "currentPage": 0,
+            "freeCanvas": {"nodes": [{"id": "canvas-node", "assetId": asset["id"]}], "edges": [], "selectedNodeId": "canvas-node"},
+            "meta": {},
+        })
+        linked = store.update_recent_capture(current["id"], {
+            "linkedProjectId": project["id"], "linkedCanvasNodeId": "canvas-node",
+        }, current["revision"])
+
+        connection = sqlite3.connect(self.data_dir / "promptcard.sqlite3")
+        try:
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM assets").fetchone()[0], 1)
+        finally:
+            connection.close()
+        self.assertEqual(len(list((self.data_dir / "assets").iterdir())), 1)
+        self.assertEqual(linked["assetId"], asset["id"])
+        self.assertEqual(registered["presets"][0]["meta"]["media"][0]["assetId"], asset["id"])
+        self.assertEqual(project["freeCanvas"]["nodes"][0]["assetId"], asset["id"])
 
     def write_json(self, name: str, payload: dict) -> None:
         (self.data_dir / name).write_text(json.dumps(payload), encoding="utf-8")

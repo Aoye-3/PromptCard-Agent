@@ -28,6 +28,13 @@ export interface RecentCaptureItemViewModel {
   sourcePlatform: string
   sourceUrl: string
   contentType: string
+  revision: number
+  originalFilename?: string
+  registeredPromptId: string | null
+  registeredAt: number | null
+  linkedProjectId: string | null
+  linkedCanvasNodeId: string | null
+  origin: Record<string, unknown>
   sizeLabel: string
   dimensionsLabel?: string
   capturedAtLabel: string

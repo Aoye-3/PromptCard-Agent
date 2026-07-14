@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "native-screenshot-start"
+description = "Allows the main window to start one native screenshot selection session."
+commands.allow = ["capture_begin_selection"]
+
+[[permission]]
+identifier = "native-screenshot-selection"
+description = "Allows the temporary selection window to activate, finish, or cancel its active native screenshot session."
+commands.allow = ["capture_activate_selection", "capture_finish_selection", "capture_cancel_selection"]

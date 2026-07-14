@@ -5,6 +5,7 @@ import os
 import sqlite3
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
@@ -62,7 +63,9 @@ class SqliteStore:
             self._transaction,
             lambda: self.list_projects()
             + [entry["payload"] for entry in self.list_project_trash()]
-            + self.list_recent_captures(),
+            + self.list_recent_captures()
+            + self.list_presets()
+            + [entry["payload"] for entry in self.list_preset_trash()],
             now_ms,
         )
         self._backups = BackupManager(
@@ -206,6 +209,116 @@ class SqliteStore:
                 ),
             )
         return updated
+
+    def delete_recent_capture(self, item_id: str, revision: int) -> None:
+        with self._transaction() as connection:
+            row = connection.execute("SELECT payload_json FROM recent_captures WHERE id=?", (item_id,)).fetchone()
+            if not row:
+                raise MissingItem()
+            current = json.loads(row[0])
+            if current["revision"] != revision:
+                raise RevisionConflict(current)
+            connection.execute("DELETE FROM recent_captures WHERE id=?", (item_id,))
+
+    def register_recent_captures_to_prompt_library(self, payload: dict[str, Any]) -> dict[str, Any]:
+        mode = payload.get("mode")
+        requested = payload.get("captures")
+        if mode not in {"separate", "merged"}:
+            raise ValueError("Registration mode must be separate or merged")
+        if not isinstance(requested, list) or not requested:
+            raise ValueError("At least one recent capture is required")
+
+        with self._transaction() as connection:
+            captures: list[dict[str, Any]] = []
+            assets: list[dict[str, Any]] = []
+            for request in requested:
+                if not isinstance(request, dict) or not isinstance(request.get("id"), str):
+                    raise ValueError("Each capture registration requires an id")
+                row = connection.execute(
+                    "SELECT payload_json FROM recent_captures WHERE id=?", (request["id"],)
+                ).fetchone()
+                if not row:
+                    raise MissingItem(request["id"])
+                capture = json.loads(row[0])
+                if capture["revision"] != request.get("revision"):
+                    raise RevisionConflict(capture)
+                if capture.get("registeredPromptId"):
+                    raise ValueError(f"Recent capture is already registered: {capture['id']}")
+                asset_row = connection.execute(
+                    "SELECT original_filename, content_type, size FROM assets WHERE asset_id=?",
+                    (capture["assetId"],),
+                ).fetchone()
+                if not asset_row:
+                    raise MissingItem(capture["assetId"])
+                captures.append(capture)
+                assets.append({
+                    "id": capture["assetId"],
+                    "filename": asset_row[0],
+                    "contentType": asset_row[1],
+                    "size": asset_row[2],
+                })
+
+            prompt_inputs = requested if mode == "separate" else [payload.get("prompt")]
+            if not all(isinstance(value, dict) for value in prompt_inputs):
+                raise ValueError("Prompt fields are required")
+
+            now = now_ms()
+            presets: list[dict[str, Any]] = []
+            capture_groups = [[index] for index in range(len(captures))] if mode == "separate" else [list(range(len(captures)))]
+            connection.execute(
+                "UPDATE presets SET sort_order = sort_order + ? WHERE status='active'",
+                (len(capture_groups),),
+            )
+            for preset_index, capture_indexes in enumerate(capture_groups):
+                prompt_input = prompt_inputs[preset_index]
+                assert isinstance(prompt_input, dict)
+                label = str(prompt_input.get("label") or "").strip()
+                content = str(prompt_input.get("content") or "").strip()
+                if not label or not content:
+                    raise ValueError("Prompt label and content are required")
+                preset_type = str(prompt_input.get("type") or _default_prompt_type([captures[index] for index in capture_indexes]))
+                preset_id = f"preset-capture-{uuid.uuid4().hex}"
+                grouped_captures = [captures[index] for index in capture_indexes]
+                grouped_assets = [assets[index] for index in capture_indexes]
+                created = normalize_preset({
+                    "id": preset_id,
+                    "type": preset_type,
+                    "category": preset_type,
+                    "label": label,
+                    "content": content,
+                    "usageCount": 0,
+                    "createdAt": now + preset_index,
+                    "updatedAt": now + preset_index,
+                    "revision": 1,
+                    "meta": {
+                        "media": [_capture_media_item(asset) for asset in grouped_assets],
+                        "recentCaptureSources": [_capture_source_metadata(capture) for capture in grouped_captures],
+                    },
+                })
+                try:
+                    self._insert_preset(connection, created, "active", preset_index)
+                except sqlite3.IntegrityError as exc:
+                    raise DuplicateItem(created["id"]) from exc
+                presets.append(created)
+
+            registered: list[dict[str, Any]] = []
+            for capture_index, capture in enumerate(captures):
+                preset_index = capture_index if mode == "separate" else 0
+                updated = normalize_recent_capture({
+                    **capture,
+                    "status": "registeredToPromptLibrary",
+                    "registeredPromptId": presets[preset_index]["id"],
+                    "registeredAt": now,
+                    "revision": capture["revision"] + 1,
+                    "updatedAt": now,
+                })
+                connection.execute(
+                    "UPDATE recent_captures SET status=?, updated_at=?, revision=?, payload_json=? WHERE id=?",
+                    (updated["status"], updated["updatedAt"], updated["revision"], _json(updated), updated["id"]),
+                )
+                registered.append(updated)
+
+        return {"presets": presets, "captures": registered}
 
     def list_presets(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -675,15 +788,20 @@ def normalize_recent_capture(item: dict[str, Any]) -> dict[str, Any]:
     capture.setdefault("height", 0)
     capture.setdefault("capturedAt", now)
     capture.setdefault("origin", {"type": "floating-toolbar"})
+    capture.setdefault("originalFilename", None)
+    capture.setdefault("registeredPromptId", None)
+    capture.setdefault("registeredAt", None)
+    capture.setdefault("linkedProjectId", None)
+    capture.setdefault("linkedCanvasNodeId", None)
     capture.setdefault("createdAt", capture.get("capturedAt") or now)
     capture.setdefault("updatedAt", capture.get("createdAt") or now)
     capture["revision"] = int(capture.get("revision") or 1)
 
     if not isinstance(capture.get("assetId"), str) or not capture["assetId"]:
         raise ValueError("Recent capture assetId is required")
-    if capture["kind"] != "screenshot":
+    if capture["kind"] not in {"screenshot", "pastedMedia", "screenRecording"}:
         raise ValueError(f"Unsupported recent capture kind: {capture['kind']}")
-    if capture["contentType"] != "image/png":
+    if capture["contentType"] not in {"image/png", "image/jpeg", "image/webp", "video/mp4"}:
         raise ValueError(f"Unsupported recent capture content type: {capture['contentType']}")
     capture["size"] = int(capture.get("size") or 0)
     capture["width"] = int(capture.get("width") or 0)
@@ -692,6 +810,41 @@ def normalize_recent_capture(item: dict[str, Any]) -> dict[str, Any]:
     capture["createdAt"] = int(capture.get("createdAt") or capture["capturedAt"])
     capture["updatedAt"] = int(capture.get("updatedAt") or capture["createdAt"])
     return capture
+
+
+def _default_prompt_type(captures: list[dict[str, Any]]) -> str:
+    role_types = {
+        "character": "subject", "prop": "subject", "scene": "scene", "composition": "camera",
+        "lighting": "lighting", "color": "style", "style": "style", "mood": "style", "other": "custom",
+    }
+    types = {role_types.get(capture.get("role"), "custom") for capture in captures}
+    return next(iter(types)) if len(types) == 1 else "custom"
+
+
+def _capture_media_item(asset: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": f"media-{asset['id']}",
+        "kind": "video" if str(asset["contentType"]).startswith("video/") else "image",
+        "source": "asset",
+        "assetId": asset["id"],
+        "filename": asset["filename"],
+        "contentType": asset["contentType"],
+        "size": asset["size"],
+        "title": asset["filename"],
+    }
+
+
+def _capture_source_metadata(capture: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "captureId": capture["id"],
+        "purpose": capture.get("purpose"),
+        "role": capture.get("role"),
+        "userNote": capture.get("userNote", ""),
+        "sourcePlatform": capture.get("sourcePlatform", ""),
+        "sourceUrl": capture.get("sourceUrl", ""),
+        "capturedAt": capture.get("capturedAt"),
+        "origin": capture.get("origin", {}),
+    }
 
 
 def now_ms() -> int:

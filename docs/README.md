@@ -21,7 +21,11 @@ This is the single entry point for the maintained project documentation. Histori
 
 PromptCard-Manager is a local-first Vite, React, TypeScript application with an optional Python Agent Runtime under `agent-runtime/`. Project and Prompt Library durable data is owned by the local `promptcard-storage` service; the frontend only keeps runtime UI state and compatibility-only browser migration markers.
 
-The Tauri desktop dev shell opens the same Vite app in a native window while keeping the source tree editable. Desktop runtime data defaults to the protected ignored profile under `logs/desktop-profile`, while legacy repository `data/` remains a compatibility seed source only. See [Desktop Dev Shell](./operations/desktop-dev-shell.md), [Local App Data Layout](./database/local-app-data-layout.md), and [ADR-004](./decisions/ADR-004-protected-profile-data-boundary.md).
+The Tauri desktop dev shell opens the same Vite app in a native window while keeping the source tree editable. During editable development, projects, Prompt presets, Recent Captures, and media use the ignored repository `data/` directory as their single durable root. Runtime logs and desktop metadata remain under `logs/`. See [Desktop Dev Shell](./operations/desktop-dev-shell.md), [Local App Data Layout](./database/local-app-data-layout.md), and [ADR-007](./decisions/ADR-007-repository-data-root-for-editable-development.md).
+
+The floating toolbar's screenshot loop is a Windows-first native `xcap` capture session: the full display frame remains in memory, while only the user-selected PNG enters Recent Captures. See [Native Screenshot Capture](./architecture/native-screenshot-capture.md) and [ADR-005](./decisions/ADR-005-native-screenshot-session.md).
+
+Capture Bar also imports WeChat/QQ-style clipboard images. Recent Captures can explicitly register one or many reviewed items into Prompt Library, or place image captures on Free Canvas, while all three consumers reuse one physical `assetId`. See [Recent Capture To Prompt Registration](./architecture/recent-capture-prompt-registration.md), [ADR-006](./decisions/ADR-006-explicit-capture-registration-and-shared-asset-identity.md), and [Storage Service API](./api/storage-service-api.md).
 
 ## Product Vision
 
@@ -60,6 +64,6 @@ When code changes, update the nearest documentation category in the same change.
 - Treat `workspaceContext.snapshot` as the per-request current workspace view. Do not use selected cards, current rows, or focused fields as the thread identity unless a future spec explicitly changes the product model.
 - Keep permission scopes narrow: `prompt-library-agent` is the only Prompt Library write proposal surface; `workspace-chatbot-agent` is for project-local card, storyboard, and three-stage edits.
 - Keep Free Canvas quick messages in the Prompt Library preset model (`category: "quick-message"`); see [ADR-001](./decisions/ADR-001-prompt-library-quick-messages.md).
-- Keep user projects, Prompt Library data, media assets, backups, logs, and Agent Runtime state inside the protected profile boundary; see [ADR-004](./decisions/ADR-004-protected-profile-data-boundary.md).
+- Keep editable-development projects, Prompt Library data, and media assets inside the protected ignored `data/` root; keep runtime logs/configuration under `logs/`; see [ADR-007](./decisions/ADR-007-repository-data-root-for-editable-development.md).
 - Any ToolUse expansion needs documentation of the visible UI affordance, runtime tool permission, and proposal or approval boundary.
 - Update this README plus the closest architecture/API/frontend/backend docs whenever Agent routing, storage, model configuration, or project workflows change.

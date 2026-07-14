@@ -60,6 +60,12 @@ class PresetBatchPayload(BaseModel):
     presets: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class RecentCaptureRegistrationPayload(BaseModel):
+    mode: str
+    captures: list[dict[str, Any]] = Field(default_factory=list)
+    prompt: dict[str, Any] | None = None
+
+
 def create_app(storage: SqliteStore) -> FastAPI:
     application = FastAPI(title="PromptCard Storage", version="1.0.0")
 
@@ -107,9 +113,21 @@ def create_app(storage: SqliteStore) -> FastAPI:
     def create_recent_capture(item: dict[str, Any]) -> dict[str, Any]:
         return _handle(lambda: storage.create_recent_capture(item))
 
+    @application.post("/api/recent-captures/register-to-prompt-library")
+    def register_recent_captures(payload: RecentCaptureRegistrationPayload) -> dict[str, Any]:
+        return _handle(lambda: storage.register_recent_captures_to_prompt_library(payload.model_dump()))
+
     @application.put("/api/recent-captures/{item_id}")
     def update_recent_capture(item_id: str, payload: UpdatePayload) -> dict[str, Any]:
         return _handle(lambda: storage.update_recent_capture(item_id, payload.updates, payload.revision))
+
+    @application.delete("/api/recent-captures/{item_id}")
+    def delete_recent_capture(item_id: str, payload: RevisionPayload) -> dict[str, Any]:
+        def delete() -> dict[str, bool]:
+            storage.delete_recent_capture(item_id, payload.revision)
+            return {"ok": True}
+
+        return _handle(delete)
 
     @application.get("/api/projects")
     def list_projects() -> dict[str, Any]:

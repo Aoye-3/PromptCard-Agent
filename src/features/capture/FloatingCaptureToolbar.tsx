@@ -1,8 +1,20 @@
-import { Camera, GripHorizontal, Video, X } from 'lucide-react'
-import { emitTo } from '@tauri-apps/api/event'
+import { useEffect, useState } from 'react'
+import { Camera, GripHorizontal, Loader2, Video, X } from 'lucide-react'
+import { emitTo, listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
+import { requestScreenshot } from './floating-capture-toolbar-request'
 
 export const FloatingCaptureToolbar = () => {
+  const [isPreparing, setIsPreparing] = useState(false)
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null
+    void listen('capture:toolbar-restored', () => setIsPreparing(false))
+      .then(dispose => { unlisten = dispose })
+      .catch(error => console.error('Failed to listen for capture toolbar state:', error))
+    return () => unlisten?.()
+  }, [])
+
   const handleDrag = async () => {
     try {
       await getCurrentWindow().startDragging()
@@ -13,7 +25,10 @@ export const FloatingCaptureToolbar = () => {
 
   const handleScreenshot = async () => {
     try {
-      await emitTo('main', 'capture:screenshot-requested', { source: 'capture-toolbar', requestedAt: Date.now() })
+      await requestScreenshot({
+        setPreparing: setIsPreparing,
+        emitIntent: () => emitTo('main', 'capture:screenshot-requested', { source: 'capture-toolbar', requestedAt: Date.now() })
+      })
     } catch (error) {
       console.error('Failed to emit screenshot intent:', error)
     }
@@ -42,22 +57,26 @@ export const FloatingCaptureToolbar = () => {
         </button>
         <button
           type="button"
+          disabled={isPreparing}
           className="flex h-9 w-9 items-center justify-center rounded-md bg-gray-950 text-white transition hover:bg-gray-800 active:scale-[0.98]"
-          aria-label="Screenshot"
-          title="Screenshot"
+          aria-label={isPreparing ? 'Preparing screenshot' : 'Screenshot'}
+          title={isPreparing ? '正在准备截图' : '截图'}
           onClick={handleScreenshot}
         >
-          <Camera className="h-4 w-4" />
+          {isPreparing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
         </button>
-        <button
-          type="button"
-          disabled
-          className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-md bg-gray-100 text-gray-300"
-          aria-label="Record coming next"
-          title="Record coming next"
-        >
-          <Video className="h-4 w-4" />
-        </button>
+        {isPreparing ? <span className="whitespace-nowrap px-1 text-xs font-bold text-gray-700">正在准备截图…</span> : null}
+        {!isPreparing && (
+          <button
+            type="button"
+            disabled
+            className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-md bg-gray-100 text-gray-300"
+            aria-label="Record coming next"
+            title="Record coming next"
+          >
+            <Video className="h-4 w-4" />
+          </button>
+        )}
         <button
           type="button"
           className="flex h-9 w-9 items-center justify-center rounded-md text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 active:scale-[0.98]"

@@ -15,6 +15,8 @@ The main webview sets `dragDropEnabled: false`. Windows requires this for Explor
 
 The Capture Bar page in the main window owns toolbar start/close controls, status, preview, and planned module configuration. When started, the floating capture toolbar is a second Tauri window routed to `/?window=capture-toolbar`. It is undecorated, non-resizable, always on top, skipped from the taskbar, and uses a toolbar-only capability with limited event/window permissions. Closing the toolbar destroys that toolbar window and does not stop the local services; service shutdown and app exit are tied to the `main` window close path.
 
+Screenshot click leaves the toolbar visible in a preparation state while the main window creates a third temporary window, `capture-selection`, hidden over the toolbar's display. After its frontend loads, the selector activates the session; Rust hides the toolbar, takes the native `xcap` frame on a blocking worker, then explicitly shows and focuses the gray drag layer. The selector capability may only activate, finish, or cancel the active screenshot session and emit completion events; it cannot invoke update, Git, or filesystem commands. Closing, cancelling, native failure, or the 30-second startup watchdog clears the matching in-memory session and restores the toolbar. See [Native Screenshot Capture](../architecture/native-screenshot-capture.md).
+
 ## Commands
 
 Windows Tauri development requires Rust plus Microsoft C++ Build Tools. If `cargo check` fails with `link.exe not found`, install Visual Studio Build Tools with the Visual C++ workload and retry.
@@ -72,39 +74,44 @@ The legacy Tauri `beforeDevCommand` still points at:
 npm.cmd run desktop:dev-services
 ```
 
-The desktop launcher avoids that path for dynamic-port launches by writing `logs/tauri.dev-runtime.conf.json`. Direct `npm.cmd run tauri:dev` still uses the static Tauri config and the legacy `beforeDevCommand`. Both paths use the protected desktop profile for storage, logs, and Agent Runtime state. Startup details, including the actual frontend, Agent Runtime, and storage URLs, are recorded in `logs/dev-runtime.json`.
+The desktop launcher avoids that path for dynamic-port launches by writing `logs/tauri.dev-runtime.conf.json`. The maintained editable-development Storage Service root is the repository `data/` directory. Direct `npm.cmd run tauri:dev` still uses the static Tauri config and legacy `beforeDevCommand`; until its environment is unified, it may select a different storage path and must not be treated as an interchangeable launcher. Startup details, including the actual frontend, Agent Runtime, storage URLs, and Storage health path, are recorded in `logs/dev-runtime.json`.
 
-## Data Profile
+## Durable Data And Runtime Profile
 
-The desktop shell defaults to a protected profile inside the current workspace:
+Editable-development durable storage and runtime state have separate roots inside the workspace:
 
 ```text
-logs/desktop-profile/
-  data/
-    promptcard.sqlite3
-    assets/
-  backups/
-  logs/
-  agent-runtime/
-    .deer-flow/
-  config/
-    desktop-shell.json
-    update-source.json
+data/
+  promptcard.sqlite3
+  assets/
+  capture-staging/
+
+backups/
+
+logs/
+  dev-runtime.json
+  tauri.dev-runtime.conf.json
+  desktop-profile/
+    agent-runtime/
+      .deer-flow/
+    config/
+      desktop-shell.json
+      update-source.json
 ```
 
-`scripts/start-desktop-dev-services.ps1` passes profile paths to the local services with environment variables:
+Maintained launchers pass explicit paths to local services:
 
 ```text
-PROMPTCARD_STORAGE_DATA_DIR=<desktop-profile>\data
+PROMPTCARD_STORAGE_DATA_DIR=<repository>\data
 DEER_FLOW_HOME=<desktop-profile>\agent-runtime\.deer-flow
-PROMPTCARD_LIBRARY_FILE=<desktop-profile>\data\prompt-library-presets.json
+PROMPTCARD_LIBRARY_FILE=<repository>\data\prompt-library-presets.json
 PROMPTCARD_LOGS_DIR=<desktop-profile>\logs
 PROMPTCARD_DESKTOP_PROFILE_ROOT=<desktop-profile>
 ```
 
-Legacy repository-local `data/` and `agent-runtime/.deer-flow/` are compatibility seed sources only. On first profile startup, missing profile files can be copied from those locations, but the startup path must not overwrite existing profile files and must not delete legacy files.
+Repository `data/` is the live Storage Service source of truth, not a compatibility seed. Legacy JSON files and browser cache remain migration inputs. Logs, update configuration, and Agent Runtime state may stay in the Desktop Profile, but no maintained launcher should create a second live Storage database under it.
 
-Plain `npm.cmd run dev:with-agent` can still use repository-local defaults unless the caller provides the same profile environment variables. The desktop shell path is the maintained profile boundary.
+Plain `npm.cmd run dev:with-agent` uses the repository storage root. All other maintained launchers must converge on the same `PROMPTCARD_STORAGE_DATA_DIR` and fail fast when Storage health reports a different path.
 
 ## Shutdown Behavior
 
@@ -130,7 +137,7 @@ The command set is:
 2. `update_save_config` writes the selected GitHub URL, remote name, and branch into the Profile config.
 3. `update_check` runs `git ls-remote` against the configured branch and records the latest remote commit.
 4. `update_preview` runs `git fetch --no-tags <repoUrl> <branch>`, diffs `HEAD..FETCH_HEAD`, and classifies changed paths.
-5. `update_apply` requires a clean worktree, blocks protected or manual-review paths, creates a Profile backup, then runs `git merge --ff-only FETCH_HEAD`.
+5. `update_apply` requires a clean worktree, blocks protected or manual-review paths, creates a SQLite/assets backup under `backups/`, then runs `git merge --ff-only FETCH_HEAD`.
 
 It uses the system Git credentials. The app does not store GitHub tokens or PATs.
 
@@ -171,10 +178,10 @@ The legacy Tauri command `git_pull_source` remains for compatibility with old de
 - It does not perform dependency installation after source updates; the Update screen reports when dependency manifests changed.
 - It does not migrate data during source updates.
 - The Capture Bar page currently starts and closes the screenshot toolbar only. Recording, audio capture, GIF export, video canvas nodes, frame extraction, Storyboard inference, visual Agent analysis, and global shortcuts remain planned modules.
-- Screenshot capture uses the WebView screen-capture picker and requires the user to grant screen/window capture before drag-selecting a region.
+- Screenshot capture uses native `xcap` for the display containing the floating toolbar; no WebView screen-share picker is used. This is implemented and build-verified on Windows, but manual single-display, multi-display, and mixed-DPI validation remains required. macOS and Linux are not yet validated.
 - Toolbar position persistence is not implemented yet.
 - If an existing service is already healthy but points at a different data directory, startup should fail instead of silently reusing it.
-- Before public distribution, keep personal data out of the source tree and switch the default profile to the packaged app's approved user-data directory.
+- Before public distribution, keep personal data out of release artifacts and migrate the repository storage root to the packaged app's approved user-data directory.
 
 ## Application Icon
 

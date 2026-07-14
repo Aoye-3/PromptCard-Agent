@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Partially superseded by [ADR-007](./ADR-007-repository-data-root-for-editable-development.md). The desktop Profile remains the boundary for runtime logs and configuration, but it no longer owns Storage Service data during editable development.
 
 ## Date
 

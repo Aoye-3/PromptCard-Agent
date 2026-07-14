@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent as ReactClipboardEvent } from 'react'
 import PromptLibrary from './components/PromptLibrary'
 import ThreeStageBuilderScreen from './components/ThreeStageBuilder'
 import { AgentDashboard } from './components/AgentDashboard'
@@ -12,7 +12,9 @@ import { UpdateScreen } from './components/app/UpdateScreen'
 import { TemplateLibraryScreen } from './components/app/TemplateLibraryScreen'
 import { MediaScreen } from './features/media/MediaScreen'
 import { CaptureBarScreen } from './features/capture/CaptureBarScreen'
-import { ScreenshotCaptureOverlay } from './features/capture/ScreenshotCaptureOverlay'
+import type { ClipboardCaptureStatus } from './features/capture/CaptureBarScreen'
+import { getClipboardImageFiles } from './components/canvas/canvas-image-assets'
+import { importImageCapture, readClipboardImageFiles } from './features/capture/image-capture-import'
 import { closeCaptureToolbarWindow, openCaptureToolbarWindow, type CaptureToolbarStatus } from './features/capture/capture-toolbar-window'
 import type { BuilderModePreviewSnapshot } from './components/app/builder-preview-contract'
 import { AddCardModal, CreateProjectModal, HistoryModal, RenameProjectModal } from './components/app/ProjectModals'
@@ -23,6 +25,7 @@ import { assemblePrompt, getCardDefaultTitle } from './utils/promptParser'
 import { findDuplicatePhrases, parsePromptToCardUpdates } from './utils/promptComposer'
 import { useI18n } from './i18n'
 import { storage } from './utils/storage'
+import { desktopShellService } from './services/desktop-shell-service'
 import { createBuilderTemplateProjectTitle, getBuilderTemplateById } from './domain/builder-templates/builder-templates'
 import type { BuilderTemplateId } from './domain/builder-templates/builder-templates'
 import { sortProjects } from './domain/projects/project-normalization'
@@ -30,7 +33,7 @@ import { mergeStoredProjectMetadata } from './domain/projects/project-storage-me
 import { createProjectSaveCoordinator, type ProjectSaveResult } from './domain/projects/project-save-coordinator'
 import { normalizeThreeStageTemplateSettings, type ThreeStageTemplateSettings } from './domain/three-stage/three-stage-definitions'
 import { createFreeCanvasImageNodeFromMedia } from './domain/free-canvas/free-canvas-project'
-import type { FreeCanvasMediaNode } from './domain/free-canvas/free-canvas'
+import { createCaptureCanvasMediaNode, createCaptureCanvasUpdates } from './features/media/capture-canvas-placement'
 import type { IPreset, CardType } from './models/Card.model'
 import type { IFreeCanvasProject, IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
@@ -114,9 +117,10 @@ function App() {
   const [duplicateMode, setDuplicateMode] = useState(false)
   const [activeEditMode, setActiveEditMode] = useState<'learn' | 'creative'>('creative')
   const [showSettings, setShowSettings] = useState(false)
-  const [showScreenshotCapture, setShowScreenshotCapture] = useState(false)
   const [captureToolbarStatus, setCaptureToolbarStatus] = useState<CaptureToolbarStatus>('closed')
   const [captureToolbarError, setCaptureToolbarError] = useState('')
+  const [clipboardCaptureStatus, setClipboardCaptureStatus] = useState<ClipboardCaptureStatus>('idle')
+  const [clipboardCaptureMessage, setClipboardCaptureMessage] = useState('')
   const [startupMessage, setStartupMessage] = useState('正在连接本地数据服务...')
   const [userSettings, setUserSettings] = useState<IUserSettings>(DEFAULT_USER_SETTINGS)
   const threeStageTemplateSettings = useMemo(
@@ -127,6 +131,7 @@ function App() {
   const projectEditSeqRef = useRef<Record<string, number>>({})
   const lastCardWorkspaceSnapshotRef = useRef('')
   const activeProjectRef = useRef<IPromptProject | null>(null)
+  const placeCaptureOnCanvasRef = useRef<(capture: RecentCaptureItem) => Promise<void>>(async () => undefined)
   const projectSaveCoordinatorRef = useRef<ReturnType<typeof createProjectSaveCoordinator> | null>(null)
   if (!projectSaveCoordinatorRef.current) {
     projectSaveCoordinatorRef.current = createProjectSaveCoordinator({
@@ -274,14 +279,38 @@ function App() {
     if (!('__TAURI_INTERNALS__' in window)) return
     let unlistenScreenshot: (() => void) | null = null
     let unlistenToolbarClosed: (() => void) | null = null
+    let unlistenCaptureCompleted: (() => void) | null = null
+    let unlistenPlaceOnCanvas: (() => void) | null = null
     import('@tauri-apps/api/event')
       .then(async ({ listen }) => {
-        unlistenScreenshot = await listen('capture:screenshot-requested', () => {
-          setShowScreenshotCapture(true)
+        unlistenScreenshot = await listen('capture:screenshot-requested', async () => {
+          const project = activeProjectRef.current
+          const allowCanvas = project?.type === 'free-canvas' && Boolean(project.freeCanvas)
+          try {
+            await desktopShellService.beginScreenshotSelection(allowCanvas)
+          } catch (error) {
+            setCaptureToolbarStatus('error')
+            setCaptureToolbarError(error instanceof Error ? error.message : 'Screenshot selection could not start.')
+            try {
+              await openCaptureToolbarWindow()
+            } catch {
+              setCaptureToolbarStatus('error')
+            }
+          }
         })
         unlistenToolbarClosed = await listen('capture:toolbar-closed', () => {
           setCaptureToolbarStatus('closed')
           setCaptureToolbarError('')
+        })
+        unlistenCaptureCompleted = await listen('capture:completed', () => {
+          setActiveTab('media')
+          setShowTemplateLibrary(false)
+          setProjectMode('home')
+          setCaptureToolbarStatus('running')
+          setCaptureToolbarError('')
+        })
+        unlistenPlaceOnCanvas = await listen<{ capture: RecentCaptureItem }>('capture:place-on-canvas', event => {
+          void placeCaptureOnCanvasRef.current(event.payload.capture)
         })
       })
       .catch(error => {
@@ -290,6 +319,8 @@ function App() {
     return () => {
       unlistenScreenshot?.()
       unlistenToolbarClosed?.()
+      unlistenCaptureCompleted?.()
+      unlistenPlaceOnCanvas?.()
     }
   }, [])
 
@@ -808,22 +839,7 @@ function App() {
 
   const handlePlaceCaptureOnCanvas = async (capture: RecentCaptureItem) => {
     if (!activeProjectId || activeProject?.type !== 'free-canvas' || !activeProject.freeCanvas) return
-    const size = fitCaptureForCanvas(capture.width, capture.height)
-    const mediaNode: FreeCanvasMediaNode = {
-      id: `capture-media-${capture.id}`,
-      kind: 'imageAsset',
-      title: capture.title,
-      position: { x: 120, y: 120 },
-      width: size.width,
-      height: size.height,
-      assetId: capture.assetId,
-      imageUrl: storage.assets.url(capture.assetId),
-      meta: {
-        recentCaptureId: capture.id,
-        originalWidth: capture.width,
-        originalHeight: capture.height
-      }
-    }
+    const mediaNode = createCaptureCanvasMediaNode(capture)
     const imageNode = createFreeCanvasImageNodeFromMedia(mediaNode)
     const updatedFreeCanvas = {
       ...activeProject.freeCanvas,
@@ -846,12 +862,18 @@ function App() {
     if (result.status === 'saved') {
       setProjectSaveStatus(activeProjectId, 'saved', savedAt)
       try {
-        await storage.recentCaptures.update(capture.id, capture.revision, { status: 'placedOnCanvas' })
+        await storage.recentCaptures.update(
+          capture.id,
+          capture.revision,
+          createCaptureCanvasUpdates(capture, activeProjectId, mediaNode.id)
+        )
       } catch (error) {
         console.error('Failed to update capture placement status:', error)
       }
     }
   }
+
+  placeCaptureOnCanvasRef.current = handlePlaceCaptureOnCanvas
 
   const handleUpdateUserSettings = async (settings: Partial<IUserSettings>) => {
     const updated = await storage.settings.save(settings)
@@ -891,6 +913,57 @@ function App() {
       setCaptureToolbarStatus('error')
       setCaptureToolbarError(error instanceof Error ? error.message : '捕获栏关闭失败。')
     }
+  }
+
+  const importClipboardFiles = async (files: File[]) => {
+    if (files.length === 0) {
+      setClipboardCaptureStatus('error')
+      setClipboardCaptureMessage('剪贴板中没有可用图片。请先用微信或 QQ 截图，再按 Ctrl+V。')
+      return
+    }
+    setClipboardCaptureStatus('saving')
+    setClipboardCaptureMessage(`正在保存 ${files.length} 张图片...`)
+    try {
+      const startedAt = Date.now()
+      for (const [index, file] of files.entries()) {
+        await importImageCapture({
+          file,
+          kind: 'pastedMedia',
+          sourcePlatform: 'Clipboard',
+          capturedAt: startedAt + index,
+          origin: { type: 'clipboard' }
+        })
+      }
+      setClipboardCaptureStatus('saved')
+      setClipboardCaptureMessage(`已保存 ${files.length} 张图片到近期捕获，可继续粘贴。`)
+    } catch (error) {
+      console.error('Failed to import clipboard capture:', error)
+      setClipboardCaptureStatus('error')
+      setClipboardCaptureMessage(error instanceof Error ? error.message : '剪贴板截图保存失败。')
+    }
+  }
+
+  const handleReadClipboard = async () => {
+    setClipboardCaptureStatus('reading')
+    setClipboardCaptureMessage('正在读取剪贴板...')
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.read !== 'function') {
+        throw new Error('当前环境不能直接读取剪贴板，请聚焦此区域后按 Ctrl+V。')
+      }
+      await importClipboardFiles(await readClipboardImageFiles(navigator.clipboard))
+    } catch (error) {
+      setClipboardCaptureStatus('error')
+      setClipboardCaptureMessage(error instanceof Error
+        ? `${error.message} 请聚焦此区域后按 Ctrl+V。`
+        : '剪贴板读取失败，请聚焦此区域后按 Ctrl+V。')
+      document.querySelector<HTMLElement>('[data-clipboard-capture]')?.focus()
+    }
+  }
+
+  const handlePasteClipboard = (event: ReactClipboardEvent<HTMLElement>) => {
+    const files = getClipboardImageFiles(event.clipboardData)
+    if (files.length > 0) event.preventDefault()
+    void importClipboardFiles(files)
   }
 
   const handleCopyPrompt = async () => {
@@ -1111,13 +1184,25 @@ function App() {
   ] as const
 
   const content = activeTab === 'media' ? (
-    <MediaScreen />
+    <MediaScreen
+      canPlaceOnCanvas={activeProject?.type === 'free-canvas' && Boolean(activeProject.freeCanvas)}
+      onPlaceOnCanvas={async capture => {
+        const storedCapture = await storage.recentCaptures.getById(capture.id)
+        if (storedCapture) await handlePlaceCaptureOnCanvas(storedCapture)
+      }}
+      onOpenPromptLibrary={() => setActiveTab('library')}
+    />
   ) : activeTab === 'capture' ? (
     <CaptureBarScreen
       status={captureToolbarStatus}
       errorMessage={captureToolbarError}
       onOpenToolbar={handleOpenCaptureToolbar}
       onCloseToolbar={handleCloseCaptureToolbar}
+      clipboardStatus={clipboardCaptureStatus}
+      clipboardMessage={clipboardCaptureMessage}
+      onReadClipboard={() => void handleReadClipboard()}
+      onPasteClipboard={handlePasteClipboard}
+      onOpenRecentCaptures={() => setActiveTab('media')}
     />
   ) : activeTab === 'library' ? (
     <PromptLibrary embedded />
@@ -1318,28 +1403,8 @@ function App() {
           </div>
         </div>
       )}
-      {showScreenshotCapture && (
-        <ScreenshotCaptureOverlay
-          onClose={() => setShowScreenshotCapture(false)}
-          onCaptureCreated={() => {
-            setActiveTab('media')
-            setShowTemplateLibrary(false)
-            setProjectMode('home')
-          }}
-          canPlaceOnCanvas={activeProject?.type === 'free-canvas' && Boolean(activeProject.freeCanvas)}
-          onPlaceOnCanvas={handlePlaceCaptureOnCanvas}
-        />
-      )}
     </AppShell>
   )
-}
-
-const fitCaptureForCanvas = (width: number, height: number): { width: number; height: number } => {
-  const maximum = 360
-  const safeWidth = Math.max(1, width || maximum)
-  const safeHeight = Math.max(1, height || 220)
-  const scale = maximum / Math.max(safeWidth, safeHeight)
-  return { width: safeWidth * scale, height: safeHeight * scale }
 }
 
 export default App

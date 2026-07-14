@@ -11,7 +11,7 @@ import {
   sortProjects
 } from '@/domain/projects/project-normalization'
 import { devPresetFileStorage, devProjectFileStorage, staticPresetFileStorage } from '@/storage/dev-file-storage'
-import { storageServiceClient, type RecentCaptureItem } from '@/storage/storage-service-client'
+import { storageServiceClient, type RecentCaptureItem, type RecentCaptureRegistrationRequest, type RecentCaptureRegistrationResult } from '@/storage/storage-service-client'
 import type { IPromptTemplate } from '@/models/PromptTemplate.model'
 import type { IUserSettings } from '@/models/UserSettings.model'
 import type { IPage } from '@/stores/card-initial-state'
@@ -91,6 +91,12 @@ export const storage = {
     },
     update(id: string, revision: number, updates: Partial<RecentCaptureItem>): Promise<RecentCaptureItem> {
       return storageServiceClient.recentCaptures.update(id, revision, updates)
+    },
+    delete(id: string, revision: number): Promise<void> {
+      return storageServiceClient.recentCaptures.delete(id, revision)
+    },
+    registerToPromptLibrary(payload: RecentCaptureRegistrationRequest): Promise<RecentCaptureRegistrationResult> {
+      return storageServiceClient.recentCaptures.registerToPromptLibrary(payload)
     }
   },
 

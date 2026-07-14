@@ -16,10 +16,56 @@ export const createRecentCaptureViewModel = (capture: RecentCaptureItem): Recent
   sourcePlatform: capture.sourcePlatform,
   sourceUrl: capture.sourceUrl,
   contentType: capture.contentType,
+  revision: capture.revision,
+  originalFilename: capture.originalFilename,
+  registeredPromptId: capture.registeredPromptId || null,
+  registeredAt: capture.registeredAt || null,
+  linkedProjectId: capture.linkedProjectId || null,
+  linkedCanvasNodeId: capture.linkedCanvasNodeId || null,
+  origin: capture.origin,
   sizeLabel: formatBytes(capture.size),
   dimensionsLabel: capture.width > 0 && capture.height > 0 ? `${capture.width} x ${capture.height}` : undefined,
   capturedAtLabel: formatCapturedAt(capture.capturedAt)
 })
+
+export const createImageCaptureDraft = (input: {
+  assetId: string
+  filename: string
+  contentType: 'image/png' | 'image/jpeg' | 'image/webp'
+  kind: 'screenshot' | 'pastedMedia'
+  sourcePlatform: string
+  size: number
+  width: number
+  height: number
+  capturedAt?: number
+  selection?: { x: number; y: number; width: number; height: number }
+  origin?: Record<string, unknown>
+}): Partial<RecentCaptureItem> & Pick<RecentCaptureItem, 'assetId'> => {
+  const capturedAt = input.capturedAt || Date.now()
+  return {
+    id: `capture-${capturedAt}`,
+    assetId: input.assetId,
+    kind: input.kind,
+    status: 'recent',
+    purpose: 'inspirationReference',
+    role: 'other',
+    title: input.filename.replace(/\.[^.]+$/, '') || 'Screenshot capture',
+    prompt: '',
+    userNote: '',
+    sourcePlatform: input.sourcePlatform,
+    sourceUrl: '',
+    contentType: input.contentType,
+    originalFilename: input.filename,
+    size: input.size,
+    width: input.width,
+    height: input.height,
+    capturedAt,
+    origin: input.origin || {
+      type: 'floating-toolbar',
+      selection: input.selection
+    }
+  }
+}
 
 export const createScreenshotCaptureDraft = (input: {
   assetId: string
@@ -29,31 +75,13 @@ export const createScreenshotCaptureDraft = (input: {
   height: number
   capturedAt?: number
   selection?: { x: number; y: number; width: number; height: number }
-}): Partial<RecentCaptureItem> & Pick<RecentCaptureItem, 'assetId'> => {
-  const capturedAt = input.capturedAt || Date.now()
-  return {
-    id: `capture-${capturedAt}`,
-    assetId: input.assetId,
-    kind: 'screenshot',
-    status: 'recent',
-    purpose: 'inspirationReference',
-    role: 'other',
-    title: input.filename.replace(/\.[^.]+$/, '') || 'Screenshot capture',
-    prompt: '',
-    userNote: '',
-    sourcePlatform: 'Floating toolbar',
-    sourceUrl: '',
-    contentType: 'image/png',
-    size: input.size,
-    width: input.width,
-    height: input.height,
-    capturedAt,
-    origin: {
-      type: 'floating-toolbar',
-      selection: input.selection
-    }
-  }
-}
+  origin?: Record<string, unknown>
+}): Partial<RecentCaptureItem> & Pick<RecentCaptureItem, 'assetId'> => createImageCaptureDraft({
+  ...input,
+  contentType: 'image/png',
+  kind: 'screenshot',
+  sourcePlatform: 'Floating toolbar'
+})
 
 export const notifyRecentCapturesChanged = () => {
   window.dispatchEvent(new CustomEvent(RECENT_CAPTURES_CHANGED_EVENT))

@@ -29,7 +29,7 @@ Asset uploads send the bytes as the request body, the MIME type in `Content-Type
 
 The generated ID is safe to persist in project metadata and Recent Capture metadata. The read endpoint serves the original bytes with their stored content type. Invalid types, empty or oversized bodies return `400`; unknown or malformed IDs return `404`.
 
-`GET /api/assets/diagnostics` checks the asset manifest and reference graph. Recent Capture `assetId` values are treated as live references, so screenshots that have not been placed on a project canvas are not reported as unreferenced solely because they are capture-only assets.
+`GET /api/assets/diagnostics` checks the asset manifest and reference graph. Active and Trash projects, active and Trash Prompt presets, and Recent Captures all participate in the reference scan. Registering or placing a capture therefore does not require a copied asset.
 
 ## Recent Captures
 
@@ -37,16 +37,18 @@ The generated ID is safe to persist in project metadata and Recent Capture metad
 - `GET /api/recent-captures/{id}`
 - `POST /api/recent-captures`
 - `PUT /api/recent-captures/{id}`
+- `DELETE /api/recent-captures/{id}`
+- `POST /api/recent-captures/register-to-prompt-library`
 
-Recent Capture records are metadata rows that point at existing assets by `assetId`. The MVP writes screenshot captures only; recording/video capture remains a future surface. A stored item has this UI-facing shape:
+Recent Capture records are metadata rows that point at existing assets by `assetId`. The current image intake accepts native screenshots and clipboard PNG/JPEG/WebP images. Recording/video capture remains gated behind Windows desktop acceptance. A stored item has this UI-facing shape:
 
 ```json
 {
   "id": "capture-1",
   "assetId": "generated-id.png",
   "kind": "screenshot",
-  "status": "saved",
-  "purpose": "reference",
+  "status": "recent",
+  "purpose": "inspirationReference",
   "role": null,
   "title": "Screenshot",
   "prompt": "",
@@ -58,11 +60,46 @@ Recent Capture records are metadata rows that point at existing assets by `asset
   "width": 640,
   "height": 360,
   "capturedAt": 1770000000000,
-  "origin": "floating-toolbar"
+  "origin": { "type": "floating-toolbar", "engine": "xcap" },
+  "registeredPromptId": null,
+  "registeredAt": null,
+  "linkedProjectId": null,
+  "linkedCanvasNodeId": null,
+  "revision": 1
 }
 ```
 
-Creates accept a complete capture metadata payload and return the stored item with service timestamps and `revision`. Updates require the current `revision` and replace only supplied mutable fields. Stale revisions return `409` with the current item. Unknown asset IDs return `404`; malformed payloads return `400`.
+The Media UI labels deletion as **Remove record**. `DELETE /api/recent-captures/{id}` requires `{ "revision": <current revision> }` and only removes the metadata row. It intentionally does not delete the shared asset file or any Prompt Library/Canvas consumer that already references the same `assetId`; an asset left without consumers remains visible to asset diagnostics for later cleanup. Permanent asset deletion is not part of this endpoint.
+
+Creates accept a complete capture metadata payload and return the stored item with service timestamps and `revision`. Updates require the current `revision` and replace only supplied mutable fields. Stale revisions return `409` with the current item. Malformed payloads return `400`.
+
+Registration is one SQLite transaction. `mode: "separate"` creates one preset per Capture; `mode: "merged"` creates one preset whose `meta.media` contains every selected asset. Each request item carries Capture `id` and `revision`, while user-confirmed label/content/type fields are supplied per item or in the merged `prompt` object. The response is `{ "presets": [...], "captures": [...] }`. Missing captures/assets, stale revisions, blank Prompt fields, or already-registered captures roll back the entire batch. Preset `meta.media[].assetId` is copied by reference, while `meta.recentCaptureSources` preserves Capture provenance.
+
+Separate request:
+
+```json
+{
+  "mode": "separate",
+  "captures": [
+    { "id": "capture-1", "revision": 2, "label": "Hero", "content": "cinematic hero portrait", "type": "subject" }
+  ]
+}
+```
+
+Merged request:
+
+```json
+{
+  "mode": "merged",
+  "captures": [
+    { "id": "capture-1", "revision": 2 },
+    { "id": "capture-2", "revision": 1 }
+  ],
+  "prompt": { "label": "Reference set", "content": "use the reviewed reference set", "type": "custom" }
+}
+```
+
+Registration returns `400` for invalid modes, empty/blank Prompt fields, or already-registered items; `404` for missing Capture or asset records; and `409` for stale revisions. A failure response never contains a partially inserted Preset or partially updated Capture.
 
 ## Projects
 

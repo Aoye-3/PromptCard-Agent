@@ -37,6 +37,25 @@ describe('CaptureBarScreen', () => {
     expect(onOpenToolbar).toHaveBeenCalledTimes(1)
     expect(onCloseToolbar).toHaveBeenCalledTimes(1)
   })
+
+  it('renders a visible clipboard paste area and recent captures shortcut', () => {
+    const markup = renderToStaticMarkup(
+      <CaptureBarScreen
+        status="closed"
+        clipboardStatus="idle"
+        onOpenToolbar={() => undefined}
+        onCloseToolbar={() => undefined}
+        onReadClipboard={() => undefined}
+        onPasteClipboard={() => undefined}
+        onOpenRecentCaptures={() => undefined}
+      />
+    )
+
+    expect(markup).toContain('data-clipboard-capture')
+    expect(markup).toContain('粘贴剪贴板截图')
+    expect(markup).toContain('Ctrl+V')
+    expect(markup).toContain('查看近期捕获')
+  })
 })
 
 const findButton = (node: ReactNode, label: string): ReactElement<{ onClick: () => void }> => {

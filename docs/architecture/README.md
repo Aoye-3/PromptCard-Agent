@@ -6,4 +6,6 @@ Architecture documents explain the runtime topology, module boundaries, and cros
 - [Data Flow](./data-flow.md)
 - [Data Storage And Update System](./data-storage-and-update-system.md)
 - [Agent Runtime Boundary](./agent-runtime-boundary.md)
+- [Native Screenshot Capture](./native-screenshot-capture.md)
+- [Recent Capture To Prompt Registration](./recent-capture-prompt-registration.md)
 - [Architecture Decisions](../decisions/README.md)

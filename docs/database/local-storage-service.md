@@ -1,14 +1,14 @@
 # Local Storage Service
 
-`promptcard_storage` is the sole durable owner of projects, Prompt Library presets, Trash state, asset metadata, asset bytes, and Recent Capture metadata. Runtime records are stored under the configured `PROMPTCARD_STORAGE_DATA_DIR`, which the desktop dev shell derives from the protected profile by default:
+`promptcard_storage` is the sole durable owner of projects, Prompt Library presets, Trash state, asset metadata, asset bytes, and Recent Capture metadata. During editable development, `PROMPTCARD_STORAGE_DATA_DIR` resolves to the repository data root:
 
 ```text
-logs/desktop-profile/data/
+data/
   promptcard.sqlite3
   assets/
 ```
 
-The repository-local `data/` fallback remains a compatibility path for direct service startup and legacy migration, not the preferred desktop runtime location.
+Every maintained launcher must use this same path and reject a healthy Storage Service whose `/health` response reports a different storage root. Packaged builds may move the same database/assets contract only through an explicit migration.
 
 ## SQLite Contract
 
@@ -21,7 +21,7 @@ The repository-local `data/` fallback remains a compatibility path for direct se
 - Active and Trash records share one table. Delete and restore are single transactions.
 - Connections enable WAL, foreign keys, a busy timeout, and full synchronous durability. Writes begin with `BEGIN IMMEDIATE`.
 - Duplicate creates and stale revisions return conflicts instead of overwriting data.
-- Asset diagnostics include references from projects, presets, and Recent Capture records before reporting unreferenced files.
+- Asset diagnostics include references from active/Trash projects, active/Trash Prompt presets, and Recent Capture records before reporting unreferenced files.
 
 ## JSON Migration
 

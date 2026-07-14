@@ -5,19 +5,81 @@ import { MediaAnalysisDialog } from './MediaAnalysisDialog'
 import { RecentCaptureDetailPanel } from './RecentCaptureDetailPanel'
 import { RecentCaptureInbox } from './RecentCaptureInbox'
 import { useRecentCaptures } from './use-recent-captures'
+import { RecentCaptureRegistrationDialog } from './RecentCaptureRegistrationDialog'
+import type { RecentCaptureItemViewModel } from './media-types'
+import { usePresetStore } from '@/stores/preset.store'
+import { storage } from '@/utils/storage'
 
-export const MediaScreen = () => {
+export const MediaScreen = ({
+  canPlaceOnCanvas = false,
+  onPlaceOnCanvas = async () => undefined,
+  onOpenPromptLibrary = () => undefined
+}: {
+  canPlaceOnCanvas?: boolean
+  onPlaceOnCanvas?: (capture: RecentCaptureItemViewModel) => Promise<void>
+  onOpenPromptLibrary?: (presetId?: string) => void
+}) => {
   const { t } = useI18n()
-  const { captures, selectedCapture, selectedCaptureId, setSelectedCaptureId } = useRecentCaptures()
+  const { captures, refreshCaptures, selectedCapture, selectedCaptureId, setSelectedCaptureId } = useRecentCaptures()
+  const refreshPresets = usePresetStore(state => state.refresh)
   const [analysisCaptureId, setAnalysisCaptureId] = useState<string | null>(null)
+  const [batchMode, setBatchMode] = useState(false)
+  const [selectedCaptureIds, setSelectedCaptureIds] = useState<string[]>([])
+  const [registrationCaptureIds, setRegistrationCaptureIds] = useState<string[] | null>(null)
+  const [deletingCaptureId, setDeletingCaptureId] = useState<string | null>(null)
+  const [captureActionError, setCaptureActionError] = useState('')
   const analysisCapture = useMemo(
     () => captures.find(capture => capture.id === analysisCaptureId) || null,
     [analysisCaptureId, captures]
   )
+  const registrationCaptures = useMemo(
+    () => registrationCaptureIds?.map(id => captures.find(capture => capture.id === id)).filter((capture): capture is RecentCaptureItemViewModel => Boolean(capture)) || [],
+    [captures, registrationCaptureIds]
+  )
 
   const handleSelectCapture = (captureId: string) => {
     setSelectedCaptureId(captureId)
+  }
+
+  const handleEditCapture = (captureId: string) => {
+    setSelectedCaptureId(captureId)
     setAnalysisCaptureId(captureId)
+  }
+
+  const handleDeleteCapture = async (capture: RecentCaptureItemViewModel) => {
+    const confirmed = window.confirm(
+      `确定从“近期捕获”移除“${capture.title}”吗？\n\n这只会移除近期捕获记录，不会删除已绑定的 Prompt、画布节点或共享素材文件。`
+    )
+    if (!confirmed) return
+
+    setCaptureActionError('')
+    setDeletingCaptureId(capture.id)
+    try {
+      await storage.recentCaptures.delete(capture.id, capture.revision)
+      if (selectedCaptureId === capture.id) setSelectedCaptureId(null)
+      if (analysisCaptureId === capture.id) setAnalysisCaptureId(null)
+      setSelectedCaptureIds(current => current.filter(id => id !== capture.id))
+      setRegistrationCaptureIds(current => current?.filter(id => id !== capture.id) || null)
+      await refreshCaptures()
+    } catch (error) {
+      setCaptureActionError(error instanceof Error ? `移除近期捕获记录失败：${error.message}` : '移除近期捕获记录失败，请重试。')
+    } finally {
+      setDeletingCaptureId(null)
+    }
+  }
+
+  const toggleBatchMode = () => {
+    setBatchMode(current => !current)
+    setSelectedCaptureIds([])
+  }
+
+  const toggleCaptureSelection = (captureId: string) => {
+    setSelectedCaptureIds(current => current.includes(captureId) ? current.filter(id => id !== captureId) : [...current, captureId])
+  }
+
+  const placeOnCanvas = async (capture: RecentCaptureItemViewModel) => {
+    await onPlaceOnCanvas(capture)
+    await refreshCaptures()
   }
 
   return (
@@ -37,7 +99,7 @@ export const MediaScreen = () => {
           <div className="grid grid-cols-3 gap-2 text-left sm:w-[420px]">
             <Stat label={t('mediaStatRecent')} value={captures.length.toString()} />
             <Stat label={t('mediaStatAnnotated')} value="0" />
-            <Stat label={t('mediaStatRegistered')} value="0" />
+            <Stat label={t('mediaStatRegistered')} value={captures.filter(capture => capture.registeredPromptId).length.toString()} />
           </div>
         </header>
 
@@ -63,13 +125,39 @@ export const MediaScreen = () => {
           </div>
         </div>
 
+        {captureActionError && (
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+            {captureActionError}
+          </div>
+        )}
+
+        {batchMode && selectedCaptureIds.length > 0 && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+            <span className="text-sm font-black text-blue-900">已选择 {selectedCaptureIds.length} 项</span>
+            <button type="button" onClick={() => setRegistrationCaptureIds(selectedCaptureIds)} className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-black text-white">批量注册到 Prompt Library</button>
+          </div>
+        )}
+
         <div className="grid min-h-[620px] flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
           <RecentCaptureInbox
             captures={captures}
             selectedCaptureId={selectedCaptureId}
+            selectedCaptureIds={selectedCaptureIds}
+            batchMode={batchMode}
             onSelectCapture={handleSelectCapture}
+            onEditCapture={handleEditCapture}
+            onDeleteCapture={capture => void handleDeleteCapture(capture)}
+            deletingCaptureId={deletingCaptureId}
+            onToggleBatchMode={toggleBatchMode}
+            onToggleCaptureSelection={toggleCaptureSelection}
           />
-          <RecentCaptureDetailPanel capture={selectedCapture} />
+          <RecentCaptureDetailPanel
+            capture={selectedCapture}
+            canPlaceOnCanvas={canPlaceOnCanvas}
+            onRegister={capture => setRegistrationCaptureIds([capture.id])}
+            onPlaceOnCanvas={capture => void placeOnCanvas(capture)}
+            onOpenPromptLibrary={presetId => onOpenPromptLibrary(presetId)}
+          />
         </div>
 
         <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-3 text-xs font-bold text-gray-500">
@@ -78,6 +166,18 @@ export const MediaScreen = () => {
         </div>
       </div>
       <MediaAnalysisDialog capture={analysisCapture} onClose={() => setAnalysisCaptureId(null)} />
+      {registrationCaptureIds && registrationCaptures.length > 0 && (
+        <RecentCaptureRegistrationDialog
+          captures={registrationCaptures}
+          onClose={() => setRegistrationCaptureIds(null)}
+          onRegistered={async () => {
+            await Promise.all([refreshCaptures(), refreshPresets()])
+            setRegistrationCaptureIds(null)
+            setSelectedCaptureIds([])
+            setBatchMode(false)
+          }}
+        />
+      )}
     </section>
   )
 }

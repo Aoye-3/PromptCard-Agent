@@ -87,7 +87,10 @@ body {
 
 html[data-window="capture-toolbar"],
 html[data-window="capture-toolbar"] body,
-html[data-window="capture-toolbar"] #root {
+html[data-window="capture-toolbar"] #root,
+html[data-window="capture-selection"],
+html[data-window="capture-selection"] body,
+html[data-window="capture-selection"] #root {
   background: transparent !important;
   overflow: hidden;
 }

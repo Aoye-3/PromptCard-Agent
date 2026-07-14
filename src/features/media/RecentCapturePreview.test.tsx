@@ -18,6 +18,12 @@ describe('RecentCapturePreview', () => {
       sourcePlatform: 'Floating toolbar',
       sourceUrl: '',
       contentType: 'image/png',
+      revision: 1,
+      registeredPromptId: null,
+      registeredAt: null,
+      linkedProjectId: null,
+      linkedCanvasNodeId: null,
+      origin: { type: 'floating-toolbar' },
       sizeLabel: '2 KB',
       dimensionsLabel: '800 x 450',
       capturedAtLabel: 'Today 10:00'

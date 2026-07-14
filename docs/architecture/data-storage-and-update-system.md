@@ -10,11 +10,11 @@ The core rule is simple: source can be updated from GitHub; user data must not b
 
 | Data kind | Owner | Default location | GitHub update may overwrite? | Notes |
 | --- | --- | --- | --- | --- |
-| User projects | User | `logs/desktop-profile/data/promptcard.sqlite3` | No | `projects` rows, active and Trash state, revisions, and full project JSON payloads. |
-| Prompt Library presets | User | `logs/desktop-profile/data/promptcard.sqlite3` | No | `presets` rows, active and Trash state, ordering, usage counts, and full preset JSON payloads. |
-| Recent Captures | User | `logs/desktop-profile/data/promptcard.sqlite3` | No | Capture inbox metadata with `assetId` references. |
-| User media assets | User | `logs/desktop-profile/data/assets/` | No | PNG, JPEG, WebP, MP4, and WebM bytes. Projects and presets store references only. |
-| User backups | User | `logs/desktop-profile/backups/` | No | Manual, migration, and pre-update snapshots. |
+| User projects | User | `data/promptcard.sqlite3` | No | `projects` rows, active and Trash state, revisions, and full project JSON payloads. |
+| Prompt Library presets | User | `data/promptcard.sqlite3` | No | `presets` rows, active and Trash state, ordering, usage counts, and full preset JSON payloads. |
+| Recent Captures | User | `data/promptcard.sqlite3` | No | Capture inbox metadata with `assetId` references. |
+| User media assets | User | `data/assets/` | No | PNG, JPEG, WebP, and future MP4 bytes. Projects and presets store references only. |
+| User backups | User | `backups/` | No | Migration, manual, and pre-update snapshots. |
 | Desktop logs | User/runtime | `logs/desktop-profile/logs/` | No | Runtime diagnostics for the editable desktop shell. |
 | Agent Runtime state | User/runtime | `logs/desktop-profile/agent-runtime/.deer-flow/` | No | Memory, threads, uploads, outputs, and local model configuration. |
 | Desktop profile metadata | User/runtime | `logs/desktop-profile/config/desktop-shell.json` | No | Profile identity and source-root metadata. |
@@ -27,39 +27,45 @@ The core rule is simple: source can be updated from GitHub; user data must not b
 | Source code and scripts | Source | `src/`, `promptcard_storage/`, `src-tauri/`, `scripts/`, `vite/`, selected `agent-runtime/` source directories | Yes | Managed by the project repository. |
 | Package and build metadata | Source | `package*.json`, `tsconfig*.json`, `vite.config.ts`, Tauri/Rust manifests | Yes | Managed by the project repository. |
 
-## Protected Profile Contract
+## Editable-Development Data Contract
 
-The editable desktop shell uses a protected profile by default:
+The editable desktop shell uses one ignored durable storage root:
 
 ```text
-logs/desktop-profile/
-  data/
-    promptcard.sqlite3
-    promptcard.sqlite3-wal
-    promptcard.sqlite3-shm
-    assets/
-  backups/
-  logs/
-  agent-runtime/
-    .deer-flow/
-      data/
-      promptcard-model-config.json
-  config/
-    desktop-shell.json
-    update-source.json
+data/
+  promptcard.sqlite3
+  promptcard.sqlite3-wal
+  promptcard.sqlite3-shm
+  assets/
+  capture-staging/
+
+backups/
+
+logs/
+  dev-runtime.json
+  tauri.dev-runtime.conf.json
+  desktop-profile/
+    logs/
+    agent-runtime/
+      .deer-flow/
+        data/
+        promptcard-model-config.json
+    config/
+      desktop-shell.json
+      update-source.json
 ```
 
-`scripts/start-desktop-dev-services.ps1` derives the runtime environment from that profile:
+Maintained editable-development launchers must derive storage and runtime paths consistently:
 
 | Environment variable | Value |
 | --- | --- |
-| `PROMPTCARD_DESKTOP_PROFILE_ROOT` | Selected profile root, defaulting to `logs/desktop-profile`. |
-| `PROMPTCARD_STORAGE_DATA_DIR` | `<profile>/data`. |
-| `PROMPTCARD_LOGS_DIR` | `<profile>/logs`. |
-| `DEER_FLOW_HOME` | `<profile>/agent-runtime/.deer-flow`. |
-| `PROMPTCARD_LIBRARY_FILE` | `<profile>/data/prompt-library-presets.json`. |
+| `PROMPTCARD_STORAGE_DATA_DIR` | `<repository>/data`. |
+| `PROMPTCARD_LOGS_DIR` | Runtime log directory under `logs/`. |
+| `PROMPTCARD_DESKTOP_PROFILE_ROOT` | Optional runtime config/log root under `logs/desktop-profile`; it does not own Storage Service data. |
+| `DEER_FLOW_HOME` | Agent Runtime state directory selected by the launcher. |
+| `PROMPTCARD_LIBRARY_FILE` | Legacy JSON compatibility path only; live Prompt Library records are in SQLite. |
 
-Legacy repository-local `data/` and `agent-runtime/.deer-flow/` paths are compatibility seed sources only. On first profile startup, missing profile files may be copied from those locations. This seed step must not overwrite profile files and must not delete legacy files.
+Startup must verify that Storage Service health reports the expected repository `data/` path. A healthy service pointing to another directory is an error, not an alternate profile to reuse silently. Legacy JSON files and browser cache remain migration sources; the SQLite database and asset directory under `data/` are the live source of truth.
 
 ## Durable Storage Responsibilities
 
@@ -91,7 +97,7 @@ Development/example data must never contain:
 - real API keys or tokens;
 - local Agent Runtime memory, thread data, uploads, or outputs.
 
-Runtime code may read source-owned examples as seeds or fixtures, but it must write user changes to the protected profile or browser-owned storage, not back into source example files.
+Runtime code may read source-owned examples as seeds or fixtures, but durable project/media changes must go through the Storage Service into the ignored `data/` root. UI-only browser data remains in browser-owned storage.
 
 ## Source Update Allowlist
 
@@ -127,10 +133,10 @@ The desktop shell exposes these Tauri commands:
 | Command | Responsibility |
 | --- | --- |
 | `update_get_config` | Read `config/update-source.json`, filling missing values from the current Git remote and branch. |
-| `update_save_config` | Persist the selected repository URL, remote name, and branch into the protected profile. |
+| `update_save_config` | Persist the selected repository URL, remote name, and branch into local runtime configuration under `logs/`. |
 | `update_check` | Run `git ls-remote` against the configured branch and record the latest remote commit. |
 | `update_preview` | Run `git fetch --no-tags <repoUrl> <branch>`, diff `HEAD..FETCH_HEAD`, and classify changed paths. |
-| `update_apply` | Require a clean source worktree, create a Profile backup, block protected/manual paths, then run `git merge --ff-only FETCH_HEAD`. |
+| `update_apply` | Require a clean source worktree, create a storage backup, block protected/manual paths, then run `git merge --ff-only FETCH_HEAD`. |
 
 Current update flow:
 
@@ -139,7 +145,7 @@ Current update flow:
 3. Classify changed paths as source-owned, protected user data/config, or manual review.
 4. Block automatic update if any protected or manual-review path would be touched.
 5. Block automatic update if the source worktree has uncommitted changes.
-6. Create a Profile backup under `logs/desktop-profile/backups/source-update-<timestamp>/`.
+6. Create a storage backup under `backups/source-update-<timestamp>/`.
 7. Apply source updates with `git merge --ff-only FETCH_HEAD`.
 8. Return `requiresDependencyInstall` when package or Rust dependency manifests changed; v1 does not run dependency installation from the app.
 9. Ask the user to restart the desktop shell after a successful source update.
@@ -152,7 +158,7 @@ Automatic updates must stop and ask for manual review when:
 
 - the source worktree has uncommitted tracked changes;
 - a remote change touches protected data/config paths;
-- profile backup creation fails;
+- Storage Service backup creation fails;
 - SQLite integrity check fails;
 - the storage service is still writing or cannot be stopped safely;
 - source update requires a data migration that is not implemented for the current schema version;
@@ -161,7 +167,8 @@ Automatic updates must stop and ask for manual review when:
 
 ## Related Documents
 
-- [ADR-004: Keep User Data In A Protected Desktop Profile](../decisions/ADR-004-protected-profile-data-boundary.md)
+- [ADR-007: Use The Repository Data Root During Editable Development](../decisions/ADR-007-repository-data-root-for-editable-development.md)
+- [ADR-004: Keep User Data In A Protected Desktop Profile (partially superseded)](../decisions/ADR-004-protected-profile-data-boundary.md)
 - [Local App Data Layout](../database/local-app-data-layout.md)
 - [Local Storage Service](../database/local-storage-service.md)
 - [Frontend Storage Model](../frontend/storage-model.md)

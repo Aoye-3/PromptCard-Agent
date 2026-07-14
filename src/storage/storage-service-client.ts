@@ -1,4 +1,4 @@
-import type { IPreset } from '@/models/Card.model'
+import type { CardType, IPreset } from '@/models/Card.model'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 
 export interface TrashEntry<T> {
@@ -12,7 +12,7 @@ export interface TrashEntry<T> {
 export interface RecentCaptureItem {
   id: string
   assetId: string
-  kind: 'screenshot'
+  kind: 'screenshot' | 'pastedMedia' | 'screenRecording'
   status: 'recent' | 'annotated' | 'registeredToPromptLibrary' | 'placedOnCanvas' | 'archived'
   purpose: 'inspirationReference' | 'generatedResult' | 'promptAttachment' | 'shotOutput'
   role?: 'character' | 'scene' | 'prop' | 'composition' | 'lighting' | 'color' | 'style' | 'mood' | 'other' | null
@@ -21,7 +21,14 @@ export interface RecentCaptureItem {
   userNote: string
   sourcePlatform: string
   sourceUrl: string
-  contentType: 'image/png'
+  contentType: 'image/png' | 'image/jpeg' | 'image/webp' | 'video/mp4'
+  originalFilename?: string
+  registeredPromptId?: string | null
+  registeredAt?: number | null
+  linkedProjectId?: string | null
+  linkedCanvasNodeId?: string | null
+  durationMs?: number
+  hasAudio?: boolean
   size: number
   width: number
   height: number
@@ -30,6 +37,27 @@ export interface RecentCaptureItem {
   createdAt: number
   updatedAt: number
   revision: number
+}
+
+export interface RecentCaptureRegistrationRequest {
+  mode: 'separate' | 'merged'
+  captures: Array<{
+    id: string
+    revision: number
+    label?: string
+    content?: string
+    type?: CardType
+  }>
+  prompt?: {
+    label: string
+    content: string
+    type: CardType
+  }
+}
+
+export interface RecentCaptureRegistrationResult {
+  presets: IPreset[]
+  captures: RecentCaptureItem[]
 }
 
 export class StorageRevisionConflict<T> extends Error {
@@ -70,9 +98,9 @@ type ErrorEnvelope = {
   }
 }
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+async function request<T>(url: string, init?: RequestInit, timeoutMs = 10_000): Promise<T> {
   const controller = new AbortController()
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), 10_000)
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs)
   let response: Response
   try {
     response = await fetch(url, {
@@ -143,7 +171,7 @@ export const storageServiceClient = {
           'X-File-Name': encodeURIComponent(file.name)
         },
         body: file
-      })
+      }, 30_000)
     },
     url(assetId: string): string {
       return `/storage-api/assets/${encodeURIComponent(assetId)}`
@@ -170,6 +198,16 @@ export const storageServiceClient = {
     update(id: string, revision: number, updates: Partial<RecentCaptureItem>): Promise<RecentCaptureItem> {
       return request(`/storage-api/recent-captures/${encodeURIComponent(id)}`, {
         method: 'PUT', body: JSON.stringify({ revision, updates })
+      })
+    },
+    async delete(id: string, revision: number): Promise<void> {
+      await request(`/storage-api/recent-captures/${encodeURIComponent(id)}`, {
+        method: 'DELETE', body: JSON.stringify({ revision })
+      })
+    },
+    registerToPromptLibrary(payload: RecentCaptureRegistrationRequest): Promise<RecentCaptureRegistrationResult> {
+      return request('/storage-api/recent-captures/register-to-prompt-library', {
+        method: 'POST', body: JSON.stringify(payload)
       })
     }
   },

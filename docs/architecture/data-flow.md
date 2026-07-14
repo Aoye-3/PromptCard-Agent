@@ -6,7 +6,7 @@ Project data is represented by `IPromptProject`. Card projects mainly use `pages
 
 Three-stage projects use a page-based form model under `threeStage.pages`. Each page contains ordered independent `form` items for character, storyboard, video-prompt, and optional object boards. The legacy top-level `threeStage.character`, `threeStage.storyboard`, `threeStage.videoPrompt`, `selectedStage`, and `selectedFieldId` fields remain compatibility mirrors and are synchronized from the selected page/form during normalization and UI updates.
 
-Loading now goes through the local `promptcard_storage` service. Active and Trash project rows live in the configured profile database, normally `logs/desktop-profile/data/promptcard.sqlite3`; the old repository `data/` files are read-only compatibility seeds. Browser project cache is imported once through an idempotent migration endpoint and is not used as an ongoing project source.
+Loading now goes through the local `promptcard_storage` service. During editable development, active and Trash project rows live in `data/promptcard.sqlite3`. Browser project cache and legacy JSON files are imported only through explicit/idempotent migration paths and are not ongoing project sources.
 
 Project normalization is pure domain logic in `src/domain/projects/project-normalization.ts`. It is responsible for defaulting legacy card projects, migrating legacy flat storyboard rows into the sequence model, creating missing three-stage payloads, repairing known display-text mojibake, and sorting by recent activity. UI components and stores should call the storage facade instead of duplicating this logic.
 
@@ -22,19 +22,35 @@ Frontend project and preset storage calls use `/storage-api/*`, proxied to the s
 
 ## Floating Screenshot Capture Data
 
-The Capture Bar page in the main app creates the floating capture toolbar on demand. The toolbar is a separate Tauri window rendered from the same frontend bundle with `?window=capture-toolbar`; it is not created at desktop startup. Its screenshot button emits `capture:screenshot-requested` to the `main` window. The record button is intentionally disabled for the current MVP.
+The Capture Bar page creates `capture-toolbar` on demand. It is a separate Tauri window rendered from `?window=capture-toolbar`; it is not created at desktop startup. On screenshot click, the toolbar stays visible in a disabled `正在准备截图…` state and emits `capture:screenshot-requested` to `main`.
 
-The main app listens for the event and opens a full-screen screenshot selection overlay. The overlay requests a screen/window stream with the WebView `getDisplayMedia` picker, renders the selected source into a video preview, lets the user drag a region, crops that region to a PNG blob, uploads the blob through `storage.assets.upload`, and creates a Recent Capture record through `storage.recentCaptures.create`.
+The main window calls `capture_begin_selection`. Rust resolves the display containing the toolbar, reserves the single in-memory session, and creates `capture-selection` hidden at `?window=capture-selection&session=<id>`. Once that React page has loaded, it calls `capture_activate_selection`; Rust then hides the toolbar, captures one `xcap` frame on Tauri's blocking worker, and explicitly shows/focuses the gray monitor-sized selector. The selector submits a logical drag rectangle; Rust converts it to source-frame pixels, crops and PNG-encodes the image, then releases the full source frame. A session that does not become ready within 30 seconds is cleared and the toolbar is restored.
 
-After creation, the overlay dispatches `recent-captures:changed` so the Media screen reloads its capture list. The post-capture action bar can copy the image, save it locally, dismiss the overlay, or place the same `assetId` on the current free canvas when the active project context supports image nodes. Canvas placement references the existing asset file; it does not duplicate bytes.
+The selector converts the returned data URL into a `File`, uploads it through `storage.assets.upload`, and creates a Recent Capture through `storage.recentCaptures.create`. It then dispatches `recent-captures:changed` so Media reloads without a full-app refresh. Copy and local save are explicit user-clicked browser actions. Canvas placement is offered only when the screenshot began in an active Free Canvas project; it reuses the same `assetId` and never registers the capture in Prompt Library.
 
-Recent Capture metadata is stored in SQLite beside projects and presets. Screenshot assets remain under the profile `data/assets/`, and asset diagnostics treats Recent Capture `assetId` values as live references.
+The Capture Bar page also owns a visible clipboard intake region. Direct reads use `navigator.clipboard.read()`; denied or unavailable reads focus the same region for Ctrl+V. DataTransfer and ClipboardItem paths accept PNG, JPEG, and WebP, then use the same dimension/upload/Recent Capture import service as the native screenshot flow. Clipboard records use `kind: "pastedMedia"` and preserve the original MIME type, filename, and import time.
 
-## Protected Profile Boundary
+## Recent Captures To Prompt Library And Canvas
 
-The desktop dev shell derives storage paths from `PROMPTCARD_DESKTOP_PROFILE_ROOT`, defaulting to `logs/desktop-profile`. Storage, Agent Runtime state, logs, backups, and desktop shell metadata are therefore user data even though the default profile is still inside the current workspace.
+Recent Capture registration is explicit. The Media page can register one item, register a batch as one Prompt per item, or merge a batch into one Prompt. A single storage endpoint validates every Capture revision and asset before inserting Presets and updating Capture links in one SQLite transaction. Prompt `meta.media` and Canvas image nodes both retain the Capture's existing `assetId`; neither path uploads another file.
 
-Source updates must treat the profile as out of scope. The sidebar Update module checks source revisions, previews changed source paths, creates a Profile backup, and applies source changes with a fast-forward Git merge without editing profile data. The legacy `git_pull_source` command remains only for compatibility with old desktop builds.
+```text
+Recent Capture(assetId A)
+  -> atomic registration -> Prompt meta.media(assetId A)
+  -> explicit placement  -> Free Canvas image node(assetId A)
+```
+
+`registeredPromptId` is the authoritative registration link. Canvas links are independent fields, so placement cannot erase registered state. Asset diagnostics scans active/Trash Presets as well as projects and captures. Raw Recent Captures remain outside Agent context; only the resulting Prompt preset enters the curated Agent-visible source.
+
+Media row selection only changes the detail-panel selection. Opening the analysis dialog requires the explicit Edit action. **Remove record** sends the Capture id and current revision to `DELETE /api/recent-captures/{id}` and removes only the Capture metadata row. Prompt/Canvas references and the shared asset remain intact; if the asset has no remaining consumer, diagnostics reports it as unreferenced for a future reference-aware cleanup workflow.
+
+Recent Capture metadata is stored in SQLite beside projects and presets. During editable development, screenshot and clipboard-image assets remain under the repository `data/assets/`, and asset diagnostics treats Recent Capture `assetId` values as live references. Native captures add `origin.engine: "xcap"`, the display name, and native crop pixels for diagnosis. See [Native Screenshot Capture](./native-screenshot-capture.md) for the session lifecycle and permission boundary.
+
+## Durable Data And Runtime Boundaries
+
+Editable-development Storage Service data is rooted at the ignored repository `data/` directory, with storage backups under `backups/`. Runtime logs, the dynamic-port manifest, generated Tauri configuration, and desktop/update metadata may remain under `logs/`. All are local user/runtime state and must remain outside source updates. See [ADR-007](../decisions/ADR-007-repository-data-root-for-editable-development.md).
+
+Source updates must treat durable data and local runtime state as out of scope. The sidebar Update module checks source revisions, previews changed source paths, creates a Storage Service backup under `backups/`, and applies source changes with a fast-forward Git merge without editing `data/`, `backups/`, or local runtime state under `logs/`. The legacy `git_pull_source` command remains only for compatibility with old desktop builds.
 
 ## Agent Collaboration Data
 

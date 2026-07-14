@@ -100,6 +100,25 @@ describe('storageServiceClient', () => {
     }))
   })
 
+  test('allows asset uploads 30 seconds before timing out', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = expect(storageServiceClient.assets.upload(
+      new File([new Uint8Array([1, 2, 3])], 'board.png', { type: 'image/png' })
+    )).rejects.toMatchObject({ code: 'timeout', status: 0 })
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    const signal = fetchMock.mock.calls[0][1]?.signal
+    expect(signal?.aborted).toBe(false)
+
+    await vi.advanceTimersByTimeAsync(20_000)
+    await request
+  })
+
   test('rejects unsupported upload files before sending a request', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)
@@ -107,5 +126,52 @@ describe('storageServiceClient', () => {
     await expect(storageServiceClient.assets.upload(new File(['gif'], 'board.gif', { type: 'image/gif' })))
       .rejects.toMatchObject({ code: 'invalid_asset', status: 400 })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  test('sends one atomic Recent Capture registration request', async () => {
+    const payload = { presets: [{ id: 'preset-1' }], captures: [{ id: 'capture-1' }] }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(storageServiceClient.recentCaptures.registerToPromptLibrary({
+      mode: 'separate',
+      captures: [{ id: 'capture-1', revision: 2, label: 'Hero', content: 'A hero', type: 'subject' }]
+    })).resolves.toEqual(payload)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/storage-api/recent-captures/register-to-prompt-library',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          mode: 'separate',
+          captures: [{ id: 'capture-1', revision: 2, label: 'Hero', content: 'A hero', type: 'subject' }]
+        })
+      })
+    )
+  })
+
+  test('deletes one Recent Capture with optimistic revision checking', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const deleteCapture = Reflect.get(storageServiceClient.recentCaptures, 'delete') as
+      | ((id: string, revision: number) => Promise<void>)
+      | undefined
+    expect(deleteCapture).toBeTypeOf('function')
+    if (!deleteCapture) return
+
+    await deleteCapture('capture/one', 3)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/storage-api/recent-captures/capture%2Fone',
+      expect.objectContaining({
+        method: 'DELETE',
+        body: JSON.stringify({ revision: 3 })
+      })
+    )
   })
 })

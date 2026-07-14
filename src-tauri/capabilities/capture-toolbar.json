@@ -8,6 +8,7 @@
   },
   "permissions": [
     "core:event:allow-emit-to",
+    "core:event:allow-listen",
     "core:window:allow-close",
     "core:window:allow-start-dragging"
   ]

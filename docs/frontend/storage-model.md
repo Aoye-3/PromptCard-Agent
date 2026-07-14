@@ -4,7 +4,7 @@ Frontend persistence is exposed through `src/utils/storage.ts`.
 
 `src/utils/storage.ts` is intentionally a facade: it preserves the existing app-facing API while delegating project and Prompt Library durability to the local storage service through `src/storage/storage-service-client.ts`.
 
-In the desktop dev shell, the storage service writes to the protected profile data directory selected by `scripts/start-desktop-dev-services.ps1`. Frontend code should continue to use `/storage-api/*` and must not assume a repository-local `data/` path.
+In editable desktop development, the storage service writes to the ignored repository `data/` directory. Frontend code still uses `/storage-api/*` and does not open repository files directly; the path contract belongs to launchers and the Storage Service.
 
 ## Browser Storage
 
@@ -40,15 +40,21 @@ The Vite middleware implementation for these endpoints lives in `vite/plugins/pr
 
 ## Image Assets
 
-Free-canvas images and floating screenshot captures are uploaded through `/storage-api/assets`. Project JSON and Recent Capture metadata store the returned `assetId`, never Base64 image data. Original and cropped nodes can therefore share one durable file without increasing project write size; cropped nodes add only normalized crop coordinates and their source node reference.
+Free-canvas images, floating screenshots, and clipboard images are uploaded through `/storage-api/assets`. Project JSON, Prompt preset metadata, and Recent Capture metadata store the returned `assetId`, never Base64 image data. Original and cropped nodes can therefore share one durable file without increasing project write size; cropped nodes add only normalized crop coordinates and their source node reference.
 
 ## Recent Captures
 
 Recent Capture metadata is stored through `/storage-api/recent-captures` and exposed in the frontend facade as `storage.recentCaptures`. Durable records use `RecentCaptureItem`; media UI converts them to `RecentCaptureItemViewModel` before rendering.
 
-The Media screen loads Recent Captures from the storage service instead of fixtures. It also listens for the `recent-captures:changed` browser event so a new floating-toolbar screenshot appears without reloading the whole app. Screenshot previews resolve their image URL with `storage.assets.url(assetId)`.
+The Media screen loads Recent Captures from the storage service instead of fixtures. It also listens for the `recent-captures:changed` browser event so a new native screenshot or clipboard import appears without reloading the whole app. Image previews resolve their URL with `storage.assets.url(assetId)`.
 
-Raw Recent Capture records are capture inbox items only. They are not automatically added to the Prompt Library, Agent context, or a project canvas. The screenshot post-capture action can place the same `assetId` on the current free canvas when an active canvas context is available.
+Native toolbar screenshots keep the normal screenshot fields plus `origin.engine: "xcap"`, the toolbar display name, and the actual crop rectangle in original-frame pixels. The uncropped frame and the transient PNG data URL are never durable records; only the uploaded asset and Recent Capture metadata are persisted.
+
+Raw Recent Capture records are capture inbox items only. They are not automatically added to Prompt Library, Agent context, or a project canvas. Registration calls one transactional endpoint with Capture IDs, revisions, and user-confirmed Prompt fields; it creates Presets and updates `registeredPromptId` atomically. Single, separate-batch, and merged-batch modes all preserve the original `assetId` in `meta.media`.
+
+Screenshot and pasted-image records can be placed on an active Free Canvas. Placement creates a new Canvas node but uploads no file and creates no asset row. `linkedProjectId` and `linkedCanvasNodeId` are independent from registration fields, so Canvas placement does not register a Prompt and cannot erase an existing registration.
+
+The Recent Captures list keeps row selection separate from editing: selection updates the detail panel, while the explicit Edit action opens the analysis dialog. Its **Remove record** action calls the revision-checked Recent Capture DELETE endpoint. This removes only the inbox metadata row; Prompt media, Canvas nodes, the asset row, and the physical file remain unchanged. An asset with no remaining consumers is surfaced by diagnostics rather than deleted implicitly.
 
 ## Project Normalization
 

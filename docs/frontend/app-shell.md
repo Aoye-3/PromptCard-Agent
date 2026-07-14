@@ -12,8 +12,9 @@ Large UI surfaces are split under `src/components/app/`:
 - `StoryboardBuilderScreen.tsx`: storyboard sequence/shot editor.
 - `MeScreen.tsx`: local profile/settings and dev server shutdown.
 - `ProjectModals.tsx`: history, card type, create-project, and rename modals.
-- `src/features/media/MediaScreen.tsx`: Recent Captures shell for captured screenshots and recordings before they are registered or placed on canvas.
+- `src/features/media/MediaScreen.tsx`: Recent Captures review surface for native screenshots and pasted images, including selection-only detail updates, explicit analysis editing, metadata-record removal, batch Prompt registration, and image placement on Free Canvas. Recording remains planned.
 - `src/features/capture/CaptureBarScreen.tsx`: Capture Bar control page for starting, closing, previewing, and planning toolbar modules.
+- `src/features/capture/ScreenshotCaptureOverlay.tsx`: native-session selector rendered only by the hidden-preloaded `capture-selection` window; after activation it presents the gray drag surface, uploads a cropped PNG, and creates the Recent Capture.
 
 `src/App.tsx` remains a meaningful orchestration surface. Treat it carefully during refactors: prefer extracting behavior into smaller components, domain helpers, or stores without changing persistence or navigation semantics in the same change.
 
@@ -22,7 +23,7 @@ Large UI surfaces are split under `src/components/app/`:
 The desktop shell uses a fixed left sidebar for primary navigation. The sidebar exposes six primary areas:
 
 - **Projects**: project home, card builder, and storyboard builder.
-- **Media**: `近期捕获` / Recent Captures review queue for media intake, metadata review, media analysis dialog shell, and placeholder archive/register/place-on-canvas actions.
+- **Media**: `近期捕获` / Recent Captures review queue for metadata review, media analysis, explicit Prompt registration, and image placement on Free Canvas. Archive remains deferred.
 - **Capture Bar**: floating toolbar control page for starting and closing the capture toolbar, previewing the compact toolbar, and listing planned capture modules.
 - **Prompt Library**: embedded Prompt library management UI.
 - **Agent Dashboard**: unified Agent management page with DeepSeek model service configuration, default model, ToolUse visibility, skills, runtime status, diagnostics chat, and Prompt Library proposal review.
@@ -34,7 +35,9 @@ The sidebar search input is enabled only on the Projects home view and filters t
 
 The Projects utility area currently keeps **Trash** pinned in the left sidebar for every non-builder page. Clicking it calls the existing project-trash handler, returns to the Projects home flow, and opens the trash view. The direct **Template Library** sidebar entry is intentionally hidden for now and remains a planned navigation item rather than an active surface.
 
-The Capture Bar is intentionally separate from Media. Capture Bar owns toolbar launch, close, preview, and module configuration; Media remains the results inbox for Recent Captures. The desktop shell does not create the floating capture toolbar at app startup. Users start it from the Capture Bar page when needed, and closing it destroys the toolbar window instead of merely hiding it.
+The Capture Bar is intentionally separate from Media. Capture Bar owns toolbar launch, close, preview, and module configuration; Media remains the results inbox for Recent Captures. In Media, selecting a row updates the right-hand detail panel, Edit opens the analysis dialog, and Remove record deletes only Recent Capture metadata after confirmation. The desktop shell does not create the floating capture toolbar at app startup. Users start it from the Capture Bar page when needed, and closing it destroys the toolbar window instead of merely hiding it.
+
+Screenshot capture is a three-window desktop flow. The toolbar first shows a disabled preparation state and emits an intent. `App.tsx` asks Rust to reserve the session and preload `capture-selection` hidden. After the selector page signals readiness, Rust hides the toolbar, captures the source frame off the async runtime thread, and shows/focuses the gray drag surface. The selector is never rendered in the main window. Its ability to place a saved image on canvas is fixed when the session starts and is enabled only for an active Free Canvas project. Restore events reset the toolbar preparation state after cancellation, failure, close, or startup timeout.
 
 ## Project Screens
 

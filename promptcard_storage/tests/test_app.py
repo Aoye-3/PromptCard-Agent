@@ -109,6 +109,40 @@ class StorageAppContractTest(unittest.TestCase):
         self.assertEqual(update_response.status_code, 200)
         self.assertEqual(update_response.json()["status"], "placedOnCanvas")
 
+        delete_response = self.client.request(
+            "DELETE",
+            "/api/recent-captures/capture-one",
+            json={"revision": update_response.json()["revision"]},
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_response.json(), {"ok": True})
+        self.assertEqual(self.client.get("/api/recent-captures").json()["captures"], [])
+        self.assertEqual(self.client.get(f"/api/assets/{asset_id}").status_code, 200)
+
+    def test_registers_recent_captures_to_prompt_library_atomically(self) -> None:
+        asset = self.client.post(
+            "/api/assets",
+            content=b"\x89PNG\r\n\x1a\nimage",
+            headers={"content-type": "image/png", "x-file-name": "shot.png"},
+        ).json()
+        capture = self.client.post("/api/recent-captures", json={
+            "id": "capture-register", "assetId": asset["id"], "kind": "screenshot",
+            "contentType": "image/png", "title": "Shot", "prompt": "A wide shot", "role": "composition",
+        }).json()
+
+        response = self.client.post("/api/recent-captures/register-to-prompt-library", json={
+            "mode": "separate",
+            "captures": [{
+                "id": capture["id"], "revision": capture["revision"],
+                "label": "Shot", "content": "A wide shot", "type": "camera",
+            }],
+        })
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["presets"][0]["meta"]["media"][0]["assetId"], asset["id"])
+        self.assertEqual(payload["captures"][0]["registeredPromptId"], payload["presets"][0]["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

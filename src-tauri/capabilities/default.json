@@ -13,6 +13,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-close",
     "core:window:allow-is-visible",
-    "git-pull-source"
+    "git-pull-source",
+    "native-screenshot-start"
   ]
 }

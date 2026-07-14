@@ -1,11 +1,18 @@
-import { Camera, CheckCircle2, Clock3, Download, Film, GripHorizontal, ImagePlus, Mic, PlaySquare, ShieldCheck, Video, Wand2, X } from 'lucide-react'
+import { Camera, CheckCircle2, ClipboardPaste, Clock3, Download, ExternalLink, Film, GripHorizontal, ImagePlus, Mic, PlaySquare, ShieldCheck, Video, Wand2, X } from 'lucide-react'
 import type { CaptureToolbarStatus } from './capture-toolbar-window'
+
+export type ClipboardCaptureStatus = 'idle' | 'reading' | 'saving' | 'saved' | 'error'
 
 interface CaptureBarScreenProps {
   status: CaptureToolbarStatus
   errorMessage?: string
   onOpenToolbar: () => void
   onCloseToolbar: () => void
+  clipboardStatus?: ClipboardCaptureStatus
+  clipboardMessage?: string
+  onReadClipboard?: () => void
+  onPasteClipboard?: (event: React.ClipboardEvent<HTMLElement>) => void
+  onOpenRecentCaptures?: () => void
 }
 
 const statusCopy: Record<CaptureToolbarStatus, { label: string; description: string; tone: string }> = {
@@ -58,7 +65,12 @@ export const CaptureBarScreen = ({
   status,
   errorMessage,
   onOpenToolbar,
-  onCloseToolbar
+  onCloseToolbar,
+  clipboardStatus = 'idle',
+  clipboardMessage = '',
+  onReadClipboard = () => undefined,
+  onPasteClipboard = () => undefined,
+  onOpenRecentCaptures = () => undefined
 }: CaptureBarScreenProps) => {
   const statusState = statusCopy[status]
   const isOpening = status === 'opening'
@@ -100,6 +112,49 @@ export const CaptureBarScreen = ({
             </button>
           </div>
         </header>
+
+        <section
+          data-clipboard-capture
+          tabIndex={0}
+          onPaste={onPasteClipboard}
+          className="rounded-lg border-2 border-dashed border-amber-200 bg-amber-50/60 p-5 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100"
+        >
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div className="flex items-start gap-4">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-white text-amber-500 shadow-sm">
+                <ClipboardPaste className="h-6 w-6" />
+              </span>
+              <div>
+                <h2 className="text-lg font-black text-gray-950">粘贴剪贴板截图</h2>
+                <p className="mt-1 text-sm leading-6 text-gray-600">支持微信、QQ 等截图工具复制的 PNG、JPEG、WebP。点击读取，或聚焦此区域后按 Ctrl+V。</p>
+                {clipboardMessage && (
+                  <p className={`mt-2 text-sm font-bold ${clipboardStatus === 'error' ? 'text-red-600' : 'text-emerald-700'}`} role="status">
+                    {clipboardMessage}
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={clipboardStatus === 'reading' || clipboardStatus === 'saving'}
+                onClick={onReadClipboard}
+                className="inline-flex h-11 items-center gap-2 rounded-lg bg-amber-500 px-4 text-sm font-black text-gray-950 transition hover:bg-amber-400 disabled:cursor-wait disabled:bg-amber-200"
+              >
+                <ClipboardPaste className="h-4 w-4" />
+                {clipboardStatus === 'reading' ? '读取中...' : clipboardStatus === 'saving' ? '保存中...' : '读取剪贴板'}
+              </button>
+              <button
+                type="button"
+                onClick={onOpenRecentCaptures}
+                className="inline-flex h-11 items-center gap-2 rounded-lg border border-gray-200 bg-white px-4 text-sm font-black text-gray-700 hover:bg-gray-50"
+              >
+                <ExternalLink className="h-4 w-4" />
+                查看近期捕获
+              </button>
+            </div>
+          </div>
+        </section>
 
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_420px]">
           <div className="rounded-lg border border-gray-200 bg-white p-5">

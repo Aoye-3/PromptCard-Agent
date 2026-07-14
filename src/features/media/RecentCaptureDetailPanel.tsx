@@ -9,7 +9,19 @@ import {
 import { RecentCaptureActions } from './RecentCaptureActions'
 import { RecentCapturePreview } from './RecentCapturePreview'
 
-export const RecentCaptureDetailPanel = ({ capture }: { capture: RecentCaptureItemViewModel | null }) => {
+export const RecentCaptureDetailPanel = ({
+  capture,
+  canPlaceOnCanvas,
+  onRegister,
+  onPlaceOnCanvas,
+  onOpenPromptLibrary
+}: {
+  capture: RecentCaptureItemViewModel | null
+  canPlaceOnCanvas: boolean
+  onRegister: (capture: RecentCaptureItemViewModel) => void
+  onPlaceOnCanvas: (capture: RecentCaptureItemViewModel) => void
+  onOpenPromptLibrary: (presetId: string) => void
+}) => {
   const { t } = useI18n()
   const disabled = !capture
 
@@ -86,7 +98,13 @@ export const RecentCaptureDetailPanel = ({ capture }: { capture: RecentCaptureIt
               </select>
             </Field>
           </div>
-          <RecentCaptureActions disabled={disabled} />
+          <RecentCaptureActions
+            capture={capture}
+            canPlaceOnCanvas={canPlaceOnCanvas}
+            onRegister={onRegister}
+            onPlaceOnCanvas={onPlaceOnCanvas}
+            onOpenPromptLibrary={onOpenPromptLibrary}
+          />
         </div>
       </div>
     </aside>

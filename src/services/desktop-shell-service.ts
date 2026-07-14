@@ -32,6 +32,25 @@ export interface UpdateResult {
   message: string
 }
 
+export interface NativeScreenshotSelection {
+  x: number
+  y: number
+  width: number
+  height: number
+  surfaceWidth: number
+  surfaceHeight: number
+}
+
+export interface NativeScreenshotResult {
+  dataUrl: string
+  filename: string
+  size: number
+  width: number
+  height: number
+  capturedAt: number
+  origin: Record<string, unknown>
+}
+
 const hasTauriInternals = () => {
   if (typeof window === 'undefined') return false
   const tauriWindow = window as unknown as { __TAURI_INTERNALS__?: unknown }
@@ -73,5 +92,21 @@ export const desktopShellService = {
 
   async applyUpdate(): Promise<UpdateResult> {
     return invokeDesktopCommand<UpdateResult>('update_apply')
+  },
+
+  async beginScreenshotSelection(allowCanvas: boolean): Promise<void> {
+    return invokeDesktopCommand<void>('capture_begin_selection', { allowCanvas })
+  },
+
+  async activateScreenshotSelection(sessionId: string): Promise<void> {
+    return invokeDesktopCommand<void>('capture_activate_selection', { sessionId })
+  },
+
+  async finishScreenshotSelection(sessionId: string, selection: NativeScreenshotSelection): Promise<NativeScreenshotResult> {
+    return invokeDesktopCommand<NativeScreenshotResult>('capture_finish_selection', { sessionId, selection })
+  },
+
+  async cancelScreenshotSelection(sessionId: string): Promise<void> {
+    return invokeDesktopCommand<void>('capture_cancel_selection', { sessionId })
   }
 }

@@ -1,11 +1,16 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use image::{imageops, DynamicImage, ImageFormat, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::panic;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{Manager, WindowEvent};
+use std::sync::{atomic::{AtomicU64, Ordering}, Mutex};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use xcap::Monitor as XCapMonitor;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -86,6 +91,68 @@ struct UpdateResult {
     backup_path: Option<String>,
     requires_dependency_install: bool,
     message: String,
+}
+
+const CAPTURE_TOOLBAR_LABEL: &str = "capture-toolbar";
+const CAPTURE_SELECTION_LABEL: &str = "capture-selection";
+const CAPTURE_START_TIMEOUT: Duration = Duration::from_secs(30);
+
+struct CaptureSessionStore {
+    next_id: AtomicU64,
+    session: Mutex<Option<CaptureSession>>,
+}
+
+impl Default for CaptureSessionStore {
+    fn default() -> Self {
+        Self {
+            next_id: AtomicU64::new(1),
+            session: Mutex::new(None),
+        }
+    }
+}
+
+struct CaptureSession {
+    id: String,
+    phase: CaptureSessionPhase,
+}
+
+enum CaptureSessionPhase {
+    WaitingForSelector { center_x: i32, center_y: i32 },
+    Capturing,
+    Ready {
+        frame: RgbaImage,
+        captured_at: u128,
+        monitor_name: String,
+    },
+}
+
+struct CapturedMonitorFrame {
+    frame: RgbaImage,
+    captured_at: u128,
+    monitor_name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureSelection {
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    surface_width: f64,
+    surface_height: f64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeCaptureResult {
+    data_url: String,
+    filename: String,
+    size: usize,
+    width: u32,
+    height: u32,
+    captured_at: u128,
+    origin: serde_json::Value,
 }
 
 struct GitCommandOutput {
@@ -202,6 +269,360 @@ fn update_apply() -> Result<UpdateResult, String> {
         "Source update applied. Restart the desktop shell before continuing.".to_string()
     };
     Ok(preview)
+}
+
+#[tauri::command]
+async fn capture_begin_selection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureSessionStore>,
+    allow_canvas: bool,
+) -> Result<(), String> {
+    let toolbar = app
+        .get_webview_window(CAPTURE_TOOLBAR_LABEL)
+        .ok_or_else(|| "Capture toolbar is not available.".to_string())?;
+    let monitor = match toolbar.current_monitor() {
+        Ok(Some(monitor)) => monitor,
+        Ok(None) => {
+            let _ = restore_capture_toolbar(&app);
+            return Err("Capture toolbar is not assigned to a display.".to_string());
+        }
+        Err(error) => {
+            let _ = restore_capture_toolbar(&app);
+            return Err(format!("Failed to read capture toolbar monitor: {error}"));
+        }
+    };
+    let monitor_position = monitor.position();
+    let monitor_size = monitor.size();
+    let scale_factor = monitor.scale_factor();
+    let center_x = monitor_position.x + (monitor_size.width / 2) as i32;
+    let center_y = monitor_position.y + (monitor_size.height / 2) as i32;
+
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Screenshot session lock is unavailable.".to_string())?;
+    if session.is_some() {
+        drop(session);
+        let _ = restore_capture_toolbar(&app);
+        return Err("A screenshot selection is already active.".to_string());
+    }
+
+    let session_id = format!(
+        "capture-{}-{}",
+        unix_timestamp_millis(),
+        state.next_id.fetch_add(1, Ordering::Relaxed)
+    );
+    *session = Some(CaptureSession {
+        id: session_id.clone(),
+        phase: CaptureSessionPhase::WaitingForSelector { center_x, center_y },
+    });
+    drop(session);
+
+    let logical_position = monitor_position.to_logical::<f64>(scale_factor);
+    let logical_size = monitor_size.to_logical::<f64>(scale_factor);
+    let selector_url = format!(
+        "/?window=capture-selection&session={session_id}&allowCanvas={allow_canvas}"
+    );
+    let selector = WebviewWindowBuilder::new(&app, CAPTURE_SELECTION_LABEL, WebviewUrl::App(selector_url.into()))
+        .title("PromptCard Screenshot Selection")
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .resizable(false)
+        .position(logical_position.x, logical_position.y)
+        .inner_size(logical_size.width, logical_size.height)
+        .build();
+
+    if let Err(error) = selector {
+        clear_capture_session(&state);
+        let _ = restore_capture_toolbar(&app);
+        return Err(format!("Failed to open screenshot selection: {error}"));
+    }
+    schedule_capture_start_timeout(app.clone(), session_id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn capture_activate_selection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureSessionStore>,
+    session_id: String,
+) -> Result<(), String> {
+    let toolbar = app
+        .get_webview_window(CAPTURE_TOOLBAR_LABEL)
+        .ok_or_else(|| "Capture toolbar is not available.".to_string())?;
+    let selector = app
+        .get_webview_window(CAPTURE_SELECTION_LABEL)
+        .ok_or_else(|| "Screenshot selection window is not available.".to_string())?;
+    let (center_x, center_y) = mark_capture_session_capturing(&state, &session_id)?;
+
+    if let Err(error) = toolbar.hide() {
+        clear_capture_session_if_matches(&state, &session_id);
+        abort_capture_selection(&app);
+        return Err(format!("Failed to hide capture toolbar: {error}"));
+    }
+
+    let started_at = Instant::now();
+    write_desktop_log(format!("screenshot capture started; session={session_id}"));
+    let capture = tauri::async_runtime::spawn_blocking(move || capture_monitor_frame(center_x, center_y))
+        .await
+        .map_err(|error| format!("Native screenshot worker failed: {error}"))
+        .and_then(|result| result);
+    let captured = match capture {
+        Ok(captured) => captured,
+        Err(error) => {
+            write_desktop_log(format!("screenshot capture failed; session={session_id}; error={error}"));
+            clear_capture_session_if_matches(&state, &session_id);
+            abort_capture_selection(&app);
+            return Err(error);
+        }
+    };
+
+    complete_capture_session(&state, &session_id, captured)?;
+    write_desktop_log(format!(
+        "screenshot capture ready; session={session_id}; elapsed_ms={}",
+        started_at.elapsed().as_millis()
+    ));
+    if let Err(error) = selector.show().and_then(|_| selector.set_focus()) {
+        clear_capture_session_if_matches(&state, &session_id);
+        abort_capture_selection(&app);
+        return Err(format!("Failed to show screenshot selection: {error}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn capture_finish_selection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureSessionStore>,
+    session_id: String,
+    selection: CaptureSelection,
+) -> Result<NativeCaptureResult, String> {
+    let session = take_capture_session(&state, &session_id)?;
+    let CaptureSessionPhase::Ready { frame, captured_at, monitor_name } = session.phase else {
+        return Err("Screenshot capture is still preparing.".to_string());
+    };
+    let (crop, crop_rect) = match crop_native_frame(&frame, &selection) {
+        Ok(crop) => crop,
+        Err(error) => {
+            abort_capture_selection(&app);
+            return Err(error);
+        }
+    };
+    let mut bytes = Cursor::new(Vec::new());
+    if let Err(error) = DynamicImage::ImageRgba8(crop).write_to(&mut bytes, ImageFormat::Png) {
+        abort_capture_selection(&app);
+        return Err(format!("Failed to encode screenshot PNG: {error}"));
+    }
+    let bytes = bytes.into_inner();
+    let filename = format!("screenshot-{captured_at}.png");
+
+    Ok(NativeCaptureResult {
+        data_url: format!("data:image/png;base64,{}", BASE64.encode(&bytes)),
+        filename,
+        size: bytes.len(),
+        width: crop_rect.2,
+        height: crop_rect.3,
+        captured_at,
+        origin: serde_json::json!({
+            "type": "floating-toolbar",
+            "engine": "xcap",
+            "monitor": monitor_name,
+            "selection": {
+                "x": crop_rect.0,
+                "y": crop_rect.1,
+                "width": crop_rect.2,
+                "height": crop_rect.3,
+            }
+        }),
+    })
+}
+
+#[tauri::command]
+fn capture_cancel_selection(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureSessionStore>,
+    session_id: String,
+) -> Result<(), String> {
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Screenshot session lock is unavailable.".to_string())?;
+    if let Some(active) = session.as_ref() {
+        if active.id != session_id {
+            return Err("Screenshot selection session does not match the active session.".to_string());
+        }
+    }
+    *session = None;
+    drop(session);
+    if let Some(selector) = app.get_webview_window(CAPTURE_SELECTION_LABEL) {
+        let _ = selector.close();
+    }
+    restore_capture_toolbar(&app)
+}
+
+fn crop_native_frame(
+    frame: &RgbaImage,
+    selection: &CaptureSelection,
+) -> Result<(RgbaImage, (u32, u32, u32, u32)), String> {
+    if !selection.surface_width.is_finite()
+        || !selection.surface_height.is_finite()
+        || selection.surface_width <= 0.0
+        || selection.surface_height <= 0.0
+    {
+        return Err("Screenshot selection surface size is invalid.".to_string());
+    }
+    let min_x = selection.x.min(selection.x + selection.width).max(0.0);
+    let min_y = selection.y.min(selection.y + selection.height).max(0.0);
+    let max_x = selection.x.max(selection.x + selection.width).min(selection.surface_width);
+    let max_y = selection.y.max(selection.y + selection.height).min(selection.surface_height);
+    let x = ((min_x / selection.surface_width) * frame.width() as f64).round() as u32;
+    let y = ((min_y / selection.surface_height) * frame.height() as f64).round() as u32;
+    let right = ((max_x / selection.surface_width) * frame.width() as f64).round() as u32;
+    let bottom = ((max_y / selection.surface_height) * frame.height() as f64).round() as u32;
+    let width = right.saturating_sub(x);
+    let height = bottom.saturating_sub(y);
+    if width < 2 || height < 2 {
+        return Err("Screenshot selection must be at least 2 pixels wide and high.".to_string());
+    }
+    Ok((imageops::crop_imm(frame, x, y, width, height).to_image(), (x, y, width, height)))
+}
+
+fn take_capture_session(state: &CaptureSessionStore, session_id: &str) -> Result<CaptureSession, String> {
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Screenshot session lock is unavailable.".to_string())?;
+    match session.as_ref() {
+        Some(active) if active.id != session_id => {
+            return Err("Screenshot selection session does not match the active session.".to_string());
+        }
+        Some(active) if !matches!(active.phase, CaptureSessionPhase::Ready { .. }) => {
+            return Err("Screenshot capture is still preparing.".to_string());
+        }
+        None => return Err("No screenshot selection is active.".to_string()),
+        Some(_) => {}
+    }
+    session.take().ok_or_else(|| "No screenshot selection is active.".to_string())
+}
+
+fn capture_monitor_frame(center_x: i32, center_y: i32) -> Result<CapturedMonitorFrame, String> {
+    let native_monitor = XCapMonitor::from_point(center_x, center_y)
+        .map_err(|error| format!("Could not resolve the display for screenshot capture: {error}"))?;
+    let frame = native_monitor
+        .capture_image()
+        .map_err(|error| format!("Native screenshot capture failed: {error}"))?;
+    Ok(CapturedMonitorFrame {
+        frame,
+        captured_at: unix_timestamp_millis(),
+        monitor_name: native_monitor
+            .friendly_name()
+            .unwrap_or_else(|_| "Unknown display".to_string()),
+    })
+}
+
+fn mark_capture_session_capturing(
+    state: &CaptureSessionStore,
+    session_id: &str,
+) -> Result<(i32, i32), String> {
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Screenshot session lock is unavailable.".to_string())?;
+    let active = session
+        .as_mut()
+        .ok_or_else(|| "No screenshot selection is active.".to_string())?;
+    if active.id != session_id {
+        return Err("Screenshot selection session does not match the active session.".to_string());
+    }
+    let CaptureSessionPhase::WaitingForSelector { center_x, center_y } = active.phase else {
+        return Err("Screenshot capture has already been activated.".to_string());
+    };
+    active.phase = CaptureSessionPhase::Capturing;
+    Ok((center_x, center_y))
+}
+
+fn complete_capture_session(
+    state: &CaptureSessionStore,
+    session_id: &str,
+    captured: CapturedMonitorFrame,
+) -> Result<(), String> {
+    let mut session = state
+        .session
+        .lock()
+        .map_err(|_| "Screenshot session lock is unavailable.".to_string())?;
+    let active = session
+        .as_mut()
+        .ok_or_else(|| "Screenshot selection was cancelled.".to_string())?;
+    if active.id != session_id || !matches!(active.phase, CaptureSessionPhase::Capturing) {
+        return Err("Screenshot selection session is no longer active.".to_string());
+    }
+    active.phase = CaptureSessionPhase::Ready {
+        frame: captured.frame,
+        captured_at: captured.captured_at,
+        monitor_name: captured.monitor_name,
+    };
+    Ok(())
+}
+
+fn clear_capture_session(state: &CaptureSessionStore) {
+    if let Ok(mut session) = state.session.lock() {
+        *session = None;
+    }
+}
+
+fn clear_capture_session_if_matches(state: &CaptureSessionStore, session_id: &str) -> bool {
+    if let Ok(mut session) = state.session.lock() {
+        if session.as_ref().is_some_and(|active| active.id == session_id) {
+            *session = None;
+            return true;
+        }
+    }
+    false
+}
+
+fn schedule_capture_start_timeout(app: tauri::AppHandle, session_id: String) {
+    thread::spawn(move || {
+        thread::sleep(CAPTURE_START_TIMEOUT);
+        let Some(state) = app.try_state::<CaptureSessionStore>() else {
+            return;
+        };
+        let should_abort = state
+            .session
+            .lock()
+            .map(|session| {
+                session.as_ref().is_some_and(|active| {
+                    active.id == session_id && !matches!(active.phase, CaptureSessionPhase::Ready { .. })
+                })
+            })
+            .unwrap_or(false);
+        if should_abort && clear_capture_session_if_matches(&state, &session_id) {
+            write_desktop_log(format!("screenshot capture timed out; session={session_id}"));
+            abort_capture_selection(&app);
+        }
+    });
+}
+
+fn abort_capture_selection(app: &tauri::AppHandle) {
+    if let Some(selector) = app.get_webview_window(CAPTURE_SELECTION_LABEL) {
+        let _ = selector.close();
+    }
+    let _ = restore_capture_toolbar(app);
+}
+
+fn restore_capture_toolbar(app: &tauri::AppHandle) -> Result<(), String> {
+    if let Some(toolbar) = app.get_webview_window(CAPTURE_TOOLBAR_LABEL) {
+        toolbar
+            .show()
+            .map_err(|error| format!("Failed to restore capture toolbar: {error}"))?;
+        toolbar
+            .set_focus()
+            .map_err(|error| format!("Failed to focus capture toolbar: {error}"))?;
+        let _ = toolbar.emit("capture:toolbar-restored", ());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -655,6 +1076,13 @@ fn unix_timestamp() -> u64 {
         .unwrap_or_default()
 }
 
+fn unix_timestamp_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
 fn powershell_single_quoted(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
@@ -720,6 +1148,7 @@ pub fn run() {
     write_desktop_log("desktop shell run starting");
 
     tauri::Builder::default()
+        .manage(CaptureSessionStore::default())
         .setup(|app| {
             let labels = app
                 .webview_windows()
@@ -737,7 +1166,11 @@ pub fn run() {
             update_save_config,
             update_check,
             update_preview,
-            update_apply
+            update_apply,
+            capture_begin_selection,
+            capture_activate_selection,
+            capture_finish_selection,
+            capture_cancel_selection
         ])
         .on_window_event(|window, event| {
             write_desktop_log(format!("window event: {} {:?}", window.label(), event));
@@ -748,6 +1181,12 @@ pub fn run() {
                     eprintln!("Failed to stop PromptCard local services: {error}");
                 }
                 window.app_handle().exit(0);
+            }
+            if window.label() == CAPTURE_SELECTION_LABEL && matches!(event, WindowEvent::CloseRequested { .. }) {
+                if let Some(state) = window.app_handle().try_state::<CaptureSessionStore>() {
+                    clear_capture_session(&state);
+                }
+                let _ = restore_capture_toolbar(&window.app_handle());
             }
         })
         .run(tauri::generate_context!())
@@ -815,5 +1254,95 @@ mod tests {
         ];
 
         assert!(requires_dependency_install_from_changes(&changes));
+    }
+
+    #[test]
+    fn crops_native_frame_using_selector_coordinates() {
+        let frame = RgbaImage::from_fn(1920, 1080, |_, _| image::Rgba([20, 40, 60, 255]));
+        let selection = CaptureSelection {
+            x: 120.0,
+            y: 90.0,
+            width: 960.0,
+            height: 540.0,
+            surface_width: 1440.0,
+            surface_height: 810.0,
+        };
+
+        let (crop, rect) = crop_native_frame(&frame, &selection).expect("selection should crop");
+
+        assert_eq!(rect, (160, 120, 1280, 720));
+        assert_eq!(crop.dimensions(), (1280, 720));
+    }
+
+    #[test]
+    fn rejects_native_frame_selection_smaller_than_two_pixels() {
+        let frame = RgbaImage::new(100, 100);
+        let selection = CaptureSelection {
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            surface_width: 100.0,
+            surface_height: 100.0,
+        };
+
+        assert!(crop_native_frame(&frame, &selection).is_err());
+    }
+
+    #[test]
+    fn rejects_finishing_when_no_screenshot_session_is_active() {
+        let state = CaptureSessionStore::default();
+        let result = take_capture_session(&state, "capture-1");
+
+        assert!(matches!(result, Err(error) if error == "No screenshot selection is active."));
+    }
+
+    #[test]
+    fn clears_screenshot_session_state() {
+        let state = CaptureSessionStore::default();
+        *state.session.lock().unwrap() = Some(CaptureSession {
+            id: "capture-1".to_string(),
+            phase: CaptureSessionPhase::Ready {
+                frame: RgbaImage::new(4, 4),
+                captured_at: 1234,
+                monitor_name: "Display 1".to_string(),
+            },
+        });
+
+        clear_capture_session(&state);
+
+        assert!(state.session.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn keeps_waiting_session_until_selector_activates() {
+        let state = CaptureSessionStore::default();
+        *state.session.lock().unwrap() = Some(CaptureSession {
+            id: "capture-1".to_string(),
+            phase: CaptureSessionPhase::WaitingForSelector { center_x: 20, center_y: 30 },
+        });
+
+        let result = take_capture_session(&state, "capture-1");
+
+        assert!(matches!(result, Err(error) if error == "Screenshot capture is still preparing."));
+        assert!(state.session.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn transitions_capture_session_from_waiting_to_ready() {
+        let state = CaptureSessionStore::default();
+        *state.session.lock().unwrap() = Some(CaptureSession {
+            id: "capture-1".to_string(),
+            phase: CaptureSessionPhase::WaitingForSelector { center_x: 20, center_y: 30 },
+        });
+
+        assert_eq!(mark_capture_session_capturing(&state, "capture-1").unwrap(), (20, 30));
+        complete_capture_session(&state, "capture-1", CapturedMonitorFrame {
+            frame: RgbaImage::new(4, 4),
+            captured_at: 1234,
+            monitor_name: "Display 1".to_string(),
+        }).unwrap();
+
+        assert!(take_capture_session(&state, "capture-1").is_ok());
     }
 }

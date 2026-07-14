@@ -55,11 +55,11 @@ Normalization behavior:
 
 `RecentCaptureItem` is durable metadata stored by the local storage service. It references the physical asset file by `assetId`; it does not duplicate image bytes inside project JSON or capture JSON.
 
-Current MVP fields:
+Current durable fields:
 
 - `id`
 - `assetId`
-- `kind: "screenshot"`
+- `kind: "screenshot" | "pastedMedia" | "screenRecording"`
 - `status`
 - `purpose`
 - `role?: string | null`
@@ -68,7 +68,14 @@ Current MVP fields:
 - `userNote`
 - `sourcePlatform`
 - `sourceUrl`
-- `contentType`
+- `contentType: "image/png" | "image/jpeg" | "image/webp" | "video/mp4"`
+- `originalFilename?`
+- `registeredPromptId?`
+- `registeredAt?`
+- `linkedProjectId?`
+- `linkedCanvasNodeId?`
+- `durationMs?`
+- `hasAudio?`
 - `size`
 - `width`
 - `height`
@@ -78,6 +85,6 @@ Current MVP fields:
 - `updatedAt`
 - `revision`
 
-Only screenshot records are created in the current floating capture MVP. Video capture and Prompt Library registration are future work. Raw Recent Capture items are not Agent-visible or Prompt Library-visible until a separate explicit registration flow promotes them.
+The current producers create native `screenshot` records and clipboard `pastedMedia` records. `screenRecording` and `video/mp4` are reserved by the schema for the final recording phase, but no recording producer is implemented yet. Raw Recent Capture items are not Agent-visible or Prompt Library-visible until the explicit transaction registration flow creates a Prompt preset and writes `registeredPromptId`.
 
-UI code should convert durable records to `RecentCaptureItemViewModel` through the media normalization helpers. Preview surfaces resolve screenshot thumbnails from `storage.assets.url(assetId)`.
+UI code converts durable records to `RecentCaptureItemViewModel` through the media normalization helpers. Preview surfaces resolve image thumbnails from `storage.assets.url(assetId)`. Prompt `meta.media` and Free Canvas image nodes retain that same `assetId`; linkage fields record relationships but never represent additional physical files.

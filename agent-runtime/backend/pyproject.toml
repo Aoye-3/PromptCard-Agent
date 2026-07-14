@@ -22,6 +22,7 @@ dependencies = [
     "pyjwt>=2.9.0",
     "email-validator>=2.0.0",
     "keyring==25.7.0",
+    "volcengine-python-sdk[ark]==5.0.36",
 ]
 
 [project.optional-dependencies]

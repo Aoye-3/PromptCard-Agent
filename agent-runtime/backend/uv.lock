@@ -760,6 +760,7 @@ dependencies = [
     { name = "slack-sdk" },
     { name = "sse-starlette" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "volcengine-python-sdk", extra = ["ark"] },
     { name = "wecom-aibot-python-sdk" },
 ]
 
@@ -795,6 +796,7 @@ requires-dist = [
     { name = "slack-sdk", specifier = ">=3.33.0" },
     { name = "sse-starlette", specifier = ">=2.1.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
+    { name = "volcengine-python-sdk", extras = ["ark"], specifier = "==5.0.36" },
     { name = "wecom-aibot-python-sdk", specifier = ">=0.1.6" },
 ]
 provides-extras = ["postgres"]
@@ -4403,7 +4405,7 @@ wheels = [
 
 [[package]]
 name = "volcengine-python-sdk"
-version = "5.0.25"
+version = "5.0.36"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "certifi" },
@@ -4411,9 +4413,17 @@ dependencies = [
     { name = "six" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/47/b212f7c834155de1e68e8557080a445392a68e41b11cda2957d7837001eb/volcengine_python_sdk-5.0.25.tar.gz", hash = "sha256:c93f86c3638e277a19465d67d64f5222b1b506430f25b153289d6b1b705e9abd", size = 8661219, upload-time = "2026-04-23T12:58:50.569Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/17/c98459121a0229648d9a78346c833017881590d4355862401ea115751922/volcengine_python_sdk-5.0.36.tar.gz", hash = "sha256:28eeaea1f405d4b8dd1efa090d4a9e40eeef492c00d703b7acef3502515bf6f5", size = 9739008, upload-time = "2026-06-26T06:46:03.512Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/65/28/4ab6e1f4241f3bf84aacf0a3777ddd69fe28b662a0c6a56cf932c9064ddc/volcengine_python_sdk-5.0.25-py2.py3-none-any.whl", hash = "sha256:348dbb1cb11e922bebf8360fc61a189e7d6f8be4b8211423ead3a2953eed7755", size = 34196029, upload-time = "2026-04-23T12:58:43.948Z" },
+    { url = "https://files.pythonhosted.org/packages/00/a1/9e246023bb847329bda43e516c64aa10d77b2d98c662f0e1179689020c23/volcengine_python_sdk-5.0.36-py2.py3-none-any.whl", hash = "sha256:3a74fa7a7baa5d5f604b175f967660cd0aa4c7057ce44d98c4041fbaf7944b5b", size = 38762830, upload-time = "2026-06-26T06:45:56.546Z" },
+]
+
+[package.optional-dependencies]
+ark = [
+    { name = "anyio" },
+    { name = "cryptography" },
+    { name = "httpx" },
+    { name = "pydantic" },
 ]
 
 [[package]]

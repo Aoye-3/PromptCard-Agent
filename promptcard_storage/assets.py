@@ -122,6 +122,9 @@ def _collect_asset_ids(value: Any) -> set[str]:
         asset_id = value.get("assetId")
         if isinstance(asset_id, str) and asset_id:
             found.add(asset_id)
+        output_asset_ids = value.get("outputAssetIds")
+        if isinstance(output_asset_ids, list):
+            found.update(item for item in output_asset_ids if isinstance(item, str) and item)
         for child in value.values():
             found.update(_collect_asset_ids(child))
     elif isinstance(value, list):

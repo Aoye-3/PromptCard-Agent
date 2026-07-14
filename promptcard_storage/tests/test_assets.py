@@ -66,6 +66,30 @@ class AssetStoreTest(unittest.TestCase):
         with self.assertRaises(MissingItem):
             self.store.get_asset('../projects.json')
 
+    def test_successful_run_output_assets_are_counted_as_strong_references(self) -> None:
+        asset = self.store.save_asset('generated.png', 'image/png', b'\x89PNG\r\n\x1a\ngenerated')
+        queued_only = self.store.save_asset('input.png', 'image/png', b'\x89PNG\r\n\x1a\ninput')
+        run = self.store.create_image_generation_run({
+            'id': 'run-generated',
+            'projectId': 'deleted-project',
+            'nodeId': 'deleted-node',
+            'connectionId': 'connection-one',
+            'providerId': 'volcengine-ark',
+            'modelId': 'doubao-seedream-5-0-pro-260628',
+            'state': 'queued',
+            'requestSnapshot': {'mode': 'edit', 'inputs': [{'assetId': queued_only['id']}]},
+            'outputAssetIds': [],
+            'createdAt': 1,
+        })
+        self.store.update_image_generation_run_state(run['id'], {'state': 'running', 'startedAt': 2})
+        self.store.update_image_generation_run_state(run['id'], {
+            'state': 'succeeded', 'outputAssetIds': [asset['id']], 'finishedAt': 3,
+        })
+
+        unreferenced = self.store.diagnose_assets()['unreferencedAssets']
+        self.assertNotIn(asset['id'], unreferenced)
+        self.assertIn(queued_only['id'], unreferenced)
+
 
 if __name__ == '__main__':
     unittest.main()

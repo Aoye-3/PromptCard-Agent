@@ -101,6 +101,29 @@ def create_app(storage: SqliteStore) -> FastAPI:
         except MissingItem as exc:
             raise _http_error(404, "not_found", "Asset not found") from exc
 
+    @application.post("/api/image-generation-runs")
+    def create_image_generation_run(item: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.create_image_generation_run(item))
+
+    @application.get("/api/image-generation-runs")
+    def list_image_generation_runs(
+        projectId: str | None = None,
+        nodeId: str | None = None,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.list_image_generation_runs(
+            project_id=projectId, node_id=nodeId, cursor=cursor, limit=limit
+        ))
+
+    @application.patch("/api/image-generation-runs/{run_id}/state")
+    def update_image_generation_run_state(run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.update_image_generation_run_state(run_id, patch))
+
+    @application.get("/api/image-generation-runs/{run_id}")
+    def get_image_generation_run(run_id: str) -> dict[str, Any]:
+        return _handle(lambda: storage.get_image_generation_run(run_id))
+
     @application.get("/api/recent-captures")
     def list_recent_captures() -> dict[str, Any]:
         return {"captures": storage.list_recent_captures()}

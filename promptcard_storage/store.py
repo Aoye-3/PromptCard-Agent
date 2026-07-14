@@ -13,11 +13,18 @@ from typing import Any, Iterator, Literal
 
 from .assets import AssetStore, AssetValidationError
 from .backup import BackupManager
+from .image_runs import (
+    decode_cursor,
+    image_run_page,
+    normalize_new_image_run,
+    normalize_page_limit,
+    transition_image_run,
+)
 from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DATABASE_NAME = "promptcard.sqlite3"
 JSON_SOURCES = (
     "projects.json",
@@ -65,7 +72,8 @@ class SqliteStore:
             + [entry["payload"] for entry in self.list_project_trash()]
             + self.list_recent_captures()
             + self.list_presets()
-            + [entry["payload"] for entry in self.list_preset_trash()],
+            + [entry["payload"] for entry in self.list_preset_trash()]
+            + self._successful_image_run_payloads(),
             now_ms,
         )
         self._backups = BackupManager(
@@ -93,6 +101,7 @@ class SqliteStore:
                 "browserImportIdempotency": True,
                 "backup": True,
                 "recentCaptures": True,
+                "imageGenerationRuns": True,
             },
         }
 
@@ -475,6 +484,85 @@ class SqliteStore:
             )
         return {"projects": imported_projects, "presets": imported_presets, "alreadyApplied": False}
 
+    def create_image_generation_run(self, item: dict[str, Any]) -> dict[str, Any]:
+        created = normalize_new_image_run(item, now_ms())
+        with self._transaction() as connection:
+            try:
+                connection.execute(
+                    "INSERT INTO image_generation_runs(id, project_id, node_id, connection_id, provider_id, model_id, state, created_at, started_at, finished_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        created["id"], created["projectId"], created["nodeId"], created["connectionId"],
+                        created["providerId"], created["modelId"], created["state"], created["createdAt"],
+                        None, None, _json(created),
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateItem(created["id"]) from exc
+        return created
+
+    def get_image_generation_run(self, run_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM image_generation_runs WHERE id=?", (run_id,)
+            ).fetchone()
+        if not row:
+            raise MissingItem()
+        return json.loads(row[0])
+
+    def update_image_generation_run_state(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM image_generation_runs WHERE id=?", (run_id,)
+            ).fetchone()
+            if not row:
+                raise MissingItem()
+            updated = transition_image_run(json.loads(row[0]), patch, now_ms())
+            connection.execute(
+                "UPDATE image_generation_runs SET state=?, started_at=?, finished_at=?, payload_json=? WHERE id=?",
+                (updated["state"], updated.get("startedAt"), updated.get("finishedAt"), _json(updated), run_id),
+            )
+        return updated
+
+    def list_image_generation_runs(
+        self,
+        *,
+        project_id: str | None = None,
+        node_id: str | None = None,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        normalized_limit = normalize_page_limit(limit)
+        cursor_value = decode_cursor(cursor)
+        clauses: list[str] = []
+        parameters: list[Any] = []
+        if project_id is not None:
+            clauses.append("project_id=?")
+            parameters.append(project_id)
+        if node_id is not None:
+            clauses.append("node_id=?")
+            parameters.append(node_id)
+        if cursor_value is not None:
+            clauses.append("(created_at < ? OR (created_at = ? AND id < ?))")
+            parameters.extend((cursor_value[0], cursor_value[0], cursor_value[1]))
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        parameters.append(normalized_limit + 1)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT payload_json FROM image_generation_runs{where} ORDER BY created_at DESC, id DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+        return image_run_page([json.loads(row[0]) for row in rows], normalized_limit)
+
+    def _successful_image_run_payloads(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM image_generation_runs WHERE state='succeeded'"
+            ).fetchall()
+        return [
+            {"outputAssetIds": json.loads(row[0]).get("outputAssetIds", [])}
+            for row in rows
+        ]
+
     def save_asset(self, filename: str, content_type: str, content: bytes, max_bytes: int = 20 * 1024 * 1024) -> dict[str, Any]:
         try:
             return self._assets.save(filename, content_type, content, max_bytes)
@@ -566,6 +654,19 @@ class SqliteStore:
                 except Exception:
                     connection.rollback()
                     raise
+            if current_version == 2:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._create_image_generation_runs_schema(connection)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                        (3, "add-image-generation-runs", now_ms()),
+                    )
+                    connection.commit()
+                    current_version = 3
+                except Exception:
+                    connection.rollback()
+                    raise
             if current_version != SCHEMA_VERSION:
                 raise MigrationError(f"Unsupported SQLite schema version: {current_version}")
 
@@ -594,6 +695,7 @@ class SqliteStore:
             CREATE TABLE browser_imports(migration_id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
         """)
         self._create_recent_captures_schema(connection)
+        self._create_image_generation_runs_schema(connection)
 
     def _insert_project(self, connection: sqlite3.Connection, item: dict[str, Any], status: str, trash: dict[str, Any] | None = None) -> None:
         connection.execute(
@@ -626,6 +728,29 @@ class SqliteStore:
             );
             CREATE INDEX IF NOT EXISTS recent_captures_order ON recent_captures(captured_at DESC, created_at DESC);
         """)
+
+    def _create_image_generation_runs_schema(self, connection: sqlite3.Connection) -> None:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS image_generation_runs(
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                node_id TEXT NOT NULL,
+                connection_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('queued','running','succeeded','failed')),
+                created_at INTEGER NOT NULL,
+                started_at INTEGER,
+                finished_at INTEGER,
+                payload_json TEXT NOT NULL
+            )
+        """)
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS image_generation_runs_project_order ON image_generation_runs(project_id, created_at DESC)"
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS image_generation_runs_node_order ON image_generation_runs(node_id, created_at DESC)"
+        )
 
     def _insert_recent_capture(self, connection: sqlite3.Connection, item: dict[str, Any]) -> None:
         connection.execute(

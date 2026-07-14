@@ -720,7 +720,10 @@ const FreeCanvasNode = ({ data, selected }: NodeProps<FreeCanvasFlowNode>) => {
       />
     )
   }
-  return <FreeCanvasArrowNodeView node={node} selected={selected} />
+  if (node.kind === 'arrow') {
+    return <FreeCanvasArrowNodeView node={node} selected={selected} />
+  }
+  return null
 }
 
 const FreeCanvasTextNodeView = ({

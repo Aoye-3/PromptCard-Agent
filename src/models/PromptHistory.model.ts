@@ -1,5 +1,7 @@
 import type { ICard } from './Card.model'
 import type { IPage } from '@/stores/card-initial-state'
+import type { ImageGenerationMode, ImageRegion } from '@/domain/image-generation/image-generation'
+import type { ImageModelBinding } from '@/domain/models/model-management'
 
 export interface IPromptHistory {
   id: string
@@ -29,10 +31,32 @@ export interface IPromptProject {
   meta: Record<string, any>
 }
 
-export type FreeCanvasProjectNodeKind = 'text' | 'image' | 'arrow'
+export type FreeCanvasProjectNodeKind = 'text' | 'image' | 'arrow' | 'image-generator'
 export type FreeCanvasTextSegmentSource = 'preset' | 'user'
 export type FreeCanvasTextSize = 'small' | 'medium' | 'large' | 'extra-large' | 'huge'
 export type FreeCanvasImageAnnotationKind = 'text' | 'rect' | 'arrow' | 'freehand' | 'shotNumber'
+export type ImageInputRole = 'prompt' | 'source-image' | 'reference-image'
+export type FreeCanvasImageResolution = '1K' | '2K'
+export type FreeCanvasImageAspectRatio = 'smart' | '1:1' | '4:3' | '3:4' | '16:9' | '9:16' | '3:2' | '2:3' | '21:9' | 'custom'
+export type FreeCanvasImageOutputFormat = 'png' | 'jpeg'
+
+export type PromptSegment =
+  | { type: 'text'; text: string }
+  | { type: 'reference'; referenceId: string; label: string }
+
+export interface PromptDocument {
+  version: 1
+  segments: PromptSegment[]
+}
+
+export interface IFreeCanvasImageGeneratorSettings {
+  resolution: FreeCanvasImageResolution
+  aspectRatio: FreeCanvasImageAspectRatio
+  width?: number
+  height?: number
+  outputFormat: FreeCanvasImageOutputFormat
+  watermark: boolean
+}
 
 export interface IFreeCanvasPosition {
   x: number
@@ -104,12 +128,27 @@ export interface IFreeCanvasArrowNode extends IFreeCanvasBaseNode {
   color: string
 }
 
-export type IFreeCanvasNode = IFreeCanvasTextNode | IFreeCanvasImageNode | IFreeCanvasArrowNode
+export interface IFreeCanvasImageGeneratorNode extends IFreeCanvasBaseNode {
+  kind: 'image-generator'
+  mode: ImageGenerationMode
+  binding: ImageModelBinding
+  settings: IFreeCanvasImageGeneratorSettings
+  promptDocument: PromptDocument
+  regions: ImageRegion[]
+  activeRunId?: string
+  primaryAssetId?: string
+}
+
+export type IFreeCanvasNode = IFreeCanvasTextNode | IFreeCanvasImageNode | IFreeCanvasArrowNode | IFreeCanvasImageGeneratorNode
 
 export interface IFreeCanvasEdge {
   id: string
   source: string
   target: string
+  sourceHandle?: string
+  targetHandle?: ImageInputRole
+  inputOrder?: number
+  referenceId?: string
   label?: string
   createdAt: number
 }

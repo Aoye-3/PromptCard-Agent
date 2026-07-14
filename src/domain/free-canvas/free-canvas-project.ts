@@ -10,6 +10,7 @@ import type {
   IFreeCanvasEdge,
   FreeCanvasImageAnnotationKind,
   IFreeCanvasImageAnnotation,
+  IFreeCanvasImageGeneratorNode,
   IFreeCanvasImageNode,
   IFreeCanvasNode,
   IFreeCanvasPosition,
@@ -17,8 +18,11 @@ import type {
   IFreeCanvasTextNode,
   IFreeCanvasTextSegment,
   IFreeCanvasViewport,
+  PromptDocument,
+  PromptSegment,
   IPromptProject
 } from '@/models/PromptHistory.model'
+import type { ImageRegion } from '@/domain/image-generation/image-generation'
 
 const DEFAULT_USER_COLOR = '#111827'
 const DEFAULT_PRESET_COLOR = '#ef4423'
@@ -509,6 +513,9 @@ const clampNumber = (value: number, min: number, max: number): number =>
   Math.min(Math.max(Number.isFinite(value) ? value : min, min), max)
 
 const normalizeNode = (node: Partial<IFreeCanvasNode>, timestamp: number): IFreeCanvasNode | null => {
+  if (node.kind === 'image-generator') {
+    return normalizeImageGeneratorNode(node, timestamp)
+  }
   if (node.kind === 'image') {
     return {
       id: node.id || `free-image-${timestamp}`,
@@ -551,6 +558,112 @@ const normalizeNode = (node: Partial<IFreeCanvasNode>, timestamp: number): IFree
     segments: Array.isArray(textNode.segments) ? textNode.segments.map(normalizeTextSegment) : [],
     meta: textNode.meta || {}
   }
+}
+
+const normalizeImageGeneratorNode = (
+  node: Partial<IFreeCanvasImageGeneratorNode>,
+  timestamp: number
+): IFreeCanvasImageGeneratorNode => {
+  const binding = node.binding
+  const hasValidBinding = Boolean(
+    binding
+    && typeof binding.connectionId === 'string'
+    && binding.connectionId
+    && typeof binding.modelId === 'string'
+    && binding.modelId
+  )
+  const meta = node.meta && typeof node.meta === 'object' ? node.meta : {}
+  const existingWarnings = Array.isArray(meta.validationWarnings)
+    ? meta.validationWarnings.filter((warning): warning is string => typeof warning === 'string')
+    : []
+  const validationWarnings = hasValidBinding
+    ? existingWarnings
+    : [...new Set([...existingWarnings, 'invalid_image_model_binding'])]
+
+  return {
+    id: node.id || `free-image-generator-${timestamp}`,
+    kind: 'image-generator',
+    title: node.title || 'Image Generator',
+    position: normalizePosition(node.position),
+    width: Number(node.width || 420),
+    height: Number(node.height || 560),
+    mode: node.mode === 'edit' || node.mode === 'region-edit' ? node.mode : 'generate',
+    binding: hasValidBinding
+      ? { connectionId: binding!.connectionId, modelId: binding!.modelId }
+      : { connectionId: '', modelId: '' },
+    settings: normalizeImageGeneratorSettings(node.settings),
+    promptDocument: normalizePromptDocument(node.promptDocument),
+    regions: normalizeImageRegions(node.regions),
+    ...(typeof node.activeRunId === 'string' ? { activeRunId: node.activeRunId } : {}),
+    ...(typeof node.primaryAssetId === 'string' ? { primaryAssetId: node.primaryAssetId } : {}),
+    meta: validationWarnings.length > 0 ? { ...meta, validationWarnings } : meta
+  }
+}
+
+const normalizeImageGeneratorSettings = (
+  settings: Partial<IFreeCanvasImageGeneratorNode['settings']> | undefined
+): IFreeCanvasImageGeneratorNode['settings'] => ({
+  resolution: settings?.resolution === '2K' ? '2K' : '1K',
+  aspectRatio: normalizeImageAspectRatio(settings?.aspectRatio),
+  ...(typeof settings?.width === 'number' ? { width: settings.width } : {}),
+  ...(typeof settings?.height === 'number' ? { height: settings.height } : {}),
+  outputFormat: settings?.outputFormat === 'jpeg' ? 'jpeg' : 'png',
+  watermark: settings?.watermark === true
+})
+
+const normalizeImageAspectRatio = (
+  aspectRatio: IFreeCanvasImageGeneratorNode['settings']['aspectRatio'] | undefined
+): IFreeCanvasImageGeneratorNode['settings']['aspectRatio'] => {
+  if (
+    aspectRatio === '1:1'
+    || aspectRatio === '4:3'
+    || aspectRatio === '3:4'
+    || aspectRatio === '16:9'
+    || aspectRatio === '9:16'
+    || aspectRatio === '3:2'
+    || aspectRatio === '2:3'
+    || aspectRatio === '21:9'
+    || aspectRatio === 'custom'
+  ) return aspectRatio
+  return 'smart'
+}
+
+const normalizePromptDocument = (document: Partial<PromptDocument> | undefined): PromptDocument => ({
+  version: 1,
+  segments: Array.isArray(document?.segments)
+    ? document.segments.flatMap(segment => normalizePromptSegment(segment))
+    : []
+})
+
+const normalizePromptSegment = (segment: Partial<PromptSegment>): PromptSegment[] => {
+  if (segment.type === 'reference') {
+    return typeof segment.referenceId === 'string' && typeof segment.label === 'string'
+      ? [{ type: 'reference', referenceId: segment.referenceId, label: segment.label }]
+      : []
+  }
+  return segment.type === 'text' && typeof segment.text === 'string'
+    ? [{ type: 'text', text: segment.text }]
+    : []
+}
+
+const normalizeImageRegions = (regions: ImageRegion[] | undefined): ImageRegion[] => {
+  if (!Array.isArray(regions)) return []
+  const normalized: ImageRegion[] = []
+  regions.forEach(region => {
+    if (region.type === 'point') {
+      normalized.push({ type: 'point', x: Number(region.x), y: Number(region.y) })
+    }
+    if (region.type === 'bbox') {
+      normalized.push({
+        type: 'bbox',
+        x: Number(region.x),
+        y: Number(region.y),
+        width: Number(region.width),
+        height: Number(region.height)
+      })
+    }
+  })
+  return normalized
 }
 
 const normalizeTextSegment = (segment: Partial<IFreeCanvasTextSegment>): IFreeCanvasTextSegment => {
@@ -639,6 +752,12 @@ const normalizeEdge = (edge: Partial<IFreeCanvasEdge>, timestamp: number): IFree
   id: edge.id || `free-edge-${edge.source || 'source'}-${edge.target || 'target'}-${timestamp}`,
   source: String(edge.source || ''),
   target: String(edge.target || ''),
+  ...(typeof edge.sourceHandle === 'string' ? { sourceHandle: edge.sourceHandle } : {}),
+  ...(edge.targetHandle === 'prompt' || edge.targetHandle === 'source-image' || edge.targetHandle === 'reference-image'
+    ? { targetHandle: edge.targetHandle }
+    : {}),
+  ...(typeof edge.inputOrder === 'number' ? { inputOrder: edge.inputOrder } : {}),
+  ...(typeof edge.referenceId === 'string' ? { referenceId: edge.referenceId } : {}),
   label: edge.label ? String(edge.label) : undefined,
   createdAt: Number(edge.createdAt || timestamp)
 })

@@ -50,6 +50,170 @@ describe('free canvas project domain', () => {
     })
   })
 
+  test('round-trips typed image generator nodes without losing persisted fields', () => {
+    const generator = {
+      id: 'generator-1',
+      kind: 'image-generator',
+      title: 'Seedream generator',
+      position: { x: 120, y: 240 },
+      width: 420,
+      height: 560,
+      mode: 'region-edit',
+      binding: {
+        connectionId: 'ark-connection',
+        modelId: 'doubao-seedream-5-0-pro-260628'
+      },
+      settings: {
+        resolution: '2K',
+        aspectRatio: '1:1',
+        outputFormat: 'png',
+        watermark: true
+      },
+      promptDocument: {
+        version: 1,
+        segments: [
+          { type: 'text', text: 'Change the background using ' },
+          { type: 'reference', referenceId: 'reference-1', label: 'Product' }
+        ]
+      },
+      regions: [
+        { type: 'point', x: 120, y: 240 },
+        { type: 'bbox', x: 100, y: 200, width: 300, height: 400 }
+      ],
+      activeRunId: 'run-1',
+      primaryAssetId: 'asset-1',
+      meta: { inspectorTab: 'regions' }
+    }
+
+    const project = createFreeCanvasProject(100, { nodes: [generator as never] })
+
+    expect(project.nodes[0]).toEqual(generator)
+  })
+
+  test('round-trips typed image generator edge metadata', () => {
+    const project = createFreeCanvasProject(100, {
+      nodes: [
+        {
+          id: 'source-image',
+          kind: 'image',
+          title: 'Image',
+          position: { x: 0, y: 0 },
+          width: 300,
+          height: 220,
+          annotations: [],
+          meta: {}
+        },
+        {
+          id: 'generator-1',
+          kind: 'image-generator',
+          binding: { connectionId: 'connection-1', modelId: 'image-model-1' }
+        } as never
+      ],
+      edges: [{
+        id: 'reference-edge',
+        source: 'source-image',
+        target: 'generator-1',
+        sourceHandle: 'image-output',
+        targetHandle: 'reference-image',
+        inputOrder: 0,
+        referenceId: 'reference-1',
+        label: 'Product',
+        createdAt: 50
+      }]
+    })
+
+    expect(project.edges[0]).toEqual({
+      id: 'reference-edge',
+      source: 'source-image',
+      target: 'generator-1',
+      sourceHandle: 'image-output',
+      targetHandle: 'reference-image',
+      inputOrder: 0,
+      referenceId: 'reference-1',
+      label: 'Product',
+      createdAt: 50
+    })
+  })
+
+  test('keeps legacy text, image, and arrow node payloads compatible', () => {
+    const project = createFreeCanvasProject(100, {
+      nodes: [
+        {
+          id: 'legacy-text',
+          kind: 'text',
+          title: 'Text',
+          position: { x: 1, y: 2 },
+          width: 300,
+          height: 120,
+          fontSize: 'medium',
+          segments: [],
+          meta: { legacy: true }
+        },
+        {
+          id: 'legacy-image',
+          kind: 'image',
+          title: 'Image',
+          position: { x: 3, y: 4 },
+          width: 320,
+          height: 240,
+          assetId: 'asset-old',
+          imageUrl: '/old.png',
+          imagePrompt: 'old prompt',
+          sourceNodeId: null,
+          crop: null,
+          annotations: [],
+          meta: { legacy: true }
+        },
+        {
+          id: 'legacy-arrow',
+          kind: 'arrow',
+          title: 'Arrow',
+          position: { x: 5, y: 6 },
+          width: 260,
+          height: 120,
+          text: 'Next',
+          color: '#123456',
+          meta: { legacy: true }
+        }
+      ]
+    })
+
+    expect(project.nodes.map(node => node.kind)).toEqual(['text', 'image', 'arrow'])
+    expect(project.nodes[0]).toMatchObject({ id: 'legacy-text', fontSize: 'medium', meta: { legacy: true } })
+    expect(project.nodes[1]).toMatchObject({ id: 'legacy-image', assetId: 'asset-old', imageUrl: '/old.png' })
+    expect(project.nodes[2]).toMatchObject({ id: 'legacy-arrow', text: 'Next', color: '#123456' })
+  })
+
+  test('keeps malformed generator payloads as safe generator nodes with a validation warning', () => {
+    const project = createFreeCanvasProject(100, {
+      nodes: [{
+        id: 'damaged-generator',
+        kind: 'image-generator',
+        binding: { connectionId: 42, modelId: null },
+        meta: { imported: true }
+      } as never]
+    })
+
+    expect(project.nodes[0]).toMatchObject({
+      id: 'damaged-generator',
+      kind: 'image-generator',
+      mode: 'generate',
+      binding: { connectionId: '', modelId: '' },
+      settings: {
+        resolution: '1K',
+        aspectRatio: 'smart',
+        outputFormat: 'png',
+        watermark: false
+      },
+      promptDocument: { version: 1, segments: [] },
+      regions: [],
+      meta: {
+        imported: true,
+        validationWarnings: ['invalid_image_model_binding']
+      }
+    })
+  })
+
   test('adds annotations to legacy image nodes that do not have annotations yet', () => {
     const image = createFreeCanvasImageNodeFromMedia(createFreeCanvasMediaNode('imageAsset', { x: 20, y: 40 }, 100), 101)
     const project = createFreeCanvasProject(100, { nodes: [{ ...image, annotations: undefined } as never] })

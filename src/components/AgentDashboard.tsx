@@ -1,23 +1,18 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import {
   Bot,
-  CheckCircle2,
   Database,
-  KeyRound,
   Loader2,
-  RefreshCw,
-  Save,
   Search,
   Send,
   ShieldCheck,
   Sparkles,
-  Wrench,
-  XCircle
+  Wrench
 } from 'lucide-react'
 import { useAgentStore } from '@/stores/agent.store'
 import { usePresetStore } from '@/stores/preset.store'
 import type { AgentWorkspaceProposal, PromptLibraryWriteProposal } from '@/models/Agent.model'
-import type { DeepSeekModelConfigUpdate } from '@/services/agent-runtime-service'
+import { ModelManagementPanel } from '@/components/settings/ModelManagementPanel'
 
 type AgentPanelSection = 'models' | 'default-model' | 'tools' | 'skills' | 'diagnostics'
 const DIAGNOSTICS_SESSION_KEY = 'diagnostics:agent-panel'
@@ -43,13 +38,7 @@ export function AgentDashboard() {
     subagentEnabled,
     getAgentSession,
     modelConfig,
-    modelConfigSaving,
-    modelConfigTesting,
-    modelConfigTestResult,
     checkRuntime,
-    loadModelConfig,
-    saveModelConfig,
-    testModelConfig,
     sendMessage,
     clearMessages
   } = useAgentStore()
@@ -61,29 +50,11 @@ export function AgentDashboard() {
   const { presets, initialized, init } = usePresetStore()
   const [activeSection, setActiveSection] = useState<AgentPanelSection>('models')
   const [draft, setDraft] = useState('请用一句话说明当前 PromptCard Agent runtime 的连接状态。')
-  const [form, setForm] = useState<DeepSeekModelConfigUpdate>({
-    enabled: true,
-    apiBase: 'https://api.deepseek.com',
-    modelName: 'deepseek-chat',
-    temperature: 0.3,
-    maxTokens: 4096
-  })
 
   useEffect(() => {
     if (!initialized) init()
     checkRuntime()
   }, [checkRuntime, init, initialized])
-
-  useEffect(() => {
-    if (!modelConfig) return
-    setForm({
-      enabled: modelConfig.enabled,
-      apiBase: modelConfig.apiBase,
-      modelName: modelConfig.modelName,
-      temperature: modelConfig.temperature,
-      maxTokens: modelConfig.maxTokens
-    })
-  }, [modelConfig])
 
   const promptLibraryProposalCount = useMemo(
     () => proposals.filter(isPromptLibraryProposal).length,
@@ -97,10 +68,6 @@ export function AgentDashboard() {
       sessionKey: DIAGNOSTICS_SESSION_KEY,
       permissionScope: 'workspace-chatbot-agent'
     })
-  }
-
-  const updateForm = (updates: DeepSeekModelConfigUpdate) => {
-    setForm(current => ({ ...current, ...updates }))
   }
 
   return (
@@ -147,104 +114,7 @@ export function AgentDashboard() {
           </div>
         )}
 
-        {activeSection === 'models' && (
-          <section className="rounded-[24px] border border-gray-200 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.05)]">
-            <PanelHeader title="DeepSeek 模型服务" subtitle="当前版本只接入 DeepSeek。API Key 保存到后端本地配置，不写入浏览器。" />
-            <div className="mt-6 space-y-6">
-              <div className="flex items-center justify-between rounded-2xl bg-gray-50 px-4 py-3">
-                <div>
-                  <div className="text-sm font-black text-gray-950">启用 DeepSeek</div>
-                  <div className="text-xs font-semibold text-gray-400">关闭后 Agent Runtime 不应发起模型调用</div>
-                </div>
-                <button
-                  type="button"
-                  className={`h-7 w-12 rounded-full p-1 transition ${form.enabled === false ? 'bg-gray-300' : 'bg-emerald-500'}`}
-                  onClick={() => updateForm({ enabled: form.enabled === false })}
-                >
-                  <span className={`block h-5 w-5 rounded-full bg-white transition ${form.enabled === false ? '' : 'translate-x-5'}`} />
-                </button>
-              </div>
-
-              <Field label="API 密钥" hint={modelConfig?.apiKeyConfigured ? `已保存：${modelConfig.apiKeyPreview}` : '尚未保存 DeepSeek API Key'}>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={form.apiKey || ''}
-                    onChange={event => updateForm({ apiKey: event.target.value })}
-                    placeholder={modelConfig?.apiKeyConfigured ? '留空则保留当前密钥' : 'sk-...'}
-                    className="min-w-0 flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-gray-400"
-                  />
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-2 rounded-xl bg-gray-100 px-4 py-2 text-sm font-black text-gray-700 hover:bg-gray-200"
-                    onClick={() => testModelConfig(form)}
-                    disabled={modelConfigTesting}
-                  >
-                    {modelConfigTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
-                    检测
-                  </button>
-                </div>
-              </Field>
-
-              <Field label="API 地址" hint="预览：/chat/completions 会由后端 Runtime 调用">
-                <input
-                  value={form.apiBase || ''}
-                  onChange={event => updateForm({ apiBase: event.target.value })}
-                  className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-gray-400"
-                />
-              </Field>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <Field label="模型">
-                  <input
-                    value={form.modelName || ''}
-                    onChange={event => updateForm({ modelName: event.target.value })}
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-gray-400"
-                  />
-                </Field>
-                <Field label="Temperature">
-                  <input
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={form.temperature ?? 0.3}
-                    onChange={event => updateForm({ temperature: Number(event.target.value) })}
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-gray-400"
-                  />
-                </Field>
-                <Field label="Max Tokens">
-                  <input
-                    type="number"
-                    min="256"
-                    step="256"
-                    value={form.maxTokens ?? 4096}
-                    onChange={event => updateForm({ maxTokens: Number(event.target.value) })}
-                    className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-gray-400"
-                  />
-                </Field>
-              </div>
-
-              {modelConfigTestResult && (
-                <div className={`inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm font-bold ${modelConfigTestResult.success ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
-                  {modelConfigTestResult.success ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                  {modelConfigTestResult.message}
-                </div>
-              )}
-
-              <div className="flex flex-wrap justify-end gap-3 border-t border-gray-100 pt-5">
-                <button type="button" onClick={() => loadModelConfig()} className="inline-flex items-center gap-2 rounded-full bg-gray-100 px-5 py-3 text-sm font-black text-gray-700">
-                  <RefreshCw className="h-4 w-4" />
-                  重新读取
-                </button>
-                <button type="button" onClick={() => saveModelConfig(form)} disabled={modelConfigSaving} className="inline-flex items-center gap-2 rounded-full bg-black px-5 py-3 text-sm font-black text-white disabled:opacity-40">
-                  {modelConfigSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  保存配置
-                </button>
-              </div>
-            </div>
-          </section>
-        )}
+        {activeSection === 'models' && <ModelManagementPanel />}
 
         {activeSection === 'default-model' && (
           <InfoPanel title="默认模型" icon={<Sparkles className="h-5 w-5" />}>
@@ -324,18 +194,6 @@ function PanelHeader({ title, subtitle }: { title: string; subtitle: string }) {
       <h2 className="text-2xl font-black text-gray-950">{title}</h2>
       <p className="mt-2 text-sm font-semibold text-gray-400">{subtitle}</p>
     </div>
-  )
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <span className="text-sm font-black text-gray-950">{label}</span>
-        {hint && <span className="text-xs font-semibold text-gray-400">{hint}</span>}
-      </div>
-      {children}
-    </label>
   )
 }
 

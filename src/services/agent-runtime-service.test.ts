@@ -342,29 +342,58 @@ describe('agent runtime proposal parsing', () => {
     })
   })
 
-  it('reads, saves, and tests DeepSeek model config through runtime boundary', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          enabled: true,
-          apiBase: 'https://api.deepseek.com',
-          apiKeyConfigured: true,
-          apiKeyPreview: 'sk-...abcd',
-          modelName: 'deepseek-chat',
-          temperature: 0.3,
-          maxTokens: 4096,
-          availableModels: ['deepseek-chat']
-        })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ enabled: true, apiBase: 'https://api.deepseek.com', apiKeyConfigured: true, modelName: 'deepseek-chat', temperature: 0.2, maxTokens: 3000, availableModels: ['deepseek-chat'] })
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ success: true, message: 'DeepSeek connection ok' })
-      })
+  it('keeps the legacy model-config methods as a facade over generic model management routes', async () => {
+    const fetchMock = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/model-catalog')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            providers: [{ id: 'deepseek', displayName: 'DeepSeek', defaultApiBase: 'https://api.deepseek.com' }],
+            models: [{ id: 'deepseek-chat', providerId: 'deepseek', displayName: 'DeepSeek Chat', modality: 'chat' }]
+          })
+        }
+      }
+      if (url.endsWith('/model-connections') && (!init?.method || init.method === 'GET')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ connections: [{
+            id: 'connection-chat',
+            providerId: 'deepseek',
+            displayName: 'Primary chat',
+            apiBase: 'https://api.deepseek.com',
+            enabled: true,
+            credentialConfigured: true,
+            credentialMask: '••••••••',
+            createdAt: 1,
+            updatedAt: 2
+          }] })
+        }
+      }
+      if (url.endsWith('/model-assignments')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ assignments: [{ slot: 'chat.primary', connectionId: 'connection-chat', modelId: 'deepseek-chat' }] })
+        }
+      }
+      if (url.endsWith('/model-connections/connection-chat') && init?.method === 'PUT') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: 'connection-chat', providerId: 'deepseek', displayName: 'Primary chat',
+            apiBase: 'https://api.deepseek.com', enabled: true, credentialConfigured: true,
+            credentialMask: '••••••••', createdAt: 1, updatedAt: 3
+          })
+        }
+      }
+      if (url.endsWith('/model-connections/connection-chat/test')) {
+        return { ok: true, status: 200, json: async () => ({ success: true, message: 'Connection ok.' }) }
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    })
     globalThis.fetch = fetchMock as unknown as typeof fetch
 
     await expect(agentRuntimeService.getModelConfig()).resolves.toMatchObject({
@@ -374,11 +403,13 @@ describe('agent runtime proposal parsing', () => {
     await agentRuntimeService.saveModelConfig({ temperature: 0.2, maxTokens: 3000 })
     await expect(agentRuntimeService.testModelConfig()).resolves.toEqual({
       success: true,
-      message: 'DeepSeek connection ok'
+      message: 'Connection ok.'
     })
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/agent-api/promptcard/runtime/model-config', expect.objectContaining({ credentials: 'include' }))
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/agent-api/promptcard/runtime/model-config', expect.objectContaining({ method: 'PUT' }))
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/agent-api/promptcard/runtime/model-config/test', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenCalledWith('/agent-api/promptcard/runtime/model-catalog', expect.objectContaining({ credentials: 'include' }))
+    expect(fetchMock).toHaveBeenCalledWith('/agent-api/promptcard/runtime/model-connections', expect.objectContaining({ credentials: 'include' }))
+    expect(fetchMock).toHaveBeenCalledWith('/agent-api/promptcard/runtime/model-assignments', expect.objectContaining({ credentials: 'include' }))
+    expect(fetchMock).toHaveBeenCalledWith('/agent-api/promptcard/runtime/model-connections/connection-chat/test', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock.mock.calls.some(call => String(call[0]).includes('/model-config'))).toBe(false)
   })
 })

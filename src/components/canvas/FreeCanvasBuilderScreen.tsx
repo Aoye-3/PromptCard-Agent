@@ -30,6 +30,11 @@ import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { PromptLibraryPreviewPanel } from '@/components/PromptLibraryPreviewMode'
 import { PromptPresetPreviewDialog } from '@/components/prompt-media/PromptPresetPreviewDialog'
 import { ImageCropEditor } from '@/components/canvas/ImageCropEditor'
+import {
+  ImageGeneratorNode,
+  applyImageGeneratorConnection
+} from '@/components/canvas/nodes/ImageGeneratorNode'
+import { ImageGeneratorInspector } from '@/components/canvas/image-generation/ImageGeneratorInspector'
 import { canvasImageAssetUrl, getClipboardImageFiles, isFileDrag, isSupportedImageFile, uploadFreeCanvasImageFiles } from '@/components/canvas/canvas-image-assets'
 import { createFreeCanvasCroppedNodes, type FreeCanvasCropLines, type FreeCanvasMediaNode } from '@/domain/free-canvas/free-canvas'
 import {
@@ -57,7 +62,7 @@ import {
 } from '@/domain/prompt-library/quick-messages'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
-import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject } from '@/models/PromptHistory.model'
+import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageGeneratorNode, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject } from '@/models/PromptHistory.model'
 
 interface FreeCanvasBuilderScreenProps {
   activeProject: IPromptProject
@@ -79,6 +84,8 @@ type FreeCanvasFlowNodeData = {
   onImageResize: (nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => void
   onStartImageAnnotationEdit: (nodeId: string) => void
   onStartImageCrop: (nodeId: string) => void
+  resultThumbnailUrl?: string
+  onOpenImageHistory: (nodeId: string) => void
 }
 
 type FreeCanvasFlowNode = Node<FreeCanvasFlowNodeData>
@@ -152,6 +159,7 @@ const FreeCanvasBuilderInner = ({
   const [annotationEditorNodeId, setAnnotationEditorNodeId] = useState<string | null>(null)
   const selectedNode = freeCanvas.nodes.find(node => node.id === freeCanvas.selectedNodeId) || null
   const selectedImageNode = selectedNode?.kind === 'image' ? selectedNode : null
+  const selectedImageGeneratorNode = selectedNode?.kind === 'image-generator' ? selectedNode : null
   const quickPresets = useMemo(() => presets.filter(isQuickMessagePreset), [presets])
   const cropNode = cropNodeId
     ? freeCanvas.nodes.find((node): node is IFreeCanvasImageNode => node.id === cropNodeId && node.kind === 'image')
@@ -328,9 +336,21 @@ const FreeCanvasBuilderInner = ({
     setAnnotationEditorNodeId(null)
   }, [freeCanvas, onChange])
 
+  const updateImageGeneratorNode = useCallback((
+    nodeId: string,
+    updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings'>>
+  ) => {
+    onChange({
+      ...freeCanvas,
+      nodes: freeCanvas.nodes.map(node => node.id === nodeId && node.kind === 'image-generator'
+        ? { ...node, ...updates }
+        : node)
+    })
+  }, [freeCanvas, onChange])
+
   const nodes = useMemo<FreeCanvasFlowNode[]>(() => freeCanvas.nodes.map(node => ({
     id: node.id,
-    type: 'freeCanvasNode',
+    type: node.kind === 'image-generator' ? 'imageGeneratorNode' : 'freeCanvasNode',
     position: node.position,
     selected: node.id === freeCanvas.selectedNodeId,
     style: node.kind === 'image' ? { width: node.width, height: node.height } : undefined,
@@ -343,9 +363,13 @@ const FreeCanvasBuilderInner = ({
       onTextStyleChange: updateTextStyle,
       onImageResize: resizeImageNode,
       onStartImageAnnotationEdit: setAnnotationEditorNodeId,
-      onStartImageCrop: setCropNodeId
+      onStartImageCrop: setCropNodeId,
+      resultThumbnailUrl: node.kind === 'image-generator' && node.primaryAssetId
+        ? canvasImageAssetUrl(node.primaryAssetId)
+        : undefined,
+      onOpenImageHistory: setSelectedNodeId
     }
-  })), [copyTextNode, editingNodeId, freeCanvas.nodes, freeCanvas.selectedNodeId, replaceTextRange, resizeImageNode, updateTextStyle])
+  })), [copyTextNode, editingNodeId, freeCanvas.nodes, freeCanvas.selectedNodeId, replaceTextRange, resizeImageNode, setSelectedNodeId, updateTextStyle])
 
   const [flowNodes, setFlowNodes] = useState<FreeCanvasFlowNode[]>(nodes)
   useEffect(() => setFlowNodes(nodes), [nodes])
@@ -354,6 +378,8 @@ const FreeCanvasBuilderInner = ({
     id: edge.id,
     source: edge.source,
     target: edge.target,
+    sourceHandle: edge.sourceHandle,
+    targetHandle: edge.targetHandle,
     label: edge.label,
     type: 'smoothstep',
     style: {
@@ -411,6 +437,12 @@ const FreeCanvasBuilderInner = ({
 
   const handleConnect: OnConnect = (connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return
+    const targetNode = freeCanvas.nodes.find(node => node.id === connection.target)
+    if (targetNode?.kind === 'image-generator') {
+      const updated = applyImageGeneratorConnection(freeCanvas, connection)
+      if (updated !== freeCanvas) onChange(updated)
+      return
+    }
     const duplicate = freeCanvas.edges.some(edge => edge.source === connection.source && edge.target === connection.target)
     if (duplicate) return
     onChange({
@@ -664,6 +696,18 @@ const FreeCanvasBuilderInner = ({
               />
             </div>
           </div>
+          {selectedImageGeneratorNode && (
+            <div className="max-h-[46%] shrink-0 overflow-y-auto border-b border-gray-100">
+              <ImageGeneratorInspector
+                node={selectedImageGeneratorNode}
+                resultThumbnailUrl={selectedImageGeneratorNode.primaryAssetId
+                  ? canvasImageAssetUrl(selectedImageGeneratorNode.primaryAssetId)
+                  : undefined}
+                onChange={updates => updateImageGeneratorNode(selectedImageGeneratorNode.id, updates)}
+                onOpenHistory={setSelectedNodeId}
+              />
+            </div>
+          )}
           {rightPanelMode === 'prompt-library' ? (
             <div className="min-h-0 flex-1 p-3" data-free-canvas-prompt-library-panel>
               <PromptLibraryPreviewPanel
@@ -724,6 +768,20 @@ const FreeCanvasNode = ({ data, selected }: NodeProps<FreeCanvasFlowNode>) => {
     return <FreeCanvasArrowNodeView node={node} selected={selected} />
   }
   return null
+}
+
+const ImageGeneratorFlowNode = ({ data, selected }: NodeProps<FreeCanvasFlowNode>) => {
+  if (data.canvasNode.kind !== 'image-generator') return null
+  return (
+    <ImageGeneratorNode
+      data={{
+        canvasNode: data.canvasNode,
+        resultThumbnailUrl: data.resultThumbnailUrl,
+        onOpenHistory: data.onOpenImageHistory
+      }}
+      selected={selected}
+    />
+  )
 }
 
 const FreeCanvasTextNodeView = ({
@@ -932,7 +990,7 @@ const FreeCanvasImageNodeView = ({
           mode="display"
         />
       </div>
-      <Handle type="source" position={Position.Right} className="!bg-gray-950 !opacity-0 group-hover:!opacity-100" />
+      <Handle id="image-output" type="source" position={Position.Right} className="!bg-gray-950 !opacity-0 group-hover:!opacity-100" />
     </div>
   )
 }
@@ -2641,7 +2699,8 @@ const PanelModeButton = ({
 )
 
 const nodeTypes = {
-  freeCanvasNode: FreeCanvasNode
+  freeCanvasNode: FreeCanvasNode,
+  imageGeneratorNode: ImageGeneratorFlowNode
 }
 
 const nextNodePosition = (reactFlow: ReturnType<typeof useReactFlow<FreeCanvasFlowNode>>, count: number) => (

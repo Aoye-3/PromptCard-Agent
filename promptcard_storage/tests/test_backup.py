@@ -6,9 +6,14 @@ from pathlib import Path
 from promptcard_storage.store import JsonCollectionStore
 
 
+TEST_TEMP_ROOT = Path(__file__).resolve().parents[2] / ".test-tmp" / "task3-backup"
+TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+
+
 class ImageRunBackupTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(dir=TEST_TEMP_ROOT)
+        self.assertTrue(Path(self.temp_dir.name).is_relative_to(TEST_TEMP_ROOT))
         self.store = JsonCollectionStore(Path(self.temp_dir.name, "data"))
 
     def tearDown(self) -> None:

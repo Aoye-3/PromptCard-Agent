@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from copy import deepcopy
 from typing import Any
 
@@ -25,7 +26,9 @@ _TRANSITION_FIELDS = {
     "succeeded": {"state", "finishedAt", "providerRequestId", "outputAssetIds", "usage"},
     "failed": {"state", "finishedAt", "providerRequestId", "error", "usage"},
 }
-_FORBIDDEN_KEYS = {"secret", "apikey", "remoteurl", "path"}
+_FORBIDDEN_KEY_PARTS = ("secret", "apikey", "token", "password", "credential", "url", "uri", "path")
+_ALLOWED_RESTRICTED_KEYS = {"inputtokens", "outputtokens", "totaltokens"}
+_SAFE_ASSET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 
 
 def normalize_new_image_run(item: dict[str, Any], now: int) -> dict[str, Any]:
@@ -160,6 +163,8 @@ def _timestamp(value: Any, field: str) -> int:
 def _normalize_asset_ids(value: Any) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) and item for item in value):
         raise ValueError("Image generation run outputAssetIds must be a list of non-empty strings")
+    if any(_SAFE_ASSET_ID.fullmatch(item) is None for item in value):
+        raise ValueError("Image generation run outputAssetIds contains an invalid asset identifier")
     return list(value)
 
 
@@ -180,7 +185,9 @@ def _reject_forbidden_fields(value: Any) -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             normalized_key = "".join(character for character in str(key).lower() if character.isalnum())
-            if normalized_key in _FORBIDDEN_KEYS:
+            if normalized_key not in _ALLOWED_RESTRICTED_KEYS and any(
+                part in normalized_key for part in _FORBIDDEN_KEY_PARTS
+            ):
                 raise ValueError(f"Image generation run field is forbidden: {key}")
             _reject_forbidden_fields(child)
     elif isinstance(value, list):

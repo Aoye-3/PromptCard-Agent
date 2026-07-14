@@ -517,6 +517,17 @@ class SqliteStore:
             if not row:
                 raise MissingItem()
             updated = transition_image_run(json.loads(row[0]), patch, now_ms())
+            if updated["state"] == "succeeded" and updated["outputAssetIds"]:
+                placeholders = ",".join("?" for _ in updated["outputAssetIds"])
+                registered = {
+                    asset_row[0]
+                    for asset_row in connection.execute(
+                        f"SELECT asset_id FROM assets WHERE asset_id IN ({placeholders})",
+                        updated["outputAssetIds"],
+                    )
+                }
+                if any(asset_id not in registered for asset_id in updated["outputAssetIds"]):
+                    raise MissingItem()
             connection.execute(
                 "UPDATE image_generation_runs SET state=?, started_at=?, finished_at=?, payload_json=? WHERE id=?",
                 (updated["state"], updated.get("startedAt"), updated.get("finishedAt"), _json(updated), run_id),
@@ -746,10 +757,10 @@ class SqliteStore:
             )
         """)
         connection.execute(
-            "CREATE INDEX IF NOT EXISTS image_generation_runs_project_order ON image_generation_runs(project_id, created_at DESC)"
+            "CREATE INDEX IF NOT EXISTS image_generation_runs_project_order ON image_generation_runs(project_id, created_at DESC, id DESC)"
         )
         connection.execute(
-            "CREATE INDEX IF NOT EXISTS image_generation_runs_node_order ON image_generation_runs(node_id, created_at DESC)"
+            "CREATE INDEX IF NOT EXISTS image_generation_runs_node_order ON image_generation_runs(node_id, created_at DESC, id DESC)"
         )
 
     def _insert_recent_capture(self, connection: sqlite3.Connection, item: dict[str, Any]) -> None:

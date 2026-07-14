@@ -13,6 +13,10 @@ except ModuleNotFoundError:
 from promptcard_storage.store import JsonCollectionStore, MissingItem
 
 
+TEST_TEMP_ROOT = Path(__file__).resolve().parents[2] / ".test-tmp" / "task3-image-runs"
+TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+
+
 def project(item_id: str, node_ids: list[str] | None = None) -> dict:
     return {
         "id": item_id,
@@ -77,7 +81,8 @@ def run_payload(
 
 class ImageRunSchemaMigrationTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(dir=TEST_TEMP_ROOT)
+        self.assertTrue(Path(self.temp_dir.name).is_relative_to(TEST_TEMP_ROOT))
         self.data_dir = Path(self.temp_dir.name, "data")
         self.data_dir.mkdir()
 
@@ -118,6 +123,17 @@ class ImageRunSchemaMigrationTest(unittest.TestCase):
                 row[1]
                 for row in connection.execute("PRAGMA index_list('image_generation_runs')")
             }
+            index_definitions = {
+                index_name: [
+                    (row[2], row[3])
+                    for row in connection.execute(f"PRAGMA index_xinfo('{index_name}')")
+                    if row[5]
+                ]
+                for index_name in (
+                    "image_generation_runs_project_order",
+                    "image_generation_runs_node_order",
+                )
+            }
         finally:
             connection.close()
 
@@ -125,11 +141,18 @@ class ImageRunSchemaMigrationTest(unittest.TestCase):
         self.assertEqual(table, ("image_generation_runs",))
         self.assertIn("image_generation_runs_project_order", indexes)
         self.assertIn("image_generation_runs_node_order", indexes)
+        self.assertEqual(index_definitions["image_generation_runs_project_order"], [
+            ("project_id", 0), ("created_at", 1), ("id", 1),
+        ])
+        self.assertEqual(index_definitions["image_generation_runs_node_order"], [
+            ("node_id", 0), ("created_at", 1), ("id", 1),
+        ])
 
 
 class ImageRunStoreTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(dir=TEST_TEMP_ROOT)
+        self.assertTrue(Path(self.temp_dir.name).is_relative_to(TEST_TEMP_ROOT))
         self.data_dir = Path(self.temp_dir.name, "data")
         self.store = JsonCollectionStore(self.data_dir)
 
@@ -179,18 +202,74 @@ class ImageRunStoreTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.list_image_generation_runs(limit=101)
 
-    def test_rejects_sensitive_or_location_fields_anywhere_in_payload(self) -> None:
-        for field in ("secret", "apiKey", "remoteUrl", "path"):
+    def test_rejects_credential_and_location_keys_anywhere_in_request_snapshot(self) -> None:
+        rejected_value = "must-not-persist"
+        for field in (
+            "secret",
+            "apiKey",
+            "api_key",
+            "accessToken",
+            "password",
+            "credentialRef",
+            "remoteUrl",
+            "inputUrl",
+            "sourceUri",
+            "path",
+            "localPath",
+        ):
             payload = run_payload(f"run-{field}")
-            payload["requestSnapshot"][field] = "must-not-persist"
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                self.store.create_image_generation_run(payload)
+            payload["requestSnapshot"][field] = rejected_value
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError) as raised:
+                    self.store.create_image_generation_run(payload)
+                self.assertNotIn(rejected_value, str(raised.exception))
+
+    def test_allows_credential_and_location_words_in_prompt_text_values(self) -> None:
+        payload = run_payload("run-prompt-words")
+        payload["requestSnapshot"]["promptDocument"] = {
+            "version": 1,
+            "segments": [{
+                "type": "text",
+                "text": "Render the words token, password, URL, URI, and localPath on a poster",
+            }],
+        }
+
+        created = self.store.create_image_generation_run(payload)
+
+        self.assertEqual(created["requestSnapshot"], payload["requestSnapshot"])
+
+    def test_rejects_traversal_and_absolute_like_output_asset_ids(self) -> None:
+        unsafe_ids = ("../outside.png", "nested/output.png", "/root/output.png", r"C:\output.png")
+        for index, asset_id in enumerate(unsafe_ids):
+            with self.subTest(asset_id=asset_id):
+                run = self.store.create_image_generation_run(run_payload(f"run-unsafe-{index}"))
+                self.store.update_image_generation_run_state(
+                    run["id"], {"state": "running", "startedAt": 110}
+                )
+                with self.assertRaises(ValueError):
+                    self.store.update_image_generation_run_state(run["id"], {
+                        "state": "succeeded", "outputAssetIds": [asset_id], "finishedAt": 120,
+                    })
+                self.assertEqual(self.store.get_image_generation_run(run["id"])["state"], "running")
+
+    def test_rejects_succeeded_outputs_that_are_not_registered_assets(self) -> None:
+        run = self.store.create_image_generation_run(run_payload("run-missing-output"))
+        self.store.update_image_generation_run_state(run["id"], {"state": "running", "startedAt": 110})
+        missing_asset_id = f"{'a' * 32}.png"
+
+        with self.assertRaises(MissingItem):
+            self.store.update_image_generation_run_state(run["id"], {
+                "state": "succeeded", "outputAssetIds": [missing_asset_id], "finishedAt": 120,
+            })
+
+        self.assertEqual(self.store.get_image_generation_run(run["id"])["state"], "running")
 
 
 @unittest.skipUnless(TestClient and create_app, "FastAPI contract dependencies are not installed")
 class ImageRunAppContractTest(unittest.TestCase):
     def setUp(self) -> None:
-        self.temp_dir = tempfile.TemporaryDirectory()
+        self.temp_dir = tempfile.TemporaryDirectory(dir=TEST_TEMP_ROOT)
+        self.assertTrue(Path(self.temp_dir.name).is_relative_to(TEST_TEMP_ROOT))
         self.store = JsonCollectionStore(Path(self.temp_dir.name, "data"))
         self.client = TestClient(create_app(self.store))
 
@@ -199,6 +278,9 @@ class ImageRunAppContractTest(unittest.TestCase):
 
     def test_append_state_machine_snapshot_immutability_and_no_delete_route(self) -> None:
         original = run_payload("run-state")
+        output_asset = self.store.save_asset(
+            "output.png", "image/png", b"\x89PNG\r\n\x1a\noutput"
+        )
         created = self.client.post("/api/image-generation-runs", json=original)
         self.assertEqual(created.status_code, 200)
         self.assertEqual(created.json()["state"], "queued")
@@ -231,13 +313,19 @@ class ImageRunAppContractTest(unittest.TestCase):
             json={
                 "state": "succeeded",
                 "providerRequestId": "provider-one",
-                "outputAssetIds": ["asset.png"],
-                "usage": {"inputImages": 0, "generatedImages": 1},
+                "outputAssetIds": [output_asset["id"]],
+                "usage": {
+                    "inputImages": 0,
+                    "generatedImages": 1,
+                    "outputTokens": 0,
+                    "totalTokens": 0,
+                },
                 "finishedAt": 120,
             },
         )
         self.assertEqual(succeeded.status_code, 200)
         self.assertEqual(succeeded.json()["state"], "succeeded")
+        self.assertEqual(succeeded.json()["usage"]["outputTokens"], 0)
 
         terminal_reversal = self.client.patch(
             "/api/image-generation-runs/run-state/state", json={"state": "running"}

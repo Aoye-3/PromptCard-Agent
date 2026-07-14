@@ -9,6 +9,12 @@ export interface QuickMessageDraft {
   body: string
 }
 
+export interface QuickMessageCanvasSource {
+  presetId: string
+  title: string
+  text: string
+}
+
 export interface LegacyQuickMessage extends QuickMessageDraft {
   id: string
   note: string
@@ -93,6 +99,14 @@ export const createQuickMessagePresetInput = (
 export const quickMessagePresetToDraft = (preset: Pick<IPreset, 'label' | 'content'>): QuickMessageDraft => ({
   name: preset.label,
   body: preset.content
+})
+
+export const quickMessagePresetToCanvasSource = (
+  preset: Pick<IPreset, 'id' | 'label' | 'content'>
+): QuickMessageCanvasSource => ({
+  presetId: preset.id,
+  title: preset.label.trim(),
+  text: preset.content.trim()
 })
 
 export const quickMessageSearchText = (preset: Pick<IPreset, 'label' | 'content' | 'category'>): string =>

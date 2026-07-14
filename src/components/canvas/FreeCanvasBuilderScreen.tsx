@@ -57,9 +57,11 @@ import { usePresetStore } from '@/stores/preset.store'
 import {
   createQuickMessagePresetInput,
   isQuickMessagePreset,
+  quickMessagePresetToCanvasSource,
   quickMessagePresetToDraft,
   type QuickMessageDraft
 } from '@/domain/prompt-library/quick-messages'
+import { compileImageGeneratorPrompt } from '@/domain/image-generation/prompt-compiler'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
 import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageGeneratorNode, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject } from '@/models/PromptHistory.model'
@@ -160,6 +162,9 @@ const FreeCanvasBuilderInner = ({
   const selectedNode = freeCanvas.nodes.find(node => node.id === freeCanvas.selectedNodeId) || null
   const selectedImageNode = selectedNode?.kind === 'image' ? selectedNode : null
   const selectedImageGeneratorNode = selectedNode?.kind === 'image-generator' ? selectedNode : null
+  const selectedPromptSnapshot = useMemo(() => selectedImageGeneratorNode
+    ? compileImageGeneratorPrompt(freeCanvas, selectedImageGeneratorNode.id)
+    : null, [freeCanvas, selectedImageGeneratorNode])
   const quickPresets = useMemo(() => presets.filter(isQuickMessagePreset), [presets])
   const cropNode = cropNodeId
     ? freeCanvas.nodes.find((node): node is IFreeCanvasImageNode => node.id === cropNodeId && node.kind === 'image')
@@ -213,9 +218,14 @@ const FreeCanvasBuilderInner = ({
     setEditingNodeId(node.id)
   }, [addNode, freeCanvas.nodes.length, reactFlow])
 
-  const createQuickText = useCallback((text: string) => {
-    const node = createQuickTextNode(text, nextNodePosition(reactFlow, freeCanvas.nodes.length))
-    addNode(node)
+  const createQuickText = useCallback((preset: IPreset) => {
+    const source = quickMessagePresetToCanvasSource(preset)
+    const node = createQuickTextNode(source.text, nextNodePosition(reactFlow, freeCanvas.nodes.length))
+    addNode({
+      ...node,
+      title: source.title,
+      meta: { ...node.meta, quickMessagePresetId: source.presetId }
+    })
     setQuickDrawerOpen(false)
   }, [addNode, freeCanvas.nodes.length, reactFlow])
 
@@ -338,7 +348,7 @@ const FreeCanvasBuilderInner = ({
 
   const updateImageGeneratorNode = useCallback((
     nodeId: string,
-    updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings'>>
+    updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings' | 'promptDocument'>>
   ) => {
     onChange({
       ...freeCanvas,
@@ -700,10 +710,15 @@ const FreeCanvasBuilderInner = ({
             <div className="max-h-[46%] shrink-0 overflow-y-auto border-b border-gray-100">
               <ImageGeneratorInspector
                 node={selectedImageGeneratorNode}
+                promptSnapshot={selectedPromptSnapshot || undefined}
                 resultThumbnailUrl={selectedImageGeneratorNode.primaryAssetId
                   ? canvasImageAssetUrl(selectedImageGeneratorNode.primaryAssetId)
                   : undefined}
                 onChange={updates => updateImageGeneratorNode(selectedImageGeneratorNode.id, updates)}
+                onPromptDocumentChange={promptDocument => updateImageGeneratorNode(
+                  selectedImageGeneratorNode.id,
+                  { promptDocument }
+                )}
                 onOpenHistory={setSelectedNodeId}
               />
             </div>
@@ -2470,7 +2485,7 @@ const CanvasBottomToolbar = ({
   onToggleQuickDrawer: () => void
   onOpenQuickPresetComposer: () => void
   onEditQuickPreset: (preset: IPreset) => void
-  onUseQuickPreset: (text: string) => void
+  onUseQuickPreset: (preset: IPreset) => void
 }) => (
     <div className="absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-3">
       {quickDrawerOpen && (
@@ -2496,7 +2511,7 @@ const CanvasBottomToolbar = ({
                 <button
                   type="button"
                   className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
-                  onClick={() => onUseQuickPreset(preset.content)}
+                  onClick={() => onUseQuickPreset(preset)}
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-red-50 text-red-600">
                     <MessageSquare className="h-4 w-4" />

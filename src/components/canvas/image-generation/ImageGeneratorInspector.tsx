@@ -1,14 +1,19 @@
 import type {
   FreeCanvasImageAspectRatio,
-  IFreeCanvasImageGeneratorNode
+  IFreeCanvasImageGeneratorNode,
+  PromptDocument
 } from '@/models/PromptHistory.model'
+import type { ImageGeneratorPromptSnapshot } from '@/domain/image-generation/prompt-compiler'
 import { imageGeneratorResultUrl, imageGeneratorStatus } from '../nodes/ImageGeneratorNode'
+import { ReferencePromptEditor } from './ReferencePromptEditor'
 
 export interface ImageGeneratorInspectorProps {
   node: IFreeCanvasImageGeneratorNode
   status?: string
   resultThumbnailUrl?: string
+  promptSnapshot?: ImageGeneratorPromptSnapshot
   onChange: (updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings'>>) => void
+  onPromptDocumentChange?: (document: PromptDocument) => void
   onOpenHistory?: (nodeId: string) => void
 }
 
@@ -29,7 +34,9 @@ export const ImageGeneratorInspector = ({
   node,
   status = imageGeneratorStatus(node),
   resultThumbnailUrl = imageGeneratorResultUrl(node),
+  promptSnapshot,
   onChange,
+  onPromptDocumentChange,
   onOpenHistory
 }: ImageGeneratorInspectorProps) => {
   const updateSettings = (updates: Partial<IFreeCanvasImageGeneratorNode['settings']>) => {
@@ -46,6 +53,25 @@ export const ImageGeneratorInspector = ({
         </div>
         <span className="rounded-full bg-gray-100 px-2 py-1 text-[10px] font-bold text-gray-700">{status}</span>
       </div>
+
+      {promptSnapshot && onPromptDocumentChange && (
+        <div className="space-y-2 border-t border-gray-100 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-xs font-black text-gray-950">Prompt</h3>
+            <span className="text-[10px] font-semibold text-gray-400">
+              {promptSnapshot.source === 'connected' ? 'Connected snapshot' : 'Local'}
+            </span>
+          </div>
+          <ReferencePromptEditor
+            document={promptSnapshot.promptDocument}
+            references={promptSnapshot.references}
+            unresolvedReferenceIds={promptSnapshot.validationErrors.flatMap(error => (
+              error.code === 'unresolved_reference' && error.referenceId ? [error.referenceId] : []
+            ))}
+            onChange={onPromptDocumentChange}
+          />
+        </div>
+      )}
 
       {resultThumbnailUrl && (
         <img

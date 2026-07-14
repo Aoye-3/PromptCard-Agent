@@ -1,0 +1,278 @@
+import { describe, expect, it } from 'vitest'
+import type {
+  IFreeCanvasImageGeneratorNode,
+  IFreeCanvasImageNode,
+  IFreeCanvasProject,
+  IFreeCanvasTextNode,
+  PromptDocument
+} from '@/models/PromptHistory.model'
+import { quickMessagePresetToCanvasSource } from '@/domain/prompt-library/quick-messages'
+import { compileImageGeneratorPrompt } from './prompt-compiler'
+
+const generatorNode = (promptDocument: PromptDocument = { version: 1, segments: [] }): IFreeCanvasImageGeneratorNode => ({
+  id: 'generator-1',
+  kind: 'image-generator',
+  title: 'Generator',
+  position: { x: 0, y: 0 },
+  width: 420,
+  height: 560,
+  mode: 'generate',
+  binding: { connectionId: 'connection-1', modelId: 'image-model-1' },
+  settings: {
+    resolution: '1K',
+    aspectRatio: 'smart',
+    outputFormat: 'png',
+    watermark: false
+  },
+  promptDocument,
+  regions: [],
+  meta: {}
+})
+
+const textNode = (id: string, text: string, source: 'preset' | 'user' = 'user'): IFreeCanvasTextNode => ({
+  id,
+  kind: 'text',
+  title: 'Prompt',
+  position: { x: 0, y: 0 },
+  width: 420,
+  height: 180,
+  fontSize: 'large',
+  segments: [{
+    id: `${id}-segment`,
+    source,
+    text,
+    color: source === 'preset' ? '#ef4423' : '#111827',
+    createdAt: 1,
+    updatedAt: 1
+  }],
+  meta: {}
+})
+
+const imageNode = (id: string, title: string, assetId: string): IFreeCanvasImageNode => ({
+  id,
+  kind: 'image',
+  title,
+  position: { x: 0, y: 0 },
+  width: 300,
+  height: 220,
+  assetId,
+  annotations: [],
+  meta: {}
+})
+
+const projectWith = (
+  nodes: IFreeCanvasProject['nodes'],
+  edges: IFreeCanvasProject['edges'] = []
+): IFreeCanvasProject => ({
+  nodes,
+  edges,
+  viewport: null,
+  selectedNodeId: 'generator-1',
+  meta: {}
+})
+
+describe('compileImageGeneratorPrompt', () => {
+  it('uses local explicit content before a connected prompt and otherwise snapshots upstream text', () => {
+    const upstream = textNode('prompt-1', 'Connected prompt')
+    const connectedProject = projectWith([generatorNode(), upstream], [{
+      id: 'prompt-edge',
+      source: upstream.id,
+      target: 'generator-1',
+      targetHandle: 'prompt',
+      createdAt: 1
+    }])
+
+    const connected = compileImageGeneratorPrompt(connectedProject, 'generator-1')
+    const local = compileImageGeneratorPrompt(projectWith([
+      generatorNode({ version: 1, segments: [{ type: 'text', text: 'Local override' }] }),
+      upstream
+    ], connectedProject.edges), 'generator-1')
+
+    expect(connected.source).toBe('connected')
+    expect(connected.prompt).toBe('Connected prompt')
+    expect(connected.promptDocument).toEqual({
+      version: 1,
+      segments: [{ type: 'text', text: 'Connected prompt' }]
+    })
+    expect(local.source).toBe('local')
+    expect(local.prompt).toBe('Local override')
+  })
+
+  it('returns a detached prompt snapshot that later upstream edits cannot mutate', () => {
+    const upstream = textNode('prompt-1', 'Original prompt')
+    const project = projectWith([generatorNode(), upstream], [{
+      id: 'prompt-edge',
+      source: upstream.id,
+      target: 'generator-1',
+      targetHandle: 'prompt',
+      createdAt: 1
+    }])
+
+    const snapshot = compileImageGeneratorPrompt(project, 'generator-1')
+    upstream.segments[0].text = 'Changed later'
+
+    expect(snapshot.prompt).toBe('Original prompt')
+    expect(snapshot.promptDocument.segments).toEqual([{ type: 'text', text: 'Original prompt' }])
+  })
+
+  it('treats an explicitly persisted empty text segment as a local override', () => {
+    const upstream = textNode('prompt-1', 'Connected prompt')
+    const project = projectWith([
+      generatorNode({ version: 1, segments: [{ type: 'text', text: '' }] }),
+      upstream
+    ], [{
+      id: 'prompt-edge',
+      source: upstream.id,
+      target: 'generator-1',
+      targetHandle: 'prompt',
+      createdAt: 1
+    }])
+
+    const result = compileImageGeneratorPrompt(project, 'generator-1')
+
+    expect(result.source).toBe('local')
+    expect(result.prompt).toBe('')
+    expect(result.validationErrors).toContainEqual({ code: 'missing_prompt' })
+  })
+
+  it('keeps token identity and asset binding stable while figure numbers follow reordered inputOrder', () => {
+    const document: PromptDocument = {
+      version: 1,
+      segments: [
+        { type: 'text', text: 'Blend ' },
+        { type: 'reference', referenceId: 'ref-product', label: 'Product' },
+        { type: 'text', text: ' with ' },
+        { type: 'reference', referenceId: 'ref-style', label: 'Style' }
+      ]
+    }
+    const nodes = [
+      generatorNode(document),
+      imageNode('image-product', 'Product', 'asset-product'),
+      imageNode('image-style', 'Style', 'asset-style')
+    ]
+    const edges: IFreeCanvasProject['edges'] = [
+      {
+        id: 'edge-product',
+        source: 'image-product',
+        target: 'generator-1',
+        sourceHandle: 'image-output',
+        targetHandle: 'reference-image',
+        inputOrder: 0,
+        referenceId: 'ref-product',
+        createdAt: 1
+      },
+      {
+        id: 'edge-style',
+        source: 'image-style',
+        target: 'generator-1',
+        sourceHandle: 'image-output',
+        targetHandle: 'reference-image',
+        inputOrder: 1,
+        referenceId: 'ref-style',
+        createdAt: 2
+      }
+    ]
+
+    const before = compileImageGeneratorPrompt(projectWith(nodes, edges), 'generator-1')
+    const after = compileImageGeneratorPrompt(projectWith(nodes, [
+      { ...edges[0], inputOrder: 1 },
+      { ...edges[1], inputOrder: 0 }
+    ]), 'generator-1')
+
+    expect(before.prompt).toBe('Blend 图1 with 图2')
+    expect(after.prompt).toBe('Blend 图2 with 图1')
+    expect(after.promptDocument).toEqual(document)
+    expect(after.inputAssets).toEqual([
+      { referenceId: 'ref-style', role: 'reference-image', assetId: 'asset-style', order: 0 },
+      { referenceId: 'ref-product', role: 'reference-image', assetId: 'asset-product', order: 1 }
+    ])
+  })
+
+  it('keeps a disconnected token visible as an explicit unresolved validation error', () => {
+    const document: PromptDocument = {
+      version: 1,
+      segments: [{ type: 'reference', referenceId: 'ref-product', label: 'Product' }]
+    }
+
+    const result = compileImageGeneratorPrompt(projectWith([generatorNode(document)]), 'generator-1')
+
+    expect(result.canGenerate).toBe(false)
+    expect(result.prompt).toBe('@Product')
+    expect(result.validationErrors).toContainEqual({
+      code: 'unresolved_reference',
+      referenceId: 'ref-product'
+    })
+  })
+
+  it('lists only connected source/reference images with stable reference and asset identities', () => {
+    const nodes = [
+      generatorNode({ version: 1, segments: [{ type: 'text', text: 'Edit' }] }),
+      imageNode('source', 'Source', 'asset-source'),
+      imageNode('reference', 'Reference', 'asset-reference'),
+      imageNode('unconnected', 'Unconnected', 'asset-unconnected')
+    ]
+    const project = projectWith(nodes, [
+      {
+        id: 'edge-source',
+        source: 'source',
+        target: 'generator-1',
+        sourceHandle: 'image-output',
+        targetHandle: 'source-image',
+        createdAt: 1
+      },
+      {
+        id: 'edge-reference',
+        source: 'reference',
+        target: 'generator-1',
+        sourceHandle: 'image-output',
+        targetHandle: 'reference-image',
+        inputOrder: 0,
+        referenceId: 'ref-reference',
+        createdAt: 2
+      }
+    ])
+
+    expect(compileImageGeneratorPrompt(project, 'generator-1').references).toEqual([
+      {
+        edgeId: 'edge-source',
+        nodeId: 'source',
+        referenceId: 'reference-edge-source',
+        label: 'Source',
+        role: 'source-image',
+        assetId: 'asset-source',
+        order: 0
+      },
+      {
+        edgeId: 'edge-reference',
+        nodeId: 'reference',
+        referenceId: 'ref-reference',
+        label: 'Reference',
+        role: 'reference-image',
+        assetId: 'asset-reference',
+        order: 1
+      }
+    ])
+  })
+
+  it('compiles a connected quick-message canvas source through the same prompt path', () => {
+    const quickSource = quickMessagePresetToCanvasSource({
+      id: 'quick-1',
+      label: 'Cinematic light',
+      content: 'Use low-key cinematic lighting'
+    })
+    const quickNode = {
+      ...textNode('quick-node', quickSource.text, 'preset'),
+      title: quickSource.title,
+      meta: { quickMessagePresetId: quickSource.presetId }
+    }
+    const project = projectWith([generatorNode(), quickNode], [{
+      id: 'prompt-edge',
+      source: quickNode.id,
+      target: 'generator-1',
+      targetHandle: 'prompt',
+      createdAt: 1
+    }])
+
+    expect(compileImageGeneratorPrompt(project, 'generator-1').prompt).toBe('Use low-key cinematic lighting')
+  })
+})

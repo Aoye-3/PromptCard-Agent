@@ -89,6 +89,52 @@ describe('ImageGeneratorInspector', () => {
     expect(markup).toContain('History')
   })
 
+  it('mounts the structured prompt editor with connected references and unresolved validation', () => {
+    const markup = renderToStaticMarkup(
+      <ImageGeneratorInspector
+        node={{
+          ...generatorNode,
+          promptDocument: {
+            version: 1,
+            segments: [{ type: 'reference', referenceId: 'ref-missing', label: 'Missing' }]
+          }
+        }}
+        promptSnapshot={{
+          source: 'local',
+          promptDocument: {
+            version: 1,
+            segments: [{ type: 'reference', referenceId: 'ref-missing', label: 'Missing' }]
+          },
+          prompt: '@Missing',
+          references: [{
+            edgeId: 'edge-product',
+            nodeId: 'image-product',
+            referenceId: 'ref-product',
+            label: 'Product',
+            role: 'reference-image',
+            assetId: 'asset-product',
+            order: 0
+          }],
+          inputAssets: [{
+            referenceId: 'ref-product',
+            role: 'reference-image',
+            assetId: 'asset-product',
+            order: 0
+          }],
+          validationErrors: [{ code: 'unresolved_reference', referenceId: 'ref-missing' }],
+          canGenerate: false
+        }}
+        onChange={vi.fn()}
+        onPromptDocumentChange={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('data-reference-prompt-editor')
+    expect(markup).toContain('Product')
+    expect(markup).toContain('data-unresolved="true"')
+    expect(markup).toContain('Resolve or remove disconnected image references')
+  })
+
   it('does not add an invalid second prompt connection to project state', () => {
     const project = projectWith(
       [generatorNode, textNode('prompt-1'), textNode('prompt-2')],

@@ -156,10 +156,18 @@ class ImageGenerationService:
             close_fetcher()
 
     def generate(self, command: GenerationCommand) -> GenerationOutcome:
+        create_failure: GenerationError | None = None
         try:
             self._storage.create_run(_queued_run(command))
         except Exception:
-            raise GenerationError("storage_write_failed", "Image generation run could not be created", True, command.run_id) from None
+            create_failure = GenerationError(
+                "storage_write_failed",
+                "Image generation run could not be created",
+                True,
+                command.run_id,
+            )
+        if create_failure is not None:
+            raise create_failure from None
 
         self._start_run(command.run_id)
 
@@ -226,10 +234,18 @@ class ImageGenerationService:
             }
             if provider_request_id:
                 patch["providerRequestId"] = provider_request_id
+            terminal_failure: GenerationError | None = None
             try:
                 self._storage.update_run(command.run_id, patch)
             except Exception:
-                raise GenerationError("terminal_persistence_failed", "Image generation terminal state could not be saved", True, command.run_id) from None
+                terminal_failure = GenerationError(
+                    "terminal_persistence_failed",
+                    "Image generation terminal state could not be saved",
+                    True,
+                    command.run_id,
+                )
+            if terminal_failure is not None:
+                raise terminal_failure from None
             raise failure from None
 
         if outcome is None:

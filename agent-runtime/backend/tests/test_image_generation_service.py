@@ -299,6 +299,61 @@ def test_every_post_create_failure_persists_failed_terminal_state(failure: str, 
     assert states == ["running", "failed"]
 
 
+def test_create_run_failure_does_not_retain_raw_storage_exception() -> None:
+    raw_secret = "raw-create-run-secret"
+
+    class CreateRunFailureStorage(FakeStorage):
+        def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+            raise OSError(f"Authorization: Bearer {raw_secret}")
+
+    service, _, _, _ = make_service(storage=CreateRunFailureStorage())
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(command("run-create-failed"))
+
+    error = exc_info.value
+    response = {"code": error.code, "message": error.message, "retryable": error.retryable}
+    formatted = "".join(traceback.format_exception(error))
+    assert error.code == "storage_write_failed"
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert raw_secret not in formatted
+    assert raw_secret not in repr(response)
+
+
+def test_failed_terminal_patch_failure_does_not_retain_raw_storage_exception() -> None:
+    raw_secret = "raw-terminal-patch-secret"
+
+    class TerminalPatchFailureStorage(FakeStorage):
+        def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+            if patch["state"] == "failed":
+                self._record("update_run", (run_id, patch))
+                raise OSError(f"Authorization: Bearer {raw_secret}")
+            return super().update_run(run_id, patch)
+
+    storage = TerminalPatchFailureStorage()
+    provider = FakeProvider(error=ProviderError("rate_limited", "provider raw secret", True))
+    service, _, _, _ = make_service(storage=storage, provider=provider)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(command("run-terminal-patch-failed"))
+
+    error = exc_info.value
+    response = {"code": error.code, "message": error.message, "retryable": error.retryable}
+    failed_patches = [
+        payload[1]
+        for operation, payload in storage.operations
+        if operation == "update_run" and payload[1]["state"] == "failed"
+    ]
+    formatted = "".join(traceback.format_exception(error))
+    assert error.code == "terminal_persistence_failed"
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert raw_secret not in formatted
+    assert raw_secret not in repr(response)
+    assert raw_secret not in repr(failed_patches)
+
+
 def test_limits_each_connection_to_two_in_flight_generations() -> None:
     storage = FakeStorage()
     started = threading.Event()

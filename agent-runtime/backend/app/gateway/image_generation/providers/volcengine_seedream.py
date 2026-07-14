@@ -46,6 +46,7 @@ class VolcengineSeedreamProvider:
         except PromptCompilationError as error:
             raise ProviderError(error.code, str(error), False) from error
 
+        provider_error: ProviderError | None = None
         try:
             client = self._client_factory(api_key=self._api_key, base_url=self._base_url)
             response = client.images.generate(
@@ -60,7 +61,10 @@ class VolcengineSeedreamProvider:
         except ProviderError:
             raise
         except Exception as error:
-            raise _normalize_provider_error(error, self._api_key) from error
+            provider_error = _normalize_provider_error(error, self._api_key)
+
+        if provider_error is not None:
+            raise provider_error from None
 
         data = getattr(response, "data", None)
         if not isinstance(data, list) or len(data) != 1:

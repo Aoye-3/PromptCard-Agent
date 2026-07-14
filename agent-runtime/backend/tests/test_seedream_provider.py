@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import traceback
 from types import SimpleNamespace
 from typing import Any
 
@@ -154,6 +155,30 @@ def test_normalizes_retryable_vendor_error_and_redacts_suspected_credentials() -
     assert "body-secret" not in error.message
     assert "second-secret" not in error.message
     assert "client-secret" not in error.message
+
+
+def test_vendor_secret_is_absent_from_exception_chain_and_formatted_traceback() -> None:
+    raw_secret = "raw-vendor-secret"
+
+    class VendorError(Exception):
+        status_code = 500
+
+    images = FakeImages(error=VendorError(f"Authorization: Bearer {raw_secret}"))
+    provider = VolcengineSeedreamProvider(
+        api_key="client-secret",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.generate(generation_request())
+
+    error = exc_info.value
+    formatted = "".join(traceback.format_exception(error))
+    assert raw_secret not in error.message
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert raw_secret not in formatted
 
 
 def test_rejects_zero_or_multiple_outputs() -> None:

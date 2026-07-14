@@ -18,8 +18,9 @@ from app.gateway.model_management.connection_store import (
     ModelManagementError,
     _atomic_write_json,
     get_connection_store,
+    validate_provider_endpoint,
 )
-from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
+from app.gateway.model_management.contracts import ConnectionRequest
 from app.gateway.model_management.migration import migrate_legacy_model_config
 from app.gateway.routers import agents, auth, models, skills, thread_runs, threads, tools
 from deerflow.config.app_config import get_app_config
@@ -103,6 +104,10 @@ class PromptCardRuntimeService:
         return model_config_response(config)
 
     async def save_model_config(self, body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
+        if body.api_base is not None:
+            validate_provider_endpoint("deepseek", body.api_base)
+        if body.model_name is not None and not body.model_name.strip():
+            raise ModelManagementError("model_name_required")
         config = _request_config(request)
         current = read_model_config(config)
         next_config = {
@@ -123,6 +128,8 @@ class PromptCardRuntimeService:
         return model_config_response(config)
 
     async def test_model_config(self, body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
+        if body.api_base is not None:
+            validate_provider_endpoint("deepseek", body.api_base)
         config = _request_config(request)
         candidate = {
             **read_model_config(config),
@@ -139,17 +146,14 @@ class PromptCardRuntimeService:
         if not api_key:
             return {"success": False, "message": "DeepSeek API Key is not configured."}
         api_base = str(candidate.get("apiBase") or "https://api.deepseek.com").rstrip("/")
-        request_url = f"{api_base}/models"
         try:
-            req = urllib.request.Request(request_url, headers={"Authorization": f"Bearer {api_key}"})
-            with urllib.request.urlopen(req, timeout=8) as response:
-                if 200 <= response.status < 300:
-                    return {"success": True, "message": "DeepSeek connection ok."}
-                return {"success": False, "message": f"DeepSeek returned HTTP {response.status}."}
-        except urllib.error.HTTPError as exc:
-            return {"success": False, "message": f"DeepSeek returned HTTP {exc.code}."}
-        except OSError as exc:
-            return {"success": False, "message": f"DeepSeek connection failed: {exc}"}
+            from app.gateway.routers.model_management import probe_connection
+
+            validate_provider_endpoint("deepseek", api_base)
+            probe_connection(api_base, api_key)
+        except (OSError, urllib.error.HTTPError):
+            return {"success": False, "message": "Connection failed."}
+        return {"success": True, "message": "Connection ok."}
 
     async def send_message(self, body: PromptCardRuntimeMessageRequest, request: Request) -> dict[str, Any]:
         thread_id = body.thread_id
@@ -271,7 +275,7 @@ def read_model_config(config: Any) -> dict[str, Any]:
     base = {
         "enabled": True,
         "apiBase": str(getattr(model, "base_url", None) or "https://api.deepseek.com"),
-        "apiKey": str(getattr(model, "api_key", None) or ""),
+        "apiKey": "",
         "modelName": str(getattr(model, "name", None) or "deepseek-chat"),
         "temperature": float(getattr(model, "temperature", 0.3) or 0.3),
         "maxTokens": int(getattr(model, "max_tokens", 4096) or 4096),
@@ -285,12 +289,16 @@ def read_model_config(config: Any) -> dict[str, Any]:
             connection = store.get_connection_config(assignment["connectionId"])
         except ModelManagementError:
             connection = None
-        if connection is not None and connection.get("enabled", True):
+        if connection is not None:
             base.update(
                 {
                     "enabled": bool(connection.get("enabled", True)),
                     "apiBase": str(connection["apiBase"]),
-                    "apiKey": str(store.credential_store.get(connection["id"]) or ""),
+                    "apiKey": (
+                        str(store.credential_store.get(connection["id"]) or "")
+                        if connection.get("enabled", True)
+                        else ""
+                    ),
                     "modelName": str(assignment["modelId"]),
                 }
             )
@@ -306,7 +314,6 @@ def persist_model_config(data: dict[str, Any]) -> None:
         "maxTokens": int(data.get("maxTokens", 4096)),
     }
     store = _model_connection_store()
-    assignment = store.assignment("chat.primary")
     request = ConnectionRequest(
         providerId="deepseek",
         displayName="DeepSeek",
@@ -314,17 +321,7 @@ def persist_model_config(data: dict[str, Any]) -> None:
         enabled=payload["enabled"],
         credential=str(data.get("apiKey") or ""),
     )
-    if assignment is None:
-        connection = store.create_connection(request)
-    else:
-        connection = store.update_connection(assignment["connectionId"], request)
-    store.set_assignment(
-        "chat.primary",
-        AssignmentRequest(
-            connectionId=connection["id"],
-            modelId=payload["modelName"],
-        ),
-    )
+    store.save_legacy_chat(request, payload["modelName"])
     _atomic_write_json(model_config_path(), payload)
 
 

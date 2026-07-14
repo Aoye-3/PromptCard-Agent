@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import urllib.error
-import urllib.request
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response, status
@@ -15,6 +13,7 @@ from app.gateway.model_management.connection_store import (
 from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.model_management.migration import migrate_legacy_model_config
+from app.gateway.model_management.service import ConnectionProbeError, probe_connection
 
 router = APIRouter(prefix="/api/promptcard/runtime", tags=["model-management"])
 
@@ -28,7 +27,7 @@ async def model_catalog() -> dict[str, Any]:
 async def model_connections() -> dict[str, Any]:
     try:
         return {"connections": _store().list_connections()}
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _http_error(exc) from None
 
 
@@ -36,7 +35,7 @@ async def model_connections() -> dict[str, Any]:
 async def create_model_connection(body: ConnectionRequest) -> dict[str, Any]:
     try:
         return _store().create_connection(body)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _http_error(exc) from None
 
 
@@ -47,7 +46,7 @@ async def update_model_connection(
 ) -> dict[str, Any]:
     try:
         return _store().update_connection(connection_id, body)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _http_error(exc) from None
 
 
@@ -55,7 +54,7 @@ async def update_model_connection(
 async def delete_model_connection(connection_id: str) -> Response:
     try:
         _store().delete_connection(connection_id)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _http_error(exc) from None
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -73,15 +72,15 @@ async def test_model_connection(connection_id: str) -> dict[str, Any]:
         if not credential:
             raise ModelManagementError("credential_not_configured")
         probe_connection(str(connection["apiBase"]), credential)
-    except (ModelManagementError, CredentialStoreError) as exc:
-        raise _http_error(exc) from None
-    except (OSError, urllib.error.HTTPError):
+    except ConnectionProbeError:
         success = False
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
+        raise _http_error(exc) from None
     else:
         success = True
     try:
         store.record_test(connection_id, success=success)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _http_error(exc) from None
     return {
         "success": success,
@@ -93,7 +92,7 @@ async def test_model_connection(connection_id: str) -> dict[str, Any]:
 async def model_assignments() -> dict[str, Any]:
     try:
         return {"assignments": _store().list_assignments()}
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _http_error(exc) from None
 
 
@@ -101,24 +100,8 @@ async def model_assignments() -> dict[str, Any]:
 async def update_model_assignment(slot: str, body: AssignmentRequest) -> dict[str, Any]:
     try:
         return _store().set_assignment(slot, body)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _http_error(exc) from None
-
-
-def probe_connection(api_base: str, credential: str) -> None:
-    request = urllib.request.Request(
-        f"{api_base.rstrip('/')}/models",
-        headers={"Authorization": f"Bearer {credential}"},
-    )
-    opener = urllib.request.build_opener(_NoRedirectHandler())
-    with opener.open(request, timeout=8) as response:
-        if not 200 <= response.status < 300:
-            raise OSError("connection_probe_failed")
-
-
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
 
 
 def _store():
@@ -130,13 +113,15 @@ def _store():
     return store
 
 
-def _http_error(exc: ModelManagementError | CredentialStoreError) -> HTTPException:
-    code = exc.code
+def _http_error(exc: ModelManagementError | CredentialStoreError | OSError) -> HTTPException:
+    code = getattr(exc, "code", "connection_store_unavailable")
     status_code = 409 if code == "connection_is_assigned" else 422
     if code in {
         "credential_store_unavailable",
         "connection_store_unavailable",
         "migration_failed",
+        "migration_rollback_failed",
+        "model_config_rollback_failed",
     }:
         status_code = 503
     return HTTPException(status_code=status_code, detail=code)

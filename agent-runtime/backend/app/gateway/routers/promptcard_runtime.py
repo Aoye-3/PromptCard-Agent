@@ -39,7 +39,7 @@ async def bootstrap(request: Request, response: Response) -> dict[str, Any]:
 async def catalog(request: Request) -> dict[str, Any]:
     try:
         return await runtime_service.catalog(request)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _model_http_error(exc) from None
 
 
@@ -47,7 +47,7 @@ async def catalog(request: Request) -> dict[str, Any]:
 async def model_config(request: Request) -> dict[str, Any]:
     try:
         return await runtime_service.get_model_config(request)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _model_http_error(exc) from None
 
 
@@ -55,7 +55,7 @@ async def model_config(request: Request) -> dict[str, Any]:
 async def save_model_config(body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
     try:
         return await runtime_service.save_model_config(body, request)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _model_http_error(exc) from None
 
 
@@ -63,7 +63,7 @@ async def save_model_config(body: PromptCardModelConfigRequest, request: Request
 async def test_model_config(body: PromptCardModelConfigRequest, request: Request) -> dict[str, Any]:
     try:
         return await runtime_service.test_model_config(body, request)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _model_http_error(exc) from None
 
 
@@ -71,16 +71,18 @@ async def test_model_config(body: PromptCardModelConfigRequest, request: Request
 async def messages(body: PromptCardRuntimeMessageRequest, request: Request) -> dict[str, Any]:
     try:
         return await runtime_service.send_message(body, request)
-    except (ModelManagementError, CredentialStoreError) as exc:
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _model_http_error(exc) from None
 
 
-def _model_http_error(exc: ModelManagementError | CredentialStoreError) -> HTTPException:
-    code = exc.code
+def _model_http_error(exc: ModelManagementError | CredentialStoreError | OSError) -> HTTPException:
+    code = getattr(exc, "code", "connection_store_unavailable")
     if code in {
         "credential_store_unavailable",
         "connection_store_unavailable",
         "migration_failed",
+        "migration_rollback_failed",
+        "model_config_rollback_failed",
     }:
         status_code = 503
     elif code == "connection_is_assigned":

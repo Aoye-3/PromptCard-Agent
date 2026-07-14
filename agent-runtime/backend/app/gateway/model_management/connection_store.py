@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from copy import deepcopy
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -51,7 +51,9 @@ class ModelConnectionStore:
             return {"version": 1, "connections": [], "assignments": {}}
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except OSError as exc:
+            raise ModelManagementError("connection_store_unavailable") from exc
+        except json.JSONDecodeError as exc:
             raise ModelManagementError("invalid_connection_store") from exc
         if not isinstance(payload, dict):
             raise ModelManagementError("invalid_connection_store")
@@ -62,26 +64,20 @@ class ModelConnectionStore:
         return {"version": 1, "connections": connections, "assignments": assignments}
 
     def replace_state(self, state: dict[str, Any]) -> None:
-        ids: set[str] = set()
-        for connection in state.get("connections", []):
-            connection_id = str(connection.get("id", ""))
-            _validate_connection_id(connection_id)
-            if connection_id in ids:
-                raise ModelManagementError("duplicate_connection_id")
-            ids.add(connection_id)
-            _validate_provider_and_url(
-                str(connection.get("providerId", "")),
-                str(connection.get("apiBase", "")),
-            )
-        for assignment in state.get("assignments", {}).values():
-            _validate_assignment(state, assignment)
+        _validate_state(state)
         try:
             _atomic_write_json(self.path, state)
         except OSError:
             raise ModelManagementError("connection_store_unavailable") from None
 
+    def validate_state(self, state: dict[str, Any]) -> None:
+        _validate_state(state)
+
     def state_bytes(self) -> bytes | None:
-        return self.path.read_bytes() if self.path.exists() else None
+        try:
+            return self.path.read_bytes() if self.path.exists() else None
+        except OSError:
+            raise ModelManagementError("connection_store_unavailable") from None
 
     def restore_state_bytes(self, original: bytes | None) -> None:
         if original is None:
@@ -113,8 +109,9 @@ class ModelConnectionStore:
     def create_connection(self, request: ConnectionRequest) -> dict[str, Any]:
         connection_id = str(uuid4())
         connection = self.prepare_connection(connection_id, request)
-        credential_written = self._replace_credential(connection_id, request.credential)
         state = self.read_state()
+        self.validate_state(state)
+        credential_written = self._replace_credential(connection_id, request.credential)
         state["connections"].append(connection)
         try:
             self.replace_state(state)
@@ -243,12 +240,18 @@ class ModelConnectionStore:
                 self._replace_credential(connection_id, request.credential)
             self.replace_state(state)
         except Exception as exc:
+            rollback_failed = False
             try:
                 self.restore_state_bytes(state_before)
-                if credential_changed:
-                    self._restore_credential(connection_id, previous_secret)
             except Exception:
-                raise ModelManagementError("connection_store_unavailable") from None
+                rollback_failed = True
+            if credential_changed:
+                try:
+                    self._restore_credential(connection_id, previous_secret)
+                except Exception:
+                    rollback_failed = True
+            if rollback_failed:
+                raise ModelManagementError("model_config_rollback_failed") from None
             if isinstance(exc, OSError):
                 raise ModelManagementError("connection_store_unavailable") from None
             raise
@@ -262,13 +265,13 @@ class ModelConnectionStore:
         )
         if connection is None:
             raise ModelManagementError("connection_not_found")
-        tested_at = _now()
+        checked_at = _next_ms(connection.get("updatedAt"))
         connection["lastTest"] = {
-            "status": "success" if success else "failure",
-            "testedAt": tested_at,
+            "ok": success,
+            "checkedAt": checked_at,
             "message": "Connection ok." if success else "Connection failed.",
         }
-        connection["updatedAt"] = tested_at
+        connection["updatedAt"] = checked_at
         self.replace_state(state)
 
     def assignment(self, slot: str) -> dict[str, Any] | None:
@@ -287,7 +290,9 @@ class ModelConnectionStore:
         display_name = request.display_name.strip()
         if not display_name:
             raise ModelManagementError("display_name_required")
-        now = _now()
+        now = _now_ms()
+        created_at = existing.get("createdAt", now) if existing else now
+        updated_at = _next_ms(existing.get("updatedAt")) if existing else now
         connection = {
             "id": connection_id,
             "providerId": request.provider_id,
@@ -295,8 +300,8 @@ class ModelConnectionStore:
             "apiBase": request.api_base,
             "enabled": request.enabled,
             "credentialRef": f"connection:{connection_id}",
-            "createdAt": existing.get("createdAt", now) if existing else now,
-            "updatedAt": now,
+            "createdAt": created_at,
+            "updatedAt": updated_at,
         }
         if existing and "lastTest" in existing:
             connection["lastTest"] = deepcopy(existing["lastTest"])
@@ -336,6 +341,22 @@ class ModelConnectionStore:
         self.credential_store.set(connection_id, secret)
 
 
+def _validate_state(state: dict[str, Any]) -> None:
+    ids: set[str] = set()
+    for connection in state.get("connections", []):
+        connection_id = str(connection.get("id", ""))
+        _validate_connection_id(connection_id)
+        if connection_id in ids:
+            raise ModelManagementError("duplicate_connection_id")
+        ids.add(connection_id)
+        _validate_provider_and_url(
+            str(connection.get("providerId", "")),
+            str(connection.get("apiBase", "")),
+        )
+    for assignment in state.get("assignments", {}).values():
+        _validate_assignment(state, assignment)
+
+
 def _validate_connection_id(connection_id: str) -> None:
     try:
         parsed = UUID(connection_id)
@@ -348,13 +369,17 @@ def _validate_connection_id(connection_id: str) -> None:
 def _validate_provider_and_url(provider_id: str, api_base: str) -> None:
     if not provider_exists(provider_id):
         raise ModelManagementError("provider_not_found")
-    parsed = urlsplit(api_base)
+    try:
+        parsed = urlsplit(api_base)
+        port = parsed.port
+    except ValueError:
+        raise ModelManagementError("invalid_api_base") from None
     if (
         api_base != PROVIDER_ENDPOINTS.get(provider_id)
         or parsed.scheme != "https"
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.port is not None
+        or port is not None
         or parsed.query
         or parsed.fragment
     ):
@@ -399,8 +424,13 @@ def _validate_assignment(state: dict[str, Any], assignment: dict[str, Any]) -> N
         raise ModelManagementError("incompatible_model_slot")
 
 
-def _now() -> str:
-    return datetime.now(UTC).isoformat()
+def _now_ms() -> int:
+    return time.time_ns() // 1_000_000
+
+
+def _next_ms(previous: Any) -> int:
+    now = _now_ms()
+    return max(now, int(previous) + 1) if isinstance(previous, int) else now
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

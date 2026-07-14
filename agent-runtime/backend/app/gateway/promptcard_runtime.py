@@ -23,6 +23,7 @@ from app.gateway.model_management.connection_store import (
 )
 from app.gateway.model_management.contracts import ConnectionRequest
 from app.gateway.model_management.migration import migrate_legacy_model_config
+from app.gateway.model_management.service import ConnectionProbeError, probe_connection
 from app.gateway.routers import agents, auth, models, skills, thread_runs, threads, tools
 from deerflow.config.app_config import get_app_config
 from deerflow.config.model_config import ModelConfig
@@ -148,11 +149,9 @@ class PromptCardRuntimeService:
             return {"success": False, "message": "DeepSeek API Key is not configured."}
         api_base = str(candidate.get("apiBase") or "https://api.deepseek.com").rstrip("/")
         try:
-            from app.gateway.routers.model_management import probe_connection
-
             validate_provider_endpoint("deepseek", api_base)
             probe_connection(api_base, api_key)
-        except (OSError, urllib.error.HTTPError):
+        except ConnectionProbeError:
             return {"success": False, "message": "Connection failed."}
         return {"success": True, "message": "Connection ok."}
 
@@ -315,18 +314,21 @@ def persist_model_config(data: dict[str, Any]) -> None:
         "maxTokens": int(data.get("maxTokens", 4096)),
     }
     store = _model_connection_store()
-    state_before = store.state_bytes()
-    assignment_before = store.assignment("chat.primary")
-    connection_id_before = (
-        assignment_before["connectionId"] if assignment_before is not None else None
-    )
-    credential_before = (
-        store.credential_store.get(connection_id_before)
-        if connection_id_before is not None
-        else None
-    )
     options_path = model_config_path()
-    options_before = options_path.read_bytes() if options_path.exists() else None
+    try:
+        state_before = store.state_bytes()
+        assignment_before = store.assignment("chat.primary")
+        connection_id_before = (
+            assignment_before["connectionId"] if assignment_before is not None else None
+        )
+        credential_before = (
+            store.credential_store.get(connection_id_before)
+            if connection_id_before is not None
+            else None
+        )
+        options_before = options_path.read_bytes() if options_path.exists() else None
+    except OSError:
+        raise ModelManagementError("connection_store_unavailable") from None
     request = ConnectionRequest(
         providerId="deepseek",
         displayName="DeepSeek",
@@ -338,23 +340,31 @@ def persist_model_config(data: dict[str, Any]) -> None:
     try:
         _atomic_write_json(options_path, payload)
     except Exception:
+        rollback_failed = False
         try:
             store.restore_state_bytes(state_before)
+        except Exception:
+            rollback_failed = True
+        try:
             if options_before is None:
                 if options_path.exists():
                     options_path.unlink()
             else:
                 _atomic_write_bytes(options_path, options_before)
+        except Exception:
+            rollback_failed = True
+        try:
             saved_connection_id = saved_connection["id"]
             if connection_id_before is None:
-                if request.credential:
-                    store.credential_store.delete(saved_connection_id)
+                store.credential_store.delete(saved_connection_id)
             else:
                 store._restore_credential(connection_id_before, credential_before)
                 if saved_connection_id != connection_id_before and request.credential:
                     store.credential_store.delete(saved_connection_id)
         except Exception:
-            raise ModelManagementError("connection_store_unavailable") from None
+            rollback_failed = True
+        if rollback_failed:
+            raise ModelManagementError("model_config_rollback_failed") from None
         raise ModelManagementError("connection_store_unavailable") from None
 
 

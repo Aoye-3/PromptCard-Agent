@@ -23,7 +23,9 @@ def migrate_legacy_model_config(
         return False
     try:
         legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError:
+        raise ModelManagementError("migration_failed") from None
+    except json.JSONDecodeError:
         return False
     if not isinstance(legacy, dict) or "apiKey" not in legacy:
         return False
@@ -31,7 +33,10 @@ def migrate_legacy_model_config(
     if not secret:
         sanitized = dict(legacy)
         sanitized.pop("apiKey", None)
-        _atomic_write_json(legacy_path, sanitized)
+        try:
+            _atomic_write_json(legacy_path, sanitized)
+        except OSError:
+            raise ModelManagementError("migration_failed") from None
         return True
 
     connection_id = str(
@@ -68,8 +73,11 @@ def migrate_legacy_model_config(
     state["assignments"]["chat.primary"] = assignment
     _validate_assignment(state, assignment)
 
-    legacy_bytes = legacy_path.read_bytes()
-    state_bytes = store.state_bytes()
+    try:
+        legacy_bytes = legacy_path.read_bytes()
+        state_bytes = store.state_bytes()
+    except (OSError, ModelManagementError):
+        raise ModelManagementError("migration_failed") from None
     previous_secret = store.credential_store.get(connection_id)
     try:
         store.credential_store.set(connection_id, secret)
@@ -96,12 +104,21 @@ def migrate_legacy_model_config(
         sanitized.pop("apiKey", None)
         _atomic_write_json(legacy_path, sanitized)
     except Exception as exc:
+        rollback_failed = False
         try:
             store.restore_state_bytes(state_bytes)
+        except Exception:
+            rollback_failed = True
+        try:
             _atomic_write_bytes(legacy_path, legacy_bytes)
+        except Exception:
+            rollback_failed = True
+        try:
             store._restore_credential(connection_id, previous_secret)
         except Exception:
-            pass
+            rollback_failed = True
+        if rollback_failed:
+            raise ModelManagementError("migration_rollback_failed") from None
         if isinstance(exc, (CredentialStoreError, ModelManagementError)):
             raise exc
         raise ModelManagementError("migration_failed") from None

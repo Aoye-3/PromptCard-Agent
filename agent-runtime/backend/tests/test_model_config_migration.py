@@ -7,6 +7,7 @@ import pytest
 
 from app.gateway.model_management import migration
 from app.gateway.model_management.connection_store import ModelConnectionStore, ModelManagementError
+from app.gateway.model_management.contracts import ConnectionRequest
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.model_management.migration import migrate_legacy_model_config
 
@@ -163,6 +164,84 @@ def test_legacy_rewrite_failure_restores_original_state_legacy_and_keyring(tmp_p
     assert legacy_path.read_bytes() == legacy_bytes
     assert state_path.read_bytes() == state_bytes
     assert credentials.values[connection_id] == "sk-prior"
+
+
+@pytest.mark.parametrize("existing", [False, True], ids=["new", "existing"])
+@pytest.mark.parametrize("failed_boundary", ["state", "legacy", "keyring"])
+def test_migration_rollback_attempts_every_boundary_after_one_restore_fails(
+    tmp_path,
+    monkeypatch,
+    existing,
+    failed_boundary,
+):
+    legacy_path = tmp_path / "promptcard-model-config.json"
+    legacy_bytes = b'{"apiKey":"sk-new","modelName":"deepseek-chat"}\n'
+    legacy_path.write_bytes(legacy_bytes)
+    credentials = RecordingCredentialStore()
+    store = ModelConnectionStore(
+        tmp_path / "promptcard-model-connections.json",
+        credentials,
+    )
+    connection_id = _legacy_connection_id(legacy_path)
+    if existing:
+        state = store.read_state()
+        state["connections"].append(
+            store.prepare_connection(
+                connection_id,
+                ConnectionRequest(
+                    providerId="deepseek",
+                    displayName="Existing",
+                    apiBase="https://api.deepseek.com",
+                    enabled=True,
+                ),
+            )
+        )
+        store.replace_state(state)
+        credentials.values[connection_id] = "sk-prior"
+    original_state = store.state_bytes()
+    events: list[str] = []
+    real_restore_state = store.restore_state_bytes
+    real_restore_legacy = migration._atomic_write_bytes
+    real_restore_credential = store._restore_credential
+
+    def restore_state(data):
+        events.append("state")
+        if failed_boundary == "state":
+            raise OSError("raw state restore failure")
+        real_restore_state(data)
+
+    def restore_legacy(path, data):
+        events.append("legacy")
+        if failed_boundary == "legacy":
+            raise OSError("raw legacy restore failure")
+        real_restore_legacy(path, data)
+
+    def restore_credential(restored_connection_id, secret):
+        events.append("keyring")
+        if failed_boundary == "keyring":
+            raise CredentialStoreError()
+        real_restore_credential(restored_connection_id, secret)
+
+    monkeypatch.setattr(store, "restore_state_bytes", restore_state)
+    monkeypatch.setattr(migration, "_atomic_write_bytes", restore_legacy)
+    monkeypatch.setattr(store, "_restore_credential", restore_credential)
+    monkeypatch.setattr(
+        migration,
+        "_atomic_write_json",
+        lambda path, payload: (_ for _ in ()).throw(OSError("raw sanitize failure")),
+    )
+
+    with pytest.raises(ModelManagementError, match="^migration_rollback_failed$"):
+        migrate_legacy_model_config(legacy_path, store)
+
+    assert events == ["state", "legacy", "keyring"]
+    if failed_boundary != "state":
+        assert store.state_bytes() == original_state
+    if failed_boundary != "legacy":
+        assert legacy_path.read_bytes() == legacy_bytes
+    if failed_boundary != "keyring":
+        expected = "sk-prior" if existing else None
+        assert credentials.values.get(connection_id) == expected
 
 
 def test_migration_rejects_image_model_for_deepseek_without_mutation(tmp_path):

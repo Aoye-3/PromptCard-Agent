@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+import app.gateway.promptcard_runtime as promptcard_runtime_module
 from app.gateway.model_management.connection_store import ModelConnectionStore
 from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
+from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.promptcard_runtime import (
     PromptCardRuntimeMessageRequest,
     PromptCardRuntimeService,
@@ -254,6 +257,115 @@ def test_legacy_save_restores_every_boundary_when_options_write_fails(
         config.models[0].temperature,
         config.models[0].max_tokens,
     ) == runtime_before
+
+
+@pytest.mark.parametrize("with_existing_connection", [True, False])
+@pytest.mark.parametrize("failed_boundary", ["state", "options", "keyring"])
+def test_legacy_options_rollback_attempts_every_boundary_independently(
+    model_store,
+    monkeypatch,
+    with_existing_connection,
+    failed_boundary,
+):
+    store, credentials = model_store
+    if with_existing_connection:
+        _seed_chat_assignment(store, "sk-original")
+    options_path = store.path.parent / "promptcard-model-config.json"
+    options_before = b'{"temperature":0.3,"maxTokens":4096}\r\n'
+    options_path.write_bytes(options_before)
+    state_before = store.state_bytes()
+    credentials_before = dict(credentials.values)
+    events: list[str] = []
+
+    real_state_restore = store.restore_state_bytes
+    real_options_restore = promptcard_runtime_module._atomic_write_bytes
+    real_existing_credential_restore = store._restore_credential
+    real_new_credential_delete = credentials.delete
+
+    def restore_state(payload):
+        events.append("state")
+        if failed_boundary == "state":
+            raise OSError("private state rollback detail")
+        real_state_restore(payload)
+
+    def restore_options(path, payload):
+        events.append("options")
+        if failed_boundary == "options":
+            raise OSError("private options rollback detail")
+        real_options_restore(path, payload)
+
+    def restore_existing_credential(connection_id, secret):
+        events.append("keyring")
+        if failed_boundary == "keyring":
+            raise CredentialStoreError()
+        real_existing_credential_restore(connection_id, secret)
+
+    def delete_new_credential(connection_id):
+        events.append("keyring")
+        if failed_boundary == "keyring":
+            raise CredentialStoreError()
+        real_new_credential_delete(connection_id)
+
+    monkeypatch.setattr(store, "restore_state_bytes", restore_state)
+    monkeypatch.setattr(promptcard_runtime_module, "_atomic_write_bytes", restore_options)
+    if with_existing_connection:
+        monkeypatch.setattr(store, "_restore_credential", restore_existing_credential)
+    else:
+        monkeypatch.setattr(credentials, "delete", delete_new_credential)
+
+    def fail_options_write(path, payload):
+        path.write_bytes(b"partial")
+        raise OSError("private initial write detail")
+
+    monkeypatch.setattr(promptcard_runtime_module, "_atomic_write_json", fail_options_write)
+    app = FastAPI()
+    app.state.config = _config(api_key="runtime-original")
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.put(
+            "/api/promptcard/runtime/model-config",
+            json={"apiKey": "sk-new", "modelName": "deepseek-free-form"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "model_config_rollback_failed"
+    assert "private" not in response.text
+    assert events == ["state", "options", "keyring"]
+    if failed_boundary != "state":
+        assert store.state_bytes() == state_before
+    if failed_boundary != "options":
+        assert options_path.read_bytes() == options_before
+    if failed_boundary != "keyring":
+        assert credentials.values == credentials_before
+
+
+def test_legacy_put_normalizes_options_snapshot_io_failure(model_store, monkeypatch):
+    store, _ = model_store
+    _seed_chat_assignment(store, "sk-original")
+    options_path = store.path.parent / "promptcard-model-config.json"
+    options_path.write_text('{"temperature":0.3}', encoding="utf-8")
+    real_read_bytes = Path.read_bytes
+
+    def fail_options_snapshot(path):
+        if path == options_path:
+            raise OSError("private options snapshot")
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", fail_options_snapshot)
+    app = FastAPI()
+    app.state.config = _config(api_key="runtime-original")
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.put(
+            "/api/promptcard/runtime/model-config",
+            json={"apiKey": "sk-new", "modelName": "deepseek-free-form"},
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "connection_store_unavailable"
+    assert "private options snapshot" not in response.text
 
 
 def test_runtime_clears_mutated_secret_when_chat_assignment_is_absent(model_store):

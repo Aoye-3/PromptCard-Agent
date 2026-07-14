@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 from email.message import Message
+from pathlib import Path
 from urllib.error import HTTPError
 from uuid import UUID
 
@@ -10,6 +12,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+import app.gateway.promptcard_runtime as promptcard_runtime_module
 from app.gateway.model_management.connection_store import ModelConnectionStore, ModelManagementError
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.routers import model_management
@@ -93,8 +96,14 @@ def test_connection_crud_never_serializes_or_logs_credentials(model_api, caplog)
     assert credentials.get(connection["id"]) == secret
     persisted = json.loads(store.path.read_text(encoding="utf-8"))["connections"][0]
     assert persisted["credentialRef"] == f"connection:{connection['id']}"
-    assert persisted["createdAt"]
-    assert persisted["updatedAt"]
+    assert type(persisted["createdAt"]) is int
+    assert type(persisted["updatedAt"]) is int
+    assert set(persisted) == {
+        "id", "providerId", "displayName", "apiBase", "enabled",
+        "credentialRef", "createdAt", "updatedAt",
+    }
+    created_at = persisted["createdAt"]
+    updated_at = persisted["updatedAt"]
     assert "credentialRef" not in connection
 
     updated = client.put(
@@ -111,6 +120,9 @@ def test_connection_crud_never_serializes_or_logs_credentials(model_api, caplog)
     assert updated.json()["apiBase"] == "https://api.deepseek.com"
     assert updated.json()["credentialConfigured"] is True
     assert credentials.get(connection["id"]) == secret
+    persisted_updated = json.loads(store.path.read_text(encoding="utf-8"))["connections"][0]
+    assert persisted_updated["createdAt"] == created_at
+    assert persisted_updated["updatedAt"] > updated_at
 
     listed = client.get("/api/promptcard/runtime/model-connections")
     assert listed.status_code == 200
@@ -170,6 +182,7 @@ def test_connection_crud_never_serializes_or_logs_credentials(model_api, caplog)
                 "https://127.0.0.1",
                 "https://localhost",
                 "https://api.deepseek.com.evil.test",
+                "https://[",
             ]
         ],
     ],
@@ -276,9 +289,11 @@ def test_connection_test_uses_stored_secret_without_returning_it(model_api, monk
     assert secret not in response.text
     assert secret not in caplog.text
     persisted = json.loads(store.path.read_text(encoding="utf-8"))["connections"][0]
-    assert persisted["lastTest"]["status"] == "success"
+    assert set(persisted["lastTest"]) == {"ok", "checkedAt", "message"}
+    assert persisted["lastTest"]["ok"] is True
+    assert type(persisted["lastTest"]["checkedAt"]) is int
     assert persisted["lastTest"]["message"] == "Connection ok."
-    assert persisted["lastTest"]["testedAt"]
+    assert persisted["updatedAt"] == persisted["lastTest"]["checkedAt"]
 
 
 def test_connection_test_refuses_redirects_and_returns_sanitized_failure(model_api, monkeypatch):
@@ -293,7 +308,10 @@ def test_connection_test_refuses_redirects_and_returns_sanitized_failure(model_a
             headers["Location"] = "http://127.0.0.1/steal"
             raise HTTPError(request.full_url, 302, "provider-controlled secret", headers, None)
 
-    monkeypatch.setattr(model_management.urllib.request, "build_opener", lambda *handlers: RedirectingOpener())
+    monkeypatch.setattr(
+        "app.gateway.model_management.service.urllib.request.build_opener",
+        lambda *handlers: RedirectingOpener(),
+    )
 
     response = client.post(
         f"/api/promptcard/runtime/model-connections/{connection['id']}/test"
@@ -304,8 +322,37 @@ def test_connection_test_refuses_redirects_and_returns_sanitized_failure(model_a
     assert opened == ["https://api.deepseek.com/models"]
     assert "provider-controlled" not in response.text
     last_test = json.loads(store.path.read_text(encoding="utf-8"))["connections"][0]["lastTest"]
-    assert last_test["status"] == "failure"
+    assert last_test["ok"] is False
     assert last_test["message"] == "Connection failed."
+
+
+def test_create_validates_corrupt_state_before_credential_mutation(model_api):
+    client, store, credentials = model_api
+    store.path.write_bytes(b"not-json")
+
+    response = client.post(
+        "/api/promptcard/runtime/model-connections",
+        json={
+            "providerId": "deepseek",
+            "displayName": "Must not persist",
+            "apiBase": "https://api.deepseek.com",
+            "enabled": True,
+            "credential": "sk-must-not-be-written",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "invalid_connection_store"
+    assert credentials.values == {}
+
+
+def test_probe_helper_is_owned_by_model_management_service():
+    assert importlib.util.find_spec("app.gateway.model_management.service") is not None
+    from app.gateway.model_management import service
+
+    assert model_management.probe_connection is service.probe_connection
+    promptcard_source = Path(promptcard_runtime_module.__file__).read_text(encoding="utf-8")
+    assert "app.gateway.routers.model_management import probe_connection" not in promptcard_source
 
 
 def test_connection_test_revalidates_persisted_endpoint_before_credential_read(model_api):
@@ -360,6 +407,86 @@ def test_connection_test_normalizes_store_migration_failure(model_api, monkeypat
 
     assert response.status_code == 503
     assert response.json()["detail"] == "credential_store_unavailable"
+
+
+@pytest.mark.parametrize("operation", ["get", "post", "put", "test"])
+def test_model_routes_normalize_storage_io_failures(model_api, monkeypatch, operation):
+    client, store, _ = model_api
+    connection = _create_connection(client, "deepseek", credential="sk-test")
+
+    def fail_read_state():
+        raise OSError("private storage path")
+
+    monkeypatch.setattr(store, "read_state", fail_read_state)
+    with TestClient(client.app, raise_server_exceptions=False) as safe_client:
+        if operation == "get":
+            response = safe_client.get("/api/promptcard/runtime/model-connections")
+        elif operation == "post":
+            response = safe_client.post(
+                "/api/promptcard/runtime/model-connections",
+                json={
+                    "providerId": "deepseek",
+                    "displayName": "New",
+                    "apiBase": "https://api.deepseek.com",
+                    "enabled": True,
+                    "credential": "sk-new",
+                },
+            )
+        elif operation == "put":
+            response = safe_client.put(
+                f"/api/promptcard/runtime/model-connections/{connection['id']}",
+                json={
+                    "providerId": "deepseek",
+                    "displayName": "Updated",
+                    "apiBase": "https://api.deepseek.com",
+                    "enabled": True,
+                },
+            )
+        else:
+            response = safe_client.post(
+                f"/api/promptcard/runtime/model-connections/{connection['id']}/test"
+            )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "connection_store_unavailable"
+    assert "private storage path" not in response.text
+
+
+@pytest.mark.parametrize("failure", ["legacy_read", "state_snapshot", "sanitize"])
+def test_migration_io_failures_are_stable_on_get(model_api, monkeypatch, failure):
+    client, store, _ = model_api
+    legacy_path = store.path.parent / "promptcard-model-config.json"
+    legacy_path.write_text(
+        json.dumps({"apiKey": "sk-legacy", "modelName": "deepseek-chat"}),
+        encoding="utf-8",
+    )
+    if failure == "legacy_read":
+        real_read_text = Path.read_text
+
+        def fail_legacy_read(path, *args, **kwargs):
+            if path == legacy_path:
+                raise OSError("private legacy read")
+            return real_read_text(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", fail_legacy_read)
+    elif failure == "state_snapshot":
+        monkeypatch.setattr(
+            store,
+            "state_bytes",
+            lambda: (_ for _ in ()).throw(OSError("private snapshot")),
+        )
+    else:
+        monkeypatch.setattr(
+            "app.gateway.model_management.migration._atomic_write_json",
+            lambda path, payload: (_ for _ in ()).throw(OSError("private sanitize")),
+        )
+
+    with TestClient(client.app, raise_server_exceptions=False) as safe_client:
+        response = safe_client.get("/api/promptcard/runtime/model-connections")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "migration_failed"
+    assert "private" not in response.text
 
 
 def _create_connection(

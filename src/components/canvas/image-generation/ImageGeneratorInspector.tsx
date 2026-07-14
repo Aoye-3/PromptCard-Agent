@@ -4,11 +4,18 @@ import type {
   PromptDocument
 } from '@/models/PromptHistory.model'
 import type { ImageGeneratorPromptSnapshot } from '@/domain/image-generation/prompt-compiler'
+import {
+  recommendedImageSizeSettings,
+  validateImageSizeSettings,
+  type ImageSizeCapabilities,
+  type ImageSizeSettings
+} from '@/domain/image-generation/size-validation'
 import { imageGeneratorResultUrl, imageGeneratorStatus } from '../nodes/ImageGeneratorNode'
 import { ReferencePromptEditor } from './ReferencePromptEditor'
 
 export interface ImageGeneratorInspectorProps {
   node: IFreeCanvasImageGeneratorNode
+  sizeCapabilities: ImageSizeCapabilities | null
   status?: string
   resultThumbnailUrl?: string
   promptSnapshot?: ImageGeneratorPromptSnapshot
@@ -17,21 +24,9 @@ export interface ImageGeneratorInspectorProps {
   onOpenHistory?: (nodeId: string) => void
 }
 
-const ASPECT_RATIOS: FreeCanvasImageAspectRatio[] = [
-  'smart',
-  '1:1',
-  '4:3',
-  '3:4',
-  '16:9',
-  '9:16',
-  '3:2',
-  '2:3',
-  '21:9',
-  'custom'
-]
-
 export const ImageGeneratorInspector = ({
   node,
+  sizeCapabilities,
   status = imageGeneratorStatus(node),
   resultThumbnailUrl = imageGeneratorResultUrl(node),
   promptSnapshot,
@@ -39,8 +34,30 @@ export const ImageGeneratorInspector = ({
   onPromptDocumentChange,
   onOpenHistory
 }: ImageGeneratorInspectorProps) => {
+  const activeSizeCapabilities = sizeCapabilities?.modelId === node.binding.modelId
+    ? sizeCapabilities
+    : null
+  const sizeValidationErrors = activeSizeCapabilities
+    ? validateImageSizeSettings(node.settings, activeSizeCapabilities)
+    : []
+  const recommendedSize = activeSizeCapabilities
+    ? recommendedImageSizeSettings(activeSizeCapabilities)
+    : null
+
   const updateSettings = (updates: Partial<IFreeCanvasImageGeneratorNode['settings']>) => {
     onChange({ settings: { ...node.settings, ...updates } })
+  }
+
+  const updateSizeSettings = (updates: Partial<ImageSizeSettings>) => {
+    if (!activeSizeCapabilities) return
+    const settings = { ...node.settings, ...updates }
+    if (validateImageSizeSettings(settings, activeSizeCapabilities).length > 0) return
+    updateSettings(updates as Partial<IFreeCanvasImageGeneratorNode['settings']>)
+  }
+
+  const updateCustomDimension = (dimension: 'width' | 'height', value: string) => {
+    const parsed = value === '' ? undefined : Number(value)
+    updateSizeSettings({ [dimension]: parsed })
   }
 
   return (
@@ -81,6 +98,32 @@ export const ImageGeneratorInspector = ({
         />
       )}
 
+      {!activeSizeCapabilities && (
+        <div role="alert" className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+          Size capabilities are unavailable for {node.binding.modelId || 'the selected model'}. Choose a configured image model before changing size.
+        </div>
+      )}
+
+      {activeSizeCapabilities && sizeValidationErrors.length > 0 && recommendedSize && (
+        <div role="alert" className="space-y-2 rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+          <p className="font-bold">These size settings are not supported by {activeSizeCapabilities.modelId}.</p>
+          <p className="font-semibold">Confirm a supported default before generating; the current settings were not changed.</p>
+          <button
+            type="button"
+            data-confirm-image-size
+            className="rounded-[6px] border border-amber-300 bg-white px-2 py-1.5 font-bold hover:bg-amber-100"
+            onClick={() => updateSettings({
+              resolution: recommendedSize.resolution as IFreeCanvasImageGeneratorNode['settings']['resolution'],
+              aspectRatio: recommendedSize.aspectRatio as FreeCanvasImageAspectRatio,
+              width: undefined,
+              height: undefined
+            })}
+          >
+            Use {recommendedSize.resolution} · {recommendedSize.aspectRatio}
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-3">
         <label className="text-xs font-bold text-gray-700">
           <span className="mb-1 block">Generation mode</span>
@@ -98,23 +141,31 @@ export const ImageGeneratorInspector = ({
         <label className="text-xs font-bold text-gray-700">
           <span className="mb-1 block">Resolution</span>
           <select
+            aria-label="Resolution"
             className="nodrag w-full rounded-[6px] border border-gray-200 bg-white px-2 py-2 text-xs"
             value={node.settings.resolution}
-            onChange={event => updateSettings({ resolution: event.target.value as '1K' | '2K' })}
+            disabled={!activeSizeCapabilities}
+            onChange={event => updateSizeSettings({ resolution: event.target.value })}
           >
-            <option value="1K">1K</option>
-            <option value="2K">2K</option>
+            {activeSizeCapabilities?.resolutions.map(resolution => (
+              <option key={resolution} value={resolution}>{resolution}</option>
+            ))}
           </select>
         </label>
 
         <label className="text-xs font-bold text-gray-700">
           <span className="mb-1 block">Aspect ratio</span>
           <select
+            aria-label="Aspect ratio"
             className="nodrag w-full rounded-[6px] border border-gray-200 bg-white px-2 py-2 text-xs"
             value={node.settings.aspectRatio}
-            onChange={event => updateSettings({ aspectRatio: event.target.value as FreeCanvasImageAspectRatio })}
+            disabled={!activeSizeCapabilities}
+            onChange={event => updateSizeSettings({
+              aspectRatio: event.target.value,
+              ...(event.target.value === 'custom' ? {} : { width: undefined, height: undefined })
+            })}
           >
-            {ASPECT_RATIOS.map(aspectRatio => (
+            {activeSizeCapabilities?.aspectRatios.map(aspectRatio => (
               <option key={aspectRatio} value={aspectRatio}>{aspectRatio}</option>
             ))}
           </select>
@@ -132,6 +183,41 @@ export const ImageGeneratorInspector = ({
           </select>
         </label>
       </div>
+
+      {activeSizeCapabilities?.aspectRatios.includes('custom') && activeSizeCapabilities.customSize && (
+        <fieldset className="space-y-2 rounded-[6px] border border-gray-200 p-3">
+          <legend className="px-1 text-xs font-black text-gray-700">Custom dimensions</legend>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs font-bold text-gray-700">
+              <span className="mb-1 block">Width</span>
+              <input
+                aria-label="Custom width"
+                className="nodrag w-full rounded-[6px] border border-gray-200 bg-white px-2 py-2 text-xs"
+                type="number"
+                min="1"
+                step="1"
+                value={node.settings.width ?? ''}
+                onChange={event => updateCustomDimension('width', event.target.value)}
+              />
+            </label>
+            <label className="text-xs font-bold text-gray-700">
+              <span className="mb-1 block">Height</span>
+              <input
+                aria-label="Custom height"
+                className="nodrag w-full rounded-[6px] border border-gray-200 bg-white px-2 py-2 text-xs"
+                type="number"
+                min="1"
+                step="1"
+                value={node.settings.height ?? ''}
+                onChange={event => updateCustomDimension('height', event.target.value)}
+              />
+            </label>
+          </div>
+          <p className="text-[10px] font-semibold text-gray-500">
+            {activeSizeCapabilities.customSize.minPixels.toLocaleString()}–{activeSizeCapabilities.customSize.maxPixels.toLocaleString()} total pixels; width/height ratio {activeSizeCapabilities.customSize.minAspectRatio}–{activeSizeCapabilities.customSize.maxAspectRatio}.
+          </p>
+        </fieldset>
+      )}
 
       <div className="flex items-center justify-between border-t border-gray-100 pt-3">
         <label className="flex items-center gap-2 text-xs font-bold text-gray-700">

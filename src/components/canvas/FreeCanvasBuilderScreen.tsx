@@ -62,6 +62,7 @@ import {
   type QuickMessageDraft
 } from '@/domain/prompt-library/quick-messages'
 import { compileImageGeneratorPrompt } from '@/domain/image-generation/prompt-compiler'
+import { imageSizeCapabilitiesForModel } from '@/domain/image-generation/size-validation'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
 import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageGeneratorNode, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject } from '@/models/PromptHistory.model'
@@ -710,6 +711,7 @@ const FreeCanvasBuilderInner = ({
             <div className="max-h-[46%] shrink-0 overflow-y-auto border-b border-gray-100">
               <ImageGeneratorInspector
                 node={selectedImageGeneratorNode}
+                sizeCapabilities={imageSizeCapabilitiesForModel(selectedImageGeneratorNode.binding.modelId)}
                 promptSnapshot={selectedPromptSnapshot || undefined}
                 resultThumbnailUrl={selectedImageGeneratorNode.primaryAssetId
                   ? canvasImageAssetUrl(selectedImageGeneratorNode.primaryAssetId)

@@ -1,3 +1,4 @@
+import { Children, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type {
@@ -7,7 +8,43 @@ import type {
   IFreeCanvasTextNode
 } from '@/models/PromptHistory.model'
 import { applyImageGeneratorConnection } from '../nodes/ImageGeneratorNode'
+import {
+  SEEDREAM_5_PRO_SIZE_CAPABILITIES,
+  type ImageSizeCapabilities
+} from '@/domain/image-generation/size-validation'
 import { ImageGeneratorInspector } from './ImageGeneratorInspector'
+
+const ONE_K_SQUARE_CAPABILITIES: ImageSizeCapabilities = {
+  modelId: 'model-one-k-square',
+  resolutions: ['1K'],
+  aspectRatios: ['1:1', 'custom'],
+  customSize: {
+    minPixels: 921_600,
+    maxPixels: 4_624_220,
+    minAspectRatio: 1 / 16,
+    maxAspectRatio: 16
+  }
+}
+
+const findElement = (
+  node: ReactNode,
+  predicate: (element: ReactElement<Record<string, unknown>>) => boolean
+): ReactElement<Record<string, unknown>> => {
+  const visit = (candidate: ReactNode): ReactElement<Record<string, unknown>> | null => {
+    if (!isValidElement(candidate)) return null
+    const element = candidate as ReactElement<Record<string, unknown>>
+    if (predicate(element)) return element
+    const props = element.props as { children?: ReactNode }
+    for (const child of Children.toArray(props.children)) {
+      const match = visit(child)
+      if (match) return match
+    }
+    return null
+  }
+  const match = visit(node)
+  if (match) return match
+  throw new Error('Expected element was not found')
+}
 
 const generatorNode: IFreeCanvasImageGeneratorNode = {
   id: 'generator-1',
@@ -72,6 +109,7 @@ describe('ImageGeneratorInspector', () => {
     const markup = renderToStaticMarkup(
       <ImageGeneratorInspector
         node={generatorNode}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
         status="Completed"
         resultThumbnailUrl="/result.png"
         onChange={vi.fn()}
@@ -99,6 +137,7 @@ describe('ImageGeneratorInspector', () => {
             segments: [{ type: 'reference', referenceId: 'ref-missing', label: 'Missing' }]
           }
         }}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
         promptSnapshot={{
           source: 'local',
           promptDocument: {
@@ -133,6 +172,156 @@ describe('ImageGeneratorInspector', () => {
     expect(markup).toContain('Product')
     expect(markup).toContain('data-unresolved="true"')
     expect(markup).toContain('Resolve or remove disconnected image references')
+  })
+
+  it('renders resolution and ratio options from the selected model capabilities', () => {
+    const markup = renderToStaticMarkup(
+      <ImageGeneratorInspector
+        node={{
+          ...generatorNode,
+          binding: { ...generatorNode.binding, modelId: ONE_K_SQUARE_CAPABILITIES.modelId },
+          settings: { ...generatorNode.settings, resolution: '1K', aspectRatio: '1:1' }
+        }}
+        sizeCapabilities={ONE_K_SQUARE_CAPABILITIES}
+        onChange={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('<option value="1K" selected="">1K</option>')
+    expect(markup).not.toContain('<option value="2K"')
+    expect(markup).not.toContain('<option value="4K"')
+    expect(markup).toContain('<option value="1:1" selected="">1:1</option>')
+    expect(markup).toContain('<option value="custom">custom</option>')
+    expect(markup).not.toContain('<option value="16:9"')
+  })
+
+  it('requires explicit confirmation when a model switch invalidates persisted settings', () => {
+    const onChange = vi.fn()
+    const invalidNode = {
+      ...generatorNode,
+      binding: { ...generatorNode.binding, modelId: ONE_K_SQUARE_CAPABILITIES.modelId }
+    }
+    const markup = renderToStaticMarkup(
+      <ImageGeneratorInspector
+        node={invalidNode}
+        sizeCapabilities={ONE_K_SQUARE_CAPABILITIES}
+        onChange={onChange}
+      />
+    )
+
+    expect(onChange).not.toHaveBeenCalled()
+    expect(markup).toContain('role="alert"')
+    expect(markup).toContain('These size settings are not supported by model-one-k-square')
+    expect(markup).toContain('Use 1K · 1:1')
+
+    const tree = ImageGeneratorInspector({
+      node: invalidNode,
+      sizeCapabilities: ONE_K_SQUARE_CAPABILITIES,
+      onChange
+    })
+    const confirmButton = findElement(tree, element => element.props['data-confirm-image-size'] === true)
+    const onClick = confirmButton.props.onClick as () => void
+    onClick()
+
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({
+      settings: {
+        ...invalidNode.settings,
+        resolution: '1K',
+        aspectRatio: '1:1',
+        width: undefined,
+        height: undefined
+      }
+    })
+  })
+
+  it('does not persist a forged unsupported resolution interaction', () => {
+    const onChange = vi.fn()
+    const tree = ImageGeneratorInspector({
+      node: {
+        ...generatorNode,
+        binding: { ...generatorNode.binding, modelId: ONE_K_SQUARE_CAPABILITIES.modelId },
+        settings: { ...generatorNode.settings, resolution: '1K', aspectRatio: '1:1' }
+      },
+      sizeCapabilities: ONE_K_SQUARE_CAPABILITIES,
+      onChange
+    })
+    const resolutionSelect = findElement(tree, element => element.props['aria-label'] === 'Resolution')
+    const onResolutionChange = resolutionSelect.props.onChange as (event: { target: { value: string } }) => void
+
+    onResolutionChange({ target: { value: '4K' } })
+
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('does not persist an invalid custom dimension interaction', () => {
+    const onChange = vi.fn()
+    const tree = ImageGeneratorInspector({
+      node: {
+        ...generatorNode,
+        binding: { ...generatorNode.binding, modelId: ONE_K_SQUARE_CAPABILITIES.modelId },
+        settings: {
+          ...generatorNode.settings,
+          resolution: '1K',
+          aspectRatio: 'custom',
+          width: 1_200,
+          height: 768
+        }
+      },
+      sizeCapabilities: ONE_K_SQUARE_CAPABILITIES,
+      onChange
+    })
+    const widthInput = findElement(tree, element => element.props['aria-label'] === 'Custom width')
+    const onWidthChange = widthInput.props.onChange as (event: { target: { value: string } }) => void
+
+    onWidthChange({ target: { value: '1199' } })
+
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('persists supported resolution and custom dimension interactions', () => {
+    const onResolutionChange = vi.fn()
+    const resolutionTree = ImageGeneratorInspector({
+      node: {
+        ...generatorNode,
+        settings: { ...generatorNode.settings, resolution: '1K' }
+      },
+      sizeCapabilities: SEEDREAM_5_PRO_SIZE_CAPABILITIES,
+      onChange: onResolutionChange
+    })
+    const resolutionSelect = findElement(resolutionTree, element => element.props['aria-label'] === 'Resolution')
+    const changeResolution = resolutionSelect.props.onChange as (event: { target: { value: string } }) => void
+
+    changeResolution({ target: { value: '2K' } })
+
+    expect(onResolutionChange).toHaveBeenCalledWith({
+      settings: { ...generatorNode.settings, resolution: '2K' }
+    })
+
+    const onCustomChange = vi.fn()
+    const customNode = {
+      ...generatorNode,
+      settings: {
+        ...generatorNode.settings,
+        resolution: '1K' as const,
+        aspectRatio: 'custom' as const,
+        width: 1_200,
+        height: 768
+      }
+    }
+    const customTree = ImageGeneratorInspector({
+      node: customNode,
+      sizeCapabilities: SEEDREAM_5_PRO_SIZE_CAPABILITIES,
+      onChange: onCustomChange
+    })
+    const widthInput = findElement(customTree, element => element.props['aria-label'] === 'Custom width')
+    const changeWidth = widthInput.props.onChange as (event: { target: { value: string } }) => void
+
+    changeWidth({ target: { value: '1250' } })
+
+    expect(onCustomChange).toHaveBeenCalledWith({
+      settings: { ...customNode.settings, width: 1_250 }
+    })
   })
 
   it('does not add an invalid second prompt connection to project state', () => {

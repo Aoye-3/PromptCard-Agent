@@ -41,11 +41,38 @@ class FetchedImage:
     extension: str
 
 
+class _PinnedIPTransport(httpx.BaseTransport):
+    def __init__(self, transport: httpx.BaseTransport) -> None:
+        self._transport = transport
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        validated_ip = request.extensions.pop("validated_ip", None)
+        validated_host = request.extensions.pop("validated_host", None)
+        if not isinstance(validated_ip, str) or not isinstance(validated_host, str):
+            raise httpx.TransportError("A validated image host and address are required")
+
+        headers = request.headers.copy()
+        headers["host"] = validated_host
+        extensions = dict(request.extensions)
+        extensions["sni_hostname"] = validated_host
+        pinned_request = httpx.Request(
+            request.method,
+            request.url.copy_with(host=validated_ip),
+            headers=headers,
+            stream=request.stream,
+            extensions=extensions,
+        )
+        return self._transport.handle_request(pinned_request)
+
+    def close(self) -> None:
+        self._transport.close()
+
+
 class ImageResultFetcher:
     def __init__(
         self,
         *,
-        client: httpx.Client | None = None,
+        transport: httpx.BaseTransport | None = None,
         allowed_hosts: set[str] | frozenset[str] = OFFICIAL_IMAGE_HOSTS,
         resolver: AddressResolver | None = None,
         max_bytes: int = MAX_IMAGE_BYTES,
@@ -53,8 +80,11 @@ class ImageResultFetcher:
         max_redirects: int = MAX_REDIRECTS,
     ) -> None:
         self._timeout = httpx.Timeout(connect=3.0, read=10.0, write=3.0, pool=3.0)
-        self._client = client or httpx.Client(timeout=self._timeout, follow_redirects=False)
-        self._owns_client = client is None
+        self._client = httpx.Client(
+            timeout=self._timeout,
+            follow_redirects=False,
+            transport=_PinnedIPTransport(transport or httpx.HTTPTransport()),
+        )
         self._allowed_hosts = frozenset(host.lower() for host in allowed_hosts)
         self._resolver = resolver or _resolve_addresses
         self._max_bytes = max_bytes
@@ -62,15 +92,20 @@ class ImageResultFetcher:
         self._max_redirects = max_redirects
 
     def close(self) -> None:
-        if self._owns_client:
-            self._client.close()
+        self._client.close()
 
     def fetch(self, url: str) -> FetchedImage:
         current_url = url
         try:
             for redirect_count in range(self._max_redirects + 1):
-                self._validate_url(current_url)
-                with self._client.stream("GET", current_url, timeout=self._timeout, follow_redirects=False) as response:
+                validated_host, validated_ip = self._validate_url(current_url)
+                with self._client.stream(
+                    "GET",
+                    current_url,
+                    timeout=self._timeout,
+                    follow_redirects=False,
+                    extensions={"validated_host": validated_host, "validated_ip": validated_ip},
+                ) as response:
                     if response.status_code in {301, 302, 303, 307, 308}:
                         location = response.headers.get("location")
                         if not location or redirect_count == self._max_redirects:
@@ -89,7 +124,7 @@ class ImageResultFetcher:
             raise ImageFetchError("image_download_failed", "Remote image download failed", True) from None
         raise ImageFetchError("image_redirect_rejected", "Remote image redirect was rejected", False)
 
-    def _validate_url(self, url: str) -> None:
+    def _validate_url(self, url: str) -> tuple[str, str]:
         try:
             parsed = urlsplit(url)
             port = parsed.port
@@ -110,6 +145,7 @@ class ImageResultFetcher:
             raise ImageFetchError("image_host_unresolved", "Remote image host could not be resolved", True) from None
         if not addresses or any(not _is_public_address(address) for address in addresses):
             raise ImageFetchError("unsafe_image_url", "Remote image URL is not allowed", False)
+        return hostname, addresses[0]
 
     def _read_image(self, response: httpx.Response) -> FetchedImage:
         content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()

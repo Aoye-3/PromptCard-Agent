@@ -94,18 +94,21 @@ async def generate_image(
     service: ImageGenerationService = Depends(get_image_generation_service),
 ) -> ImageGenerationResponse:
     command = _command(body)
+    response_error: HTTPException | None = None
     try:
         result = await run_in_threadpool(service.generate, command)
     except GenerationError as error:
-        raise HTTPException(
+        response_error = HTTPException(
             status_code=_status_code(error),
             detail={
                 "code": error.code,
-                "message": error.message,
+                "message": _safe_error_message(error.code),
                 "retryable": error.retryable,
                 "runId": error.run_id,
             },
-        ) from None
+        )
+    if response_error is not None:
+        raise response_error from None
     return _response(result)
 
 
@@ -159,3 +162,25 @@ def _status_code(error: GenerationError) -> int:
     if error.retryable:
         return 503
     return 422
+
+
+def _safe_error_message(code: str) -> str:
+    return {
+        "unsafe_image_url": "Remote image URL is not allowed",
+        "image_host_unresolved": "Remote image host could not be resolved",
+        "image_redirect_rejected": "Remote image redirect was rejected",
+        "image_download_timeout": "Remote image download timed out",
+        "image_download_failed": "Remote image download failed",
+        "invalid_image_mime": "Remote response is not a supported raster image",
+        "image_too_large": "Remote image exceeds the download limit",
+        "image_pixel_budget_exceeded": "Remote image exceeds the pixel limit",
+        "invalid_image_data": "Remote image could not be decoded",
+        "storage_write_failed": "Generated image could not be stored",
+        "terminal_persistence_failed": "Image generation terminal state could not be saved",
+        "credential_store_unavailable": "Model credential storage is unavailable",
+        "credential_missing": "The selected model connection has no credential",
+        "generation_busy": "This model connection already has two running generations",
+        "rate_limited": "Image provider rate limit reached",
+        "timeout": "Image provider request timed out",
+        "authentication_failed": "Image provider authentication failed",
+    }.get(code, "Image generation failed")

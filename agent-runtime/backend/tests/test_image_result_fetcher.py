@@ -25,14 +25,49 @@ def fetcher_for(
     max_bytes: int = 25 * 1024 * 1024,
     max_pixels: int = 40_000_000,
 ) -> ImageResultFetcher:
-    client = httpx.Client(transport=httpx.MockTransport(handler))
     return ImageResultFetcher(
-        client=client,
+        transport=httpx.MockTransport(handler),
         allowed_hosts={OFFICIAL_CDN},
         resolver=resolver,
         max_bytes=max_bytes,
         max_pixels=max_pixels,
     )
+
+
+def test_transport_pins_validated_ip_while_preserving_host_and_tls_sni() -> None:
+    class RebindingNetwork(httpx.BaseTransport):
+        def __init__(self) -> None:
+            self.connected_hosts: list[str] = []
+            self.private_target_reached = False
+
+        def handle_request(self, request: httpx.Request) -> httpx.Response:
+            target = request.url.host
+            self.connected_hosts.append(target)
+            if target == OFFICIAL_CDN:
+                self.private_target_reached = True
+            assert request.headers["host"] == OFFICIAL_CDN
+            assert request.extensions["sni_hostname"] == OFFICIAL_CDN
+            return httpx.Response(200, headers={"content-type": "image/png"}, content=png_bytes(), request=request)
+
+    network = RebindingNetwork()
+    resolutions = 0
+
+    def resolve_once(_hostname: str) -> tuple[str, ...]:
+        nonlocal resolutions
+        resolutions += 1
+        return (PUBLIC_IP,) if resolutions == 1 else ("10.0.0.9",)
+
+    fetcher = ImageResultFetcher(
+        transport=network,
+        allowed_hosts={OFFICIAL_CDN},
+        resolver=resolve_once,
+    )
+
+    fetcher.fetch(f"https://{OFFICIAL_CDN}/result.png")
+
+    assert resolutions == 1
+    assert network.connected_hosts == [PUBLIC_IP]
+    assert network.private_target_reached is False
 
 
 def test_fetches_and_decodes_an_official_https_image() -> None:
@@ -98,7 +133,7 @@ def test_revalidates_dns_on_every_same_host_redirect() -> None:
         fetcher.fetch(f"https://{OFFICIAL_CDN}/first.png")
 
     assert exc_info.value.code == "unsafe_image_url"
-    assert requests == [f"https://{OFFICIAL_CDN}/first.png"]
+    assert requests == [f"https://{PUBLIC_IP}/first.png"]
 
 
 def test_rejects_redirect_to_host_outside_allowlist() -> None:

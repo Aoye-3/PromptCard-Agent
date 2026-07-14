@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import threading
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from io import BytesIO
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -48,6 +51,7 @@ class FakeStorage:
         self.asset = StorageAsset(content=png_bytes(), content_type="image/png")
         self.fail_upload = False
         self._lock = threading.Lock()
+        self.runs: dict[str, dict[str, Any]] = {}
 
     def _record(self, operation: str, payload: Any) -> None:
         with self._lock:
@@ -55,11 +59,19 @@ class FakeStorage:
 
     def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._record("create_run", payload)
-        return {**payload, "state": "queued"}
+        created = {**payload, "state": "queued"}
+        self.runs[payload["id"]] = created
+        return created
 
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         self._record("update_run", (run_id, patch))
-        return {"id": run_id, **patch}
+        updated = {**self.runs[run_id], **patch}
+        self.runs[run_id] = updated
+        return updated
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        self._record("get_run", run_id)
+        return dict(self.runs[run_id])
 
     def load_asset(self, asset_id: str) -> StorageAsset:
         self._record("load_asset", asset_id)
@@ -77,17 +89,26 @@ class FakeStorage:
 
 
 class FakeConnections:
-    def __init__(self, credential: str | None = "ark-secret") -> None:
+    def __init__(self, credential: str | None = "ark-secret", credential_error: Exception | None = None) -> None:
         self.credential = credential
+        self.credential_error = credential_error
+        self.metadata_reads = 0
+        self.credential_reads = 0
 
-    def resolve(self, connection_id: str) -> ConnectionContext:
-        return ConnectionContext(
+    def resolve_metadata(self, connection_id: str) -> Any:
+        self.metadata_reads += 1
+        return SimpleNamespace(
             connection_id=connection_id,
             provider_id="volcengine-ark",
             api_base="https://ark.cn-beijing.volces.com/api/v3",
             enabled=True,
-            credential=self.credential,
         )
+
+    def get_credential(self, _connection_id: str) -> str | None:
+        self.credential_reads += 1
+        if self.credential_error is not None:
+            raise self.credential_error
+        return self.credential
 
 
 class FakeProvider:
@@ -204,7 +225,15 @@ def test_success_persists_state_localizes_result_and_returns_no_remote_url() -> 
 
 
 def test_resolved_connection_repr_never_contains_credential() -> None:
-    connection = FakeConnections(credential="raw-connection-secret").resolve("connection-1")
+    connections = FakeConnections(credential="raw-connection-secret")
+    metadata = connections.resolve_metadata("connection-1")
+    connection = ConnectionContext(
+        connection_id=metadata.connection_id,
+        provider_id=metadata.provider_id,
+        api_base=metadata.api_base,
+        enabled=metadata.enabled,
+        credential=connections.get_credential("connection-1"),
+    )
     assert "raw-connection-secret" not in repr(connection)
 
 
@@ -309,6 +338,91 @@ def test_limits_each_connection_to_two_in_flight_generations() -> None:
     assert calls == 2
 
 
+@pytest.mark.parametrize("commit_before_error", [False, True])
+def test_running_patch_ambiguous_failure_is_reconciled_to_failed_terminal(commit_before_error: bool) -> None:
+    class StartPatchFailureStorage(FakeStorage):
+        def __init__(self) -> None:
+            super().__init__()
+            self.failed_once = False
+
+        def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+            if patch["state"] == "running" and not self.failed_once:
+                self.failed_once = True
+                self._record("update_run", (run_id, patch))
+                if commit_before_error:
+                    self.runs[run_id] = {**self.runs[run_id], **patch}
+                raise OSError("ambiguous storage response secret=raw-storage-secret")
+            current = self.runs[run_id]["state"]
+            target = patch["state"]
+            if (current, target) not in {("queued", "running"), ("running", "failed"), ("running", "succeeded")}:
+                raise ValueError(f"invalid transition {current} -> {target}")
+            return super().update_run(run_id, patch)
+
+    storage = StartPatchFailureStorage()
+    service, _, provider, _ = make_service(storage=storage)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(command("run-start-ambiguous"))
+
+    assert exc_info.value.code == "storage_write_failed"
+    assert storage.runs["run-start-ambiguous"]["state"] == "failed"
+    assert provider.requests == []
+    assert "raw-storage-secret" not in repr(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("invalid_kind", "expected_code"),
+    [
+        ("capability", "unsupported_resolution"),
+        ("prompt", "missing_reference"),
+        ("region", "region_coordinate_out_of_range"),
+        ("asset", "invalid_input_asset"),
+    ],
+)
+def test_invalid_request_never_reads_credential_even_when_keyring_is_broken(invalid_kind: str, expected_code: str) -> None:
+    storage = FakeStorage()
+    connections = FakeConnections(credential_error=OSError("keyring raw-secret"))
+    request = command("run-invalid-before-keyring")
+    if invalid_kind == "capability":
+        request = replace(request, resolution="4K")
+    elif invalid_kind == "prompt":
+        request = replace(
+            request,
+            prompt_document=PromptDocument(segments=(PromptReferenceSegment(reference_id="missing", label="缺失"),)),
+        )
+    elif invalid_kind == "region":
+        request = replace(request, regions=(PointRegion(reference_id="subject", x=1000, y=0),))
+    elif invalid_kind == "asset":
+        storage.asset = StorageAsset(content=b"not-an-image", content_type="image/png")
+
+    service, _, provider, _ = make_service(storage=storage, connections=connections)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(request)
+
+    assert exc_info.value.code == expected_code
+    assert connections.metadata_reads == 1
+    assert connections.credential_reads == 0
+    assert provider.requests == []
+    assert storage.runs[request.run_id]["state"] == "failed"
+
+
+def test_valid_request_reads_credential_once_and_normalizes_keyring_failure() -> None:
+    storage = FakeStorage()
+    connections = FakeConnections(credential_error=OSError("keyring raw-secret"))
+    service, _, provider, _ = make_service(storage=storage, connections=connections)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(command("run-keyring-failed"))
+
+    assert exc_info.value.code == "credential_store_unavailable"
+    assert connections.metadata_reads == 1
+    assert connections.credential_reads == 1
+    assert provider.requests == []
+    assert storage.runs["run-keyring-failed"]["state"] == "failed"
+    assert "raw-secret" not in repr(storage.runs["run-keyring-failed"])
+
+
 def test_gateway_registers_image_generation_route() -> None:
     app = create_app()
     paths = {route.path for route in app.routes}
@@ -374,3 +488,45 @@ def test_router_maps_camel_case_request_and_returns_only_local_result() -> None:
     }
     assert "url" not in repr(payload).lower()
     assert received[0].regions == (PointRegion(reference_id="subject", x=20, y=30),)
+
+
+def test_router_error_has_no_raw_secret_in_chain_traceback_or_response() -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import ImageGenerationBody, generate_image, router
+
+    raw_secret = "raw-handler-secret"
+    payload = {
+        "projectId": "project-1",
+        "nodeId": "node-1",
+        "connectionId": "connection-1",
+        "modelId": "doubao-seedream-5-0-pro-260628",
+        "mode": "generate",
+        "promptDocument": {"version": 1, "segments": [{"type": "text", "text": "雪地"}]},
+        "inputs": [],
+        "regions": [],
+        "resolution": "2K",
+        "outputFormat": "png",
+        "watermark": False,
+    }
+
+    class FailingService:
+        def generate(self, _generation_command: GenerationCommand) -> GenerationOutcome:
+            raise GenerationError("unsafe_image_url", f"Authorization: Bearer {raw_secret}", False, "run-failed")
+
+    body = ImageGenerationBody.model_validate(payload)
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(generate_image(body, FailingService()))
+
+    error = exc_info.value
+    formatted = "".join(traceback.format_exception(error))
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert raw_secret not in formatted
+    assert raw_secret not in repr(error.detail)
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: FailingService()
+    response = TestClient(app).post("/api/promptcard/runtime/image-generations", json=payload)
+    assert response.status_code == 422
+    assert raw_secret not in response.text

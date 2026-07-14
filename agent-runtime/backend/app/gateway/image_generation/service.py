@@ -17,11 +17,13 @@ from app.gateway.image_generation.contracts import (
     ImageInput,
     ImageRegion,
     PointRegion,
+    PromptCompilationError,
     PromptDocument,
     PromptReferenceSegment,
     PromptTextSegment,
     ProviderError,
 )
+from app.gateway.image_generation.prompt_compiler import compile_seedream_prompt
 from app.gateway.image_generation.providers.base import ImageGenerationProvider
 from app.gateway.image_generation.providers.volcengine_seedream import VolcengineSeedreamProvider
 from app.gateway.image_generation.result_fetcher import FetchedImage, ImageFetchError, ImageResultFetcher, validate_image_content
@@ -57,6 +59,14 @@ class ConnectionContext:
     api_base: str
     enabled: bool
     credential: str | None = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectionMetadata:
+    connection_id: str
+    provider_id: str
+    api_base: str
+    enabled: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +108,8 @@ class ImageGenerationStorage(Protocol):
 
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]: ...
 
+    def get_run(self, run_id: str) -> dict[str, Any]: ...
+
     def load_asset(self, asset_id: str) -> StorageAsset: ...
 
     def upload_asset(self, filename: str, content_type: str, content: bytes) -> dict[str, Any]: ...
@@ -106,7 +118,9 @@ class ImageGenerationStorage(Protocol):
 
 
 class ConnectionResolver(Protocol):
-    def resolve(self, connection_id: str) -> ConnectionContext: ...
+    def resolve_metadata(self, connection_id: str) -> ConnectionMetadata: ...
+
+    def get_credential(self, connection_id: str) -> str | None: ...
 
 
 ProviderFactory = Callable[[ConnectionContext], ImageGenerationProvider]
@@ -147,10 +161,7 @@ class ImageGenerationService:
         except Exception:
             raise GenerationError("storage_write_failed", "Image generation run could not be created", True, command.run_id) from None
 
-        try:
-            self._storage.update_run(command.run_id, {"state": "running"})
-        except Exception:
-            raise GenerationError("storage_write_failed", "Image generation run could not be started", True, command.run_id) from None
+        self._start_run(command.run_id)
 
         acquired = self._try_acquire(command.connection_id)
         failure: GenerationError | None = None
@@ -160,9 +171,18 @@ class ImageGenerationService:
             if not acquired:
                 raise GenerationError("generation_busy", "This model connection already has two running generations", True, command.run_id)
 
-            connection = self._connections.resolve(command.connection_id)
-            self._validate_capabilities(command, connection)
+            metadata = self._connections.resolve_metadata(command.connection_id)
+            self._validate_capabilities(command, metadata)
             provider_request = self._provider_request(command)
+            compile_seedream_prompt(provider_request.prompt_document, provider_request.inputs, provider_request.regions)
+            credential = self._read_credential(command.connection_id, command.run_id)
+            connection = ConnectionContext(
+                connection_id=metadata.connection_id,
+                provider_id=metadata.provider_id,
+                api_base=metadata.api_base,
+                enabled=metadata.enabled,
+                credential=credential,
+            )
             provider = self._provider_factory(connection)
             provider_result = provider.generate(provider_request)
             provider_request_id = provider_result.request_id
@@ -216,11 +236,88 @@ class ImageGenerationService:
             raise GenerationError("generation_failed", "Image generation failed", False, command.run_id)
         return outcome
 
-    def _validate_capabilities(self, command: GenerationCommand, connection: ConnectionContext) -> None:
+    def _start_run(self, run_id: str) -> None:
+        start_failed = False
+        try:
+            self._storage.update_run(run_id, {"state": "running"})
+        except Exception:
+            start_failed = True
+        if not start_failed:
+            return
+
+        failure = GenerationError("storage_write_failed", "Image generation run could not be started", True, run_id)
+        if self._reconcile_start_failure(run_id, failure):
+            raise failure from None
+        raise GenerationError(
+            "terminal_persistence_failed",
+            "Image generation terminal state could not be saved",
+            True,
+            run_id,
+        ) from None
+
+    def _reconcile_start_failure(self, run_id: str, failure: GenerationError) -> bool:
+        state = self._read_run_state(run_id)
+        if state == "queued":
+            retry_failed = False
+            try:
+                self._storage.update_run(run_id, {"state": "running"})
+            except Exception:
+                retry_failed = True
+            state = self._read_run_state(run_id) if retry_failed else "running"
+
+        if state == "running":
+            patch = {
+                "state": "failed",
+                "error": {
+                    "code": failure.code,
+                    "message": failure.message,
+                    "retryable": failure.retryable,
+                },
+            }
+            terminal_write_failed = False
+            try:
+                self._storage.update_run(run_id, patch)
+            except Exception:
+                terminal_write_failed = True
+            if not terminal_write_failed:
+                return True
+            state = self._read_run_state(run_id)
+        return state == "failed"
+
+    def _read_run_state(self, run_id: str) -> str | None:
+        try:
+            run = self._storage.get_run(run_id)
+        except Exception:
+            return None
+        state = run.get("state")
+        return state if isinstance(state, str) else None
+
+    def _read_credential(self, connection_id: str, run_id: str) -> str:
+        credential: str | None = None
+        read_failed = False
+        try:
+            credential = self._connections.get_credential(connection_id)
+        except Exception:
+            read_failed = True
+        if read_failed:
+            raise GenerationError(
+                "credential_store_unavailable",
+                "Model credential storage is unavailable",
+                True,
+                run_id,
+            ) from None
+        if not credential:
+            raise GenerationError(
+                "credential_missing",
+                "The selected model connection has no credential",
+                False,
+                run_id,
+            )
+        return credential
+
+    def _validate_capabilities(self, command: GenerationCommand, connection: ConnectionMetadata) -> None:
         if not connection.enabled:
             raise GenerationError("connection_disabled", "The selected model connection is disabled", False, command.run_id)
-        if not connection.credential:
-            raise GenerationError("credential_missing", "The selected model connection has no credential", False, command.run_id)
         model = self._model_lookup(command.model_id)
         if model is None or model.get("modality") != "image":
             raise GenerationError("image_model_not_found", "The selected image model is unavailable", False, command.run_id)
@@ -290,15 +387,17 @@ class StoredConnectionResolver:
     def __init__(self, store: ModelConnectionStore) -> None:
         self._store = store
 
-    def resolve(self, connection_id: str) -> ConnectionContext:
+    def resolve_metadata(self, connection_id: str) -> ConnectionMetadata:
         connection = self._store.get_connection_config(connection_id)
-        return ConnectionContext(
+        return ConnectionMetadata(
             connection_id=connection_id,
             provider_id=str(connection.get("providerId", "")),
             api_base=str(connection.get("apiBase", "")),
             enabled=connection.get("enabled") is True,
-            credential=self._store.credential_store.get(connection_id),
         )
+
+    def get_credential(self, connection_id: str) -> str | None:
+        return self._store.credential_store.get(connection_id)
 
 
 class PromptCardStorageClient:
@@ -316,6 +415,9 @@ class PromptCardStorageClient:
 
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         return self._json("PATCH", f"/api/image-generation-runs/{quote(run_id, safe='')}/state", json=patch)
+
+    def get_run(self, run_id: str) -> dict[str, Any]:
+        return self._json("GET", f"/api/image-generation-runs/{quote(run_id, safe='')}")
 
     def load_asset(self, asset_id: str) -> StorageAsset:
         try:
@@ -472,6 +574,20 @@ def _normalize_generation_error(error: Exception, run_id: str) -> GenerationErro
             "invalid_image_data": "Remote image could not be decoded",
         }
         return GenerationError(error.code, messages.get(error.code, "Remote image processing failed"), error.retryable, run_id)
+    if isinstance(error, PromptCompilationError):
+        messages = {
+            "too_many_images": "The selected model accepts fewer reference images",
+            "duplicate_input_order": "Reference image order must be unique",
+            "invalid_input_order": "Reference image order is invalid",
+            "duplicate_reference_id": "Reference image identifiers must be unique",
+            "invalid_image_input": "A reference image input is invalid",
+            "invalid_prompt_segment": "The image prompt is invalid",
+            "missing_reference": "Prompt references an unavailable image",
+            "region_coordinate_out_of_range": "Region coordinates are invalid",
+            "invalid_bbox": "The selected region is invalid",
+            "invalid_region": "The selected region is invalid",
+        }
+        return GenerationError(error.code, messages.get(error.code, "The image prompt is invalid"), False, run_id)
     if isinstance(error, StorageGatewayError) or isinstance(error, OSError):
         return GenerationError("storage_write_failed", "Generated image could not be stored", True, run_id)
     code = getattr(error, "code", None)

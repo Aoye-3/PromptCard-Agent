@@ -63,6 +63,7 @@ import {
 } from '@/domain/prompt-library/quick-messages'
 import { compileImageGeneratorPrompt } from '@/domain/image-generation/prompt-compiler'
 import { imageSizeCapabilitiesForModel } from '@/domain/image-generation/size-validation'
+import { imageRegionCapabilitiesForModel, type ImageRegionSource } from '@/domain/image-generation/regions'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
 import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageGeneratorNode, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject } from '@/models/PromptHistory.model'
@@ -166,6 +167,17 @@ const FreeCanvasBuilderInner = ({
   const selectedPromptSnapshot = useMemo(() => selectedImageGeneratorNode
     ? compileImageGeneratorPrompt(freeCanvas, selectedImageGeneratorNode.id)
     : null, [freeCanvas, selectedImageGeneratorNode])
+  const selectedRegionSources = useMemo<ImageRegionSource[]>(() => (
+    selectedPromptSnapshot?.references.flatMap(reference => reference.assetId
+      ? [{
+          referenceId: reference.referenceId,
+          label: reference.label,
+          role: reference.role,
+          assetId: reference.assetId,
+          imageUrl: canvasImageAssetUrl(reference.assetId)
+        }]
+      : []) || []
+  ), [selectedPromptSnapshot])
   const quickPresets = useMemo(() => presets.filter(isQuickMessagePreset), [presets])
   const cropNode = cropNodeId
     ? freeCanvas.nodes.find((node): node is IFreeCanvasImageNode => node.id === cropNodeId && node.kind === 'image')
@@ -349,7 +361,7 @@ const FreeCanvasBuilderInner = ({
 
   const updateImageGeneratorNode = useCallback((
     nodeId: string,
-    updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings' | 'promptDocument'>>
+    updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings' | 'promptDocument' | 'regions' | 'meta'>>
   ) => {
     onChange({
       ...freeCanvas,
@@ -712,6 +724,8 @@ const FreeCanvasBuilderInner = ({
               <ImageGeneratorInspector
                 node={selectedImageGeneratorNode}
                 sizeCapabilities={imageSizeCapabilitiesForModel(selectedImageGeneratorNode.binding.modelId)}
+                regionCapabilities={imageRegionCapabilitiesForModel(selectedImageGeneratorNode.binding.modelId)}
+                regionSources={selectedRegionSources}
                 promptSnapshot={selectedPromptSnapshot || undefined}
                 resultThumbnailUrl={selectedImageGeneratorNode.primaryAssetId
                   ? canvasImageAssetUrl(selectedImageGeneratorNode.primaryAssetId)

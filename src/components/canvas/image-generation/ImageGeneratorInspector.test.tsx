@@ -12,7 +12,13 @@ import {
   SEEDREAM_5_PRO_SIZE_CAPABILITIES,
   type ImageSizeCapabilities
 } from '@/domain/image-generation/size-validation'
+import {
+  SEEDREAM_5_PRO_REGION_CAPABILITIES,
+  type BoundImageRegion,
+  type ImageRegionSource
+} from '@/domain/image-generation/regions'
 import { ImageGeneratorInspector } from './ImageGeneratorInspector'
+import { RegionEditorDialog } from './RegionEditorDialog'
 
 const ONE_K_SQUARE_CAPABILITIES: ImageSizeCapabilities = {
   modelId: 'model-one-k-square',
@@ -24,6 +30,14 @@ const ONE_K_SQUARE_CAPABILITIES: ImageSizeCapabilities = {
     minAspectRatio: 1 / 16,
     maxAspectRatio: 16
   }
+}
+
+const REGION_SOURCE: ImageRegionSource = {
+  referenceId: 'reference-source',
+  label: 'Source image',
+  role: 'source-image',
+  assetId: 'asset-source',
+  imageUrl: '/assets/source'
 }
 
 const findElement = (
@@ -322,6 +336,70 @@ describe('ImageGeneratorInspector', () => {
     expect(onCustomChange).toHaveBeenCalledWith({
       settings: { ...customNode.settings, width: 1_250 }
     })
+  })
+
+  it('mounts Seedream point and bbox editing only for region-edit mode', () => {
+    const markup = renderToStaticMarkup(
+      <ImageGeneratorInspector
+        node={{ ...generatorNode, mode: 'region-edit' }}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        regionCapabilities={SEEDREAM_5_PRO_REGION_CAPABILITIES}
+        regionSources={[REGION_SOURCE]}
+        onChange={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('data-region-editor-dialog')
+    expect(markup).toContain('Select point tool')
+    expect(markup).toContain('Select box tool')
+    expect(markup).not.toContain('Mask')
+    expect(markup).not.toContain('Brush')
+  })
+
+  it('persists region integer geometry and stable bindings without preview data', () => {
+    const onChange = vi.fn()
+    const node = { ...generatorNode, mode: 'region-edit' as const }
+    const tree = ImageGeneratorInspector({
+      node,
+      sizeCapabilities: SEEDREAM_5_PRO_SIZE_CAPABILITIES,
+      regionCapabilities: SEEDREAM_5_PRO_REGION_CAPABILITIES,
+      regionSources: [REGION_SOURCE],
+      onChange
+    })
+    const editor = findElement(tree, element => element.type === RegionEditorDialog)
+    const onSave = editor.props.onSave as (regions: BoundImageRegion[]) => void
+
+    onSave([{
+      id: 'region-1',
+      referenceId: REGION_SOURCE.referenceId,
+      type: 'bbox',
+      x: 100,
+      y: 200,
+      width: 300,
+      height: 400
+    }])
+
+    expect(onChange).toHaveBeenCalledWith({
+      regions: [{ type: 'bbox', x: 100, y: 200, width: 300, height: 400 }],
+      meta: {
+        imageRegionBindings: [{ regionId: 'region-1', referenceId: REGION_SOURCE.referenceId }]
+      }
+    })
+    expect(JSON.stringify(onChange.mock.calls)).not.toContain('/assets/source')
+  })
+
+  it('shows the source requirement for edit mode without a connected source image', () => {
+    const markup = renderToStaticMarkup(
+      <ImageGeneratorInspector
+        node={{ ...generatorNode, mode: 'edit' }}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        regionCapabilities={SEEDREAM_5_PRO_REGION_CAPABILITIES}
+        regionSources={[]}
+        onChange={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('Source image required')
   })
 
   it('does not add an invalid second prompt connection to project state', () => {

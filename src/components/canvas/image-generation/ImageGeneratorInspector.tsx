@@ -10,16 +10,26 @@ import {
   type ImageSizeCapabilities,
   type ImageSizeSettings
 } from '@/domain/image-generation/size-validation'
+import {
+  readImageRegionBindings,
+  restoreBoundImageRegions,
+  serializeBoundImageRegions,
+  type ImageRegionCapabilities,
+  type ImageRegionSource
+} from '@/domain/image-generation/regions'
 import { imageGeneratorResultUrl, imageGeneratorStatus } from '../nodes/ImageGeneratorNode'
 import { ReferencePromptEditor } from './ReferencePromptEditor'
+import { RegionEditorDialog } from './RegionEditorDialog'
 
 export interface ImageGeneratorInspectorProps {
   node: IFreeCanvasImageGeneratorNode
   sizeCapabilities: ImageSizeCapabilities | null
+  regionCapabilities?: ImageRegionCapabilities | null
+  regionSources?: readonly ImageRegionSource[]
   status?: string
   resultThumbnailUrl?: string
   promptSnapshot?: ImageGeneratorPromptSnapshot
-  onChange: (updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings'>>) => void
+  onChange: (updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings' | 'regions' | 'meta'>>) => void
   onPromptDocumentChange?: (document: PromptDocument) => void
   onOpenHistory?: (nodeId: string) => void
 }
@@ -27,6 +37,8 @@ export interface ImageGeneratorInspectorProps {
 export const ImageGeneratorInspector = ({
   node,
   sizeCapabilities,
+  regionCapabilities = null,
+  regionSources = [],
   status = imageGeneratorStatus(node),
   resultThumbnailUrl = imageGeneratorResultUrl(node),
   promptSnapshot,
@@ -43,6 +55,10 @@ export const ImageGeneratorInspector = ({
   const recommendedSize = activeSizeCapabilities
     ? recommendedImageSizeSettings(activeSizeCapabilities)
     : null
+  const boundRegions = restoreBoundImageRegions(
+    node.regions,
+    readImageRegionBindings(node.meta)
+  )
 
   const updateSettings = (updates: Partial<IFreeCanvasImageGeneratorNode['settings']>) => {
     onChange({ settings: { ...node.settings, ...updates } })
@@ -217,6 +233,31 @@ export const ImageGeneratorInspector = ({
             {activeSizeCapabilities.customSize.minPixels.toLocaleString()}–{activeSizeCapabilities.customSize.maxPixels.toLocaleString()} total pixels; width/height ratio {activeSizeCapabilities.customSize.minAspectRatio}–{activeSizeCapabilities.customSize.maxAspectRatio}.
           </p>
         </fieldset>
+      )}
+
+      {node.mode !== 'generate' && !regionCapabilities && (
+        <div role="alert" className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-950">
+          Region capabilities are unavailable for this model.
+        </div>
+      )}
+
+      {node.mode !== 'generate' && regionCapabilities && (
+        <details className="rounded-[6px] border border-gray-200">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-black text-gray-800">Edit image regions</summary>
+          <RegionEditorDialog
+            mode={node.mode}
+            capabilities={regionCapabilities}
+            sources={regionSources}
+            initialRegions={boundRegions}
+            onSave={regions => {
+              const serialized = serializeBoundImageRegions(regions)
+              onChange({
+                regions: serialized.regions,
+                meta: { ...node.meta, imageRegionBindings: serialized.bindings }
+              })
+            }}
+          />
+        </details>
       )}
 
       <div className="flex items-center justify-between border-t border-gray-100 pt-3">

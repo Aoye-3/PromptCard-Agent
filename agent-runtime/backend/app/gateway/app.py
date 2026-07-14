@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.gateway.auth_middleware import AuthMiddleware
 from app.gateway.config import get_gateway_config
 from app.gateway.csrf_middleware import CSRFMiddleware, get_configured_cors_origins
-from app.gateway.deps import langgraph_runtime
+from app.gateway.deps import image_generation_runtime, langgraph_runtime
 from app.gateway.routers import (
     agents,
     artifacts,
@@ -18,6 +18,7 @@ from app.gateway.routers import (
     auth,
     channels,
     feedback,
+    image_generation,
     mcp,
     memory,
     model_management,
@@ -178,7 +179,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"Starting API Gateway on {config.host}:{config.port}")
 
     # Initialize LangGraph runtime components (StreamBridge, RunManager, checkpointer, store)
-    async with langgraph_runtime(app):
+    async with langgraph_runtime(app), image_generation_runtime(app):
         logger.info("LangGraph runtime initialised")
 
         # Ensure admin user exists (auto-create on first boot)
@@ -346,6 +347,7 @@ This gateway provides runtime endpoints for agent runs plus custom endpoints for
     # PromptCard-owned runtime boundary API is mounted at /api/promptcard/runtime
     app.include_router(promptcard_runtime.router)
     app.include_router(model_management.router)
+    app.include_router(image_generation.router)
 
     # Artifacts API is mounted at /api/threads/{thread_id}/artifacts
     app.include_router(artifacts.router)

@@ -24,6 +24,7 @@ from deerflow.runtime.runs.store.base import RunStore
 if TYPE_CHECKING:
     from app.gateway.auth.local_provider import LocalAuthProvider
     from app.gateway.auth.repositories.sqlite import SQLiteUserRepository
+    from app.gateway.image_generation.service import ImageGenerationService
     from deerflow.persistence.thread_meta.base import ThreadMetaStore
 
 
@@ -97,6 +98,20 @@ async def langgraph_runtime(app: FastAPI) -> AsyncGenerator[None, None]:
             await close_engine()
 
 
+@asynccontextmanager
+async def image_generation_runtime(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Create the process-local image-generation orchestrator."""
+    from app.gateway.image_generation.service import build_default_image_generation_service
+
+    service = build_default_image_generation_service()
+    app.state.image_generation_service = service
+    try:
+        yield
+    finally:
+        service.close()
+        app.state.image_generation_service = None
+
+
 # ---------------------------------------------------------------------------
 # Getters – called by routers per-request
 # ---------------------------------------------------------------------------
@@ -121,6 +136,7 @@ get_checkpointer: Callable[[Request], Checkpointer] = _require("checkpointer", "
 get_run_event_store: Callable[[Request], RunEventStore] = _require("run_event_store", "Run event store")
 get_feedback_repo: Callable[[Request], FeedbackRepository] = _require("feedback_repo", "Feedback")
 get_run_store: Callable[[Request], RunStore] = _require("run_store", "Run store")
+get_image_generation_service: Callable[[Request], ImageGenerationService] = _require("image_generation_service", "Image generation service")
 
 
 def get_store(request: Request):

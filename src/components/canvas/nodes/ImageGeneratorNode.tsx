@@ -176,10 +176,15 @@ export const ImageGeneratorNode = ({ data, selected = false }: ImageGeneratorNod
 
 export const imageGeneratorStatus = (node: IFreeCanvasImageGeneratorNode): string => {
   const persistedStatus = node.meta.status
-  if (typeof persistedStatus === 'string' && persistedStatus.trim()) return persistedStatus
-  if (node.activeRunId) return 'Running'
-  if (node.primaryAssetId) return 'Completed'
-  return 'Ready'
+  if (
+    persistedStatus === 'idle'
+    || persistedStatus === 'validating'
+    || persistedStatus === 'running'
+    || persistedStatus === 'succeeded'
+    || persistedStatus === 'failed'
+  ) return persistedStatus
+  if (node.primaryAssetId) return 'succeeded'
+  return 'idle'
 }
 
 export const imageGeneratorResultUrl = (node: IFreeCanvasImageGeneratorNode): string => {

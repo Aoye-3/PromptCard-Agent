@@ -7,10 +7,20 @@ interface RecentCaptureActionsProps {
   canPlaceOnCanvas: boolean
   onRegister: (capture: RecentCaptureItemViewModel) => void
   onPlaceOnCanvas: (capture: RecentCaptureItemViewModel) => void
+  referenceTarget?: { id: string; title: string } | null
+  onPlaceAsReference?: (capture: RecentCaptureItemViewModel, targetNodeId: string) => void
   onOpenPromptLibrary: (presetId: string) => void
 }
 
-export const RecentCaptureActions = ({ capture, canPlaceOnCanvas, onRegister, onPlaceOnCanvas, onOpenPromptLibrary }: RecentCaptureActionsProps) => {
+export const RecentCaptureActions = ({
+  capture,
+  canPlaceOnCanvas,
+  onRegister,
+  onPlaceOnCanvas,
+  referenceTarget = null,
+  onPlaceAsReference,
+  onOpenPromptLibrary
+}: RecentCaptureActionsProps) => {
   const { t } = useI18n()
   const registeredPromptId = capture?.registeredPromptId
   const canPlace = Boolean(capture && capture.kind !== 'screenRecording' && canPlaceOnCanvas)
@@ -50,6 +60,17 @@ export const RecentCaptureActions = ({ capture, canPlaceOnCanvas, onRegister, on
       >
         <ImagePlus className="h-4 w-4" />{t('mediaActionPlaceOnCanvas')}
       </button>
+      {capture?.purpose === 'generatedResult' && referenceTarget && onPlaceAsReference && (
+        <button
+          type="button"
+          data-place-capture-as-reference
+          onClick={() => onPlaceAsReference(capture, referenceTarget.id)}
+          className={activeClass}
+          title={`Use as reference for ${referenceTarget.title}`}
+        >
+          <ImagePlus className="h-4 w-4" />Reference for {referenceTarget.title}
+        </button>
+      )}
     </div>
   )
 }

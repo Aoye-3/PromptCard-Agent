@@ -13,10 +13,14 @@ import { storage } from '@/utils/storage'
 export const MediaScreen = ({
   canPlaceOnCanvas = false,
   onPlaceOnCanvas = async () => undefined,
+  referenceTarget = null,
+  onPlaceAsReference = async () => undefined,
   onOpenPromptLibrary = () => undefined
 }: {
   canPlaceOnCanvas?: boolean
   onPlaceOnCanvas?: (capture: RecentCaptureItemViewModel) => Promise<void>
+  referenceTarget?: { id: string; title: string } | null
+  onPlaceAsReference?: (capture: RecentCaptureItemViewModel, targetNodeId: string) => Promise<void>
   onOpenPromptLibrary?: (presetId?: string) => void
 }) => {
   const { t } = useI18n()
@@ -79,6 +83,11 @@ export const MediaScreen = ({
 
   const placeOnCanvas = async (capture: RecentCaptureItemViewModel) => {
     await onPlaceOnCanvas(capture)
+    await refreshCaptures()
+  }
+
+  const placeAsReference = async (capture: RecentCaptureItemViewModel, targetNodeId: string) => {
+    await onPlaceAsReference(capture, targetNodeId)
     await refreshCaptures()
   }
 
@@ -156,6 +165,8 @@ export const MediaScreen = ({
             canPlaceOnCanvas={canPlaceOnCanvas}
             onRegister={capture => setRegistrationCaptureIds([capture.id])}
             onPlaceOnCanvas={capture => void placeOnCanvas(capture)}
+            referenceTarget={referenceTarget}
+            onPlaceAsReference={(capture, targetNodeId) => void placeAsReference(capture, targetNodeId)}
             onOpenPromptLibrary={presetId => onOpenPromptLibrary(presetId)}
           />
         </div>

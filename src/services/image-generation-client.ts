@@ -21,6 +21,9 @@ export interface ImageGenerationRequest {
   inputs: ImageGenerationInput[]
   regions: ImageGenerationRegion[]
   resolution: string
+  aspectRatio: string
+  width?: number
+  height?: number
   outputFormat: 'png' | 'jpeg'
   watermark: boolean
 }
@@ -167,6 +170,10 @@ const cloneRequest = (input: ImageGenerationRequest): ImageGenerationRequest => 
         x1: region.x1, y1: region.y1, x2: region.x2, y2: region.y2
       }),
   resolution: input.resolution,
+  aspectRatio: input.aspectRatio,
+  ...(input.aspectRatio === 'custom' && Number.isInteger(input.width) && Number.isInteger(input.height)
+    ? { width: input.width, height: input.height }
+    : {}),
   outputFormat: input.outputFormat,
   watermark: input.watermark
 })

@@ -21,6 +21,7 @@ const request = (): ImageGenerationRequest => ({
   inputs: [{ referenceId: 'product', assetId: 'asset-input.png', order: 0 }],
   regions: [{ type: 'bbox', referenceId: 'product', x1: 10, y1: 20, x2: 300, y2: 400 }],
   resolution: '2K',
+  aspectRatio: '16:9',
   outputFormat: 'png',
   watermark: false
 })
@@ -38,7 +39,7 @@ describe('image generation client', () => {
       remoteUrl: 'https://provider.example/secret.png',
       apiKey: 'raw-secret'
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    const unsafeRequest = { ...request(), runId: 'frontend-run', remoteUrl: 'https://bad.example' } as ImageGenerationRequest
+    const unsafeRequest = { ...request(), width: 999, height: 999, runId: 'frontend-run', remoteUrl: 'https://bad.example' } as ImageGenerationRequest
 
     const result = await requestImageGeneration(unsafeRequest, fetcher)
 

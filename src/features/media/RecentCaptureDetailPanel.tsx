@@ -14,12 +14,16 @@ export const RecentCaptureDetailPanel = ({
   canPlaceOnCanvas,
   onRegister,
   onPlaceOnCanvas,
+  referenceTarget,
+  onPlaceAsReference,
   onOpenPromptLibrary
 }: {
   capture: RecentCaptureItemViewModel | null
   canPlaceOnCanvas: boolean
   onRegister: (capture: RecentCaptureItemViewModel) => void
   onPlaceOnCanvas: (capture: RecentCaptureItemViewModel) => void
+  referenceTarget?: { id: string; title: string } | null
+  onPlaceAsReference?: (capture: RecentCaptureItemViewModel, targetNodeId: string) => void
   onOpenPromptLibrary: (presetId: string) => void
 }) => {
   const { t } = useI18n()
@@ -103,6 +107,8 @@ export const RecentCaptureDetailPanel = ({
             canPlaceOnCanvas={canPlaceOnCanvas}
             onRegister={onRegister}
             onPlaceOnCanvas={onPlaceOnCanvas}
+            referenceTarget={referenceTarget}
+            onPlaceAsReference={onPlaceAsReference}
             onOpenPromptLibrary={onOpenPromptLibrary}
           />
         </div>

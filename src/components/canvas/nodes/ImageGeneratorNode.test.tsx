@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { IFreeCanvasImageGeneratorNode } from '@/models/PromptHistory.model'
-import { ImageGeneratorNode } from './ImageGeneratorNode'
+import { ImageGeneratorNode, imageGeneratorStatus } from './ImageGeneratorNode'
 
 vi.mock('@xyflow/react', () => ({
   Handle: ({ id, type }: { id: string; type: string }) => (
@@ -60,5 +60,13 @@ describe('ImageGeneratorNode', () => {
     expect(markup).toContain('Completed')
     expect(markup).toContain('/result.png')
     expect(markup).toContain('History')
+  })
+
+  it('uses only the supported persisted generation states', () => {
+    expect(imageGeneratorStatus({ ...generatorNode, meta: { status: 'validating' } })).toBe('validating')
+    expect(imageGeneratorStatus({ ...generatorNode, meta: { status: 'running' } })).toBe('running')
+    expect(imageGeneratorStatus({ ...generatorNode, meta: { status: 'succeeded' } })).toBe('succeeded')
+    expect(imageGeneratorStatus({ ...generatorNode, meta: { status: 'failed' } })).toBe('failed')
+    expect(imageGeneratorStatus({ ...generatorNode, activeRunId: undefined, primaryAssetId: undefined, meta: { status: 'Completed' } })).toBe('idle')
   })
 })

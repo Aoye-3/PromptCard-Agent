@@ -64,6 +64,30 @@ export const createQuickTextNode = (
   timestamp = Date.now()
 ): IFreeCanvasTextNode => createFreeCanvasTextNode(text, position, timestamp, 'preset')
 
+export const createFreeCanvasImageGeneratorNode = (
+  position: IFreeCanvasPosition,
+  binding: { connectionId: string; modelId: string },
+  timestamp = Date.now()
+): IFreeCanvasImageGeneratorNode => ({
+  id: `free-image-generator-${timestamp}`,
+  kind: 'image-generator',
+  title: 'Image generator',
+  position: normalizePosition(position),
+  width: 420,
+  height: 560,
+  mode: 'generate',
+  binding: { connectionId: binding.connectionId, modelId: binding.modelId },
+  settings: {
+    resolution: '1K',
+    aspectRatio: 'smart',
+    outputFormat: 'png',
+    watermark: false
+  },
+  promptDocument: { version: 1, segments: [] },
+  regions: [],
+  meta: { status: 'idle' }
+})
+
 export const createFreeCanvasImageNodeFromMedia = (
   media: FreeCanvasMediaNode,
   timestamp = Date.now()

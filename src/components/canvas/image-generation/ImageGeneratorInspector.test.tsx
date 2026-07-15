@@ -491,6 +491,63 @@ describe('ImageGeneratorInspector', () => {
     expect(onGenerate).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['validating', 'running'] as const)('blocks duplicate generation while the node is %s', status => {
+    const onGenerate = vi.fn()
+    const renderer = mountInspector(
+      <ImageGeneratorInspector
+        node={generatorNode}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        promptSnapshot={promptSnapshot(true)}
+        status={status}
+        onChange={vi.fn()}
+        onGenerate={onGenerate}
+      />
+    )
+    const button = renderer.root.findByProps({ 'aria-label': 'Generate image' })
+
+    expect(button.props.disabled).toBe(true)
+    act(() => button.props.onClick())
+    expect(onGenerate).not.toHaveBeenCalled()
+  })
+
+  it('offers retry after failure and invokes a new attempt', () => {
+    const onGenerate = vi.fn()
+    const renderer = mountInspector(
+      <ImageGeneratorInspector
+        node={generatorNode}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        promptSnapshot={promptSnapshot(true)}
+        status="failed"
+        onChange={vi.fn()}
+        onGenerate={onGenerate}
+      />
+    )
+    const button = renderer.root.findByProps({ 'aria-label': 'Generate image' })
+
+    expect(button.props.children).toBe('Retry')
+    expect(button.props.disabled).toBe(false)
+    act(() => button.props.onClick())
+    expect(onGenerate).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks the production action until both connection and model are configured', () => {
+    const onGenerate = vi.fn()
+    const renderer = mountInspector(
+      <ImageGeneratorInspector
+        node={{ ...generatorNode, binding: { connectionId: '', modelId: '' } }}
+        sizeCapabilities={null}
+        promptSnapshot={promptSnapshot(true)}
+        onChange={vi.fn()}
+        onGenerate={onGenerate}
+      />
+    )
+    const button = renderer.root.findByProps({ 'aria-label': 'Generate image' })
+
+    expect(button.props.disabled).toBe(true)
+    act(() => button.props.onClick())
+    expect(onGenerate).not.toHaveBeenCalled()
+  })
+
   it('does not add an invalid second prompt connection to project state', () => {
     const project = projectWith(
       [generatorNode, textNode('prompt-1'), textNode('prompt-2')],

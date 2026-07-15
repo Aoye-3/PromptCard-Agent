@@ -66,6 +66,8 @@ export const ImageGeneratorInspector = ({
     || error.code === 'stale_region_reference'
     || error.code === 'invalid_region_geometry'
   )) || false
+  const generationBusy = status === 'validating' || status === 'running'
+  const generationConfigured = Boolean(node.binding.connectionId && node.binding.modelId)
 
   const updateSettings = (updates: Partial<IFreeCanvasImageGeneratorNode['settings']>) => {
     onChange({ settings: { ...node.settings, ...updates } })
@@ -84,7 +86,7 @@ export const ImageGeneratorInspector = ({
   }
 
   const handleGenerate = () => {
-    if (!onGenerate || !promptSnapshot?.canGenerate) return
+    if (!onGenerate || !promptSnapshot?.canGenerate || generationBusy || !generationConfigured) return
     onGenerate()
   }
 
@@ -298,10 +300,10 @@ export const ImageGeneratorInspector = ({
             type="button"
             aria-label="Generate image"
             className="rounded-[6px] bg-gray-950 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
-            disabled={!onGenerate || !promptSnapshot?.canGenerate}
+            disabled={!onGenerate || !promptSnapshot?.canGenerate || generationBusy || !generationConfigured}
             onClick={handleGenerate}
           >
-            Generate
+            {status === 'failed' ? 'Retry' : 'Generate'}
           </button>
           <button
             type="button"

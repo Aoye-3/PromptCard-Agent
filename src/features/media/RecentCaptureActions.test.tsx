@@ -37,4 +37,22 @@ describe('RecentCaptureActions', () => {
     expect(markup).toContain('data-open-registered-prompt')
     expect(markup).not.toContain('data-register-capture')
   })
+
+  it('offers generated results as a reference for the selected image generator', () => {
+    const markup = renderToStaticMarkup(
+      <I18nProvider>
+        <RecentCaptureActions
+          capture={{ ...recentCaptureFixtures[0], purpose: 'generatedResult' }}
+          canPlaceOnCanvas
+          referenceTarget={{ id: 'generator-1', title: 'Product generator' }}
+          onRegister={() => undefined}
+          onPlaceOnCanvas={() => undefined}
+          onPlaceAsReference={() => undefined}
+          onOpenPromptLibrary={() => undefined}
+        />
+      </I18nProvider>
+    )
+    expect(markup).toContain('data-place-capture-as-reference')
+    expect(markup).toContain('Product generator')
+  })
 })

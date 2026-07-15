@@ -1,4 +1,7 @@
 import type { FreeCanvasMediaNode } from '@/domain/free-canvas/free-canvas'
+import { createFreeCanvasImageNodeFromMedia } from '@/domain/free-canvas/free-canvas-project'
+import { validateImageGeneratorConnection, type ImageGeneratorConnectionValidationErrorCode } from '@/domain/free-canvas/image-generator-connections'
+import type { IFreeCanvasProject } from '@/models/PromptHistory.model'
 import type { RecentCaptureItem } from '@/storage/storage-service-client'
 import { storage } from '@/utils/storage'
 
@@ -65,6 +68,55 @@ export const createGeneratedResultCanvasPlacement = (
           targetHandle: 'reference-image'
         }
       : null
+  }
+}
+
+export const applyGeneratedResultCanvasPlacement = (
+  project: IFreeCanvasProject,
+  capture: RecentCaptureItem,
+  placement: { kind: 'image' } | { kind: 'reference'; targetNodeId: string },
+  timestamp = Date.now()
+): { project: IFreeCanvasProject; nodeId: string | null; error: ImageGeneratorConnectionValidationErrorCode | null } => {
+  const generated = createGeneratedResultCanvasPlacement(capture, placement, timestamp)
+  const imageNode = createFreeCanvasImageNodeFromMedia(generated.node, timestamp)
+  if (!generated.connection) {
+    return {
+      nodeId: imageNode.id,
+      error: null,
+      project: { ...project, nodes: [...project.nodes, imageNode], selectedNodeId: imageNode.id }
+    }
+  }
+
+  const candidateProject = { ...project, nodes: [...project.nodes, imageNode] }
+  const validationError = validateImageGeneratorConnection(candidateProject, {
+    source: imageNode.id,
+    target: generated.connection.target,
+    targetHandle: 'reference-image'
+  })[0]
+  if (validationError) return { project, nodeId: null, error: validationError.code }
+
+  const inputOrder = project.edges.filter(edge => (
+    edge.target === generated.connection!.target && edge.targetHandle === 'reference-image'
+  )).length
+  const edgeId = `free-edge-${imageNode.id}-${generated.connection.target}-reference-image-${timestamp}`
+  return {
+    nodeId: imageNode.id,
+    error: null,
+    project: {
+      ...project,
+      nodes: [...project.nodes, imageNode],
+      edges: [...project.edges, {
+        id: edgeId,
+        source: imageNode.id,
+        target: generated.connection.target,
+        sourceHandle: 'image-output',
+        targetHandle: 'reference-image',
+        inputOrder,
+        referenceId: `reference-${edgeId}`,
+        createdAt: timestamp
+      }],
+      selectedNodeId: generated.connection.target
+    }
   }
 }
 

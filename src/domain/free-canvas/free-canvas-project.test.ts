@@ -4,6 +4,7 @@ import { updateFreeCanvasNodePosition, threeStageFormNodeId, createFreeCanvasMed
 import {
   addFreeCanvasImageAnnotation,
   appendFreeCanvasUserText,
+  createFreeCanvasImageGeneratorNode,
   createFreeCanvasImageNodeFromMedia,
   createFreeCanvasProject,
   createQuickTextNode,
@@ -47,6 +48,22 @@ describe('free canvas project domain', () => {
     expect(project.nodes[0]).toMatchObject({
       kind: 'image',
       annotations: []
+    })
+  })
+
+  test('creates a generator bound to the current image.primary assignment', () => {
+    const node = createFreeCanvasImageGeneratorNode(
+      { x: 30, y: 40 },
+      { connectionId: 'ark-primary', modelId: 'doubao-seedream-5-0-pro-260628' },
+      100
+    )
+
+    expect(node).toMatchObject({
+      id: 'free-image-generator-100', kind: 'image-generator', title: 'Image generator',
+      position: { x: 30, y: 40 }, mode: 'generate',
+      binding: { connectionId: 'ark-primary', modelId: 'doubao-seedream-5-0-pro-260628' },
+      settings: { resolution: '1K', aspectRatio: 'smart', outputFormat: 'png', watermark: false },
+      promptDocument: { version: 1, segments: [] }, regions: [], meta: { status: 'idle' }
     })
   })
 

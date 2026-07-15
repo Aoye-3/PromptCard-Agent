@@ -35,10 +35,12 @@ import {
   applyImageGeneratorConnection
 } from '@/components/canvas/nodes/ImageGeneratorNode'
 import { ImageGeneratorInspector } from '@/components/canvas/image-generation/ImageGeneratorInspector'
+import { GenerationHistoryPanel } from '@/components/canvas/image-generation/GenerationHistoryPanel'
 import { canvasImageAssetUrl, getClipboardImageFiles, isFileDrag, isSupportedImageFile, uploadFreeCanvasImageFiles } from '@/components/canvas/canvas-image-assets'
 import { createFreeCanvasCroppedNodes, type FreeCanvasCropLines, type FreeCanvasMediaNode } from '@/domain/free-canvas/free-canvas'
 import {
   createFreeCanvasImageNodeFromMedia,
+  createFreeCanvasImageGeneratorNode,
   createFreeCanvasImageAnnotation,
   createFreeCanvasTextNode,
   createQuickTextNode,
@@ -64,6 +66,16 @@ import {
 import { compileImageGeneratorPrompt } from '@/domain/image-generation/prompt-compiler'
 import { imageSizeCapabilitiesForModel } from '@/domain/image-generation/size-validation'
 import { imageRegionCapabilitiesForModel, type ImageRegionSource } from '@/domain/image-generation/regions'
+import {
+  ImageGenerationSessionManager,
+  ImageGenerationOperationGuard,
+  SingleFlightAction,
+  applyImageGenerationFailure,
+  applyImageGenerationStatus,
+  applyImageGenerationSuccess,
+  buildImageGenerationRequest
+} from '@/domain/image-generation/generation-session'
+import { modelManagementClient } from '@/services/model-management-client'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
 import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageGeneratorNode, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject } from '@/models/PromptHistory.model'
@@ -76,6 +88,7 @@ interface FreeCanvasBuilderScreenProps {
   onSave: () => void
   onChange: (freeCanvas: IFreeCanvasProject) => void
   previewMode?: boolean
+  imageGenerationNodeV1?: boolean
 }
 
 type FreeCanvasFlowNodeData = {
@@ -134,7 +147,8 @@ const FreeCanvasBuilderInner = ({
   onRenameProject,
   onSave,
   onChange,
-  previewMode = false
+  previewMode = false,
+  imageGenerationNodeV1 = false
 }: FreeCanvasBuilderScreenProps) => {
   const reactFlow = useReactFlow<FreeCanvasFlowNode>()
   const { cardTypeLabel } = useI18n()
@@ -161,6 +175,8 @@ const FreeCanvasBuilderInner = ({
   const [fileDragActive, setFileDragActive] = useState(false)
   const [cropNodeId, setCropNodeId] = useState<string | null>(null)
   const [annotationEditorNodeId, setAnnotationEditorNodeId] = useState<string | null>(null)
+  const [generationHistory, setGenerationHistory] = useState<{ projectId: string; nodeId: string } | null>(null)
+  const [imageGeneratorCreating, setImageGeneratorCreating] = useState(false)
   const selectedNode = freeCanvas.nodes.find(node => node.id === freeCanvas.selectedNodeId) || null
   const selectedImageNode = selectedNode?.kind === 'image' ? selectedNode : null
   const selectedImageGeneratorNode = selectedNode?.kind === 'image-generator' ? selectedNode : null
@@ -190,6 +206,13 @@ const FreeCanvasBuilderInner = ({
   const selectedImageNodeRef = useRef<IFreeCanvasImageNode | null>(selectedImageNode)
   const copiedImageNodeRef = useRef<IFreeCanvasImageNode | null>(null)
   const fileDragDepthRef = useRef(0)
+  const imageGenerationSessionsRef = useRef<ImageGenerationSessionManager | null>(null)
+  if (!imageGenerationSessionsRef.current) imageGenerationSessionsRef.current = new ImageGenerationSessionManager()
+  const imageGenerationGuardRef = useRef<ImageGenerationOperationGuard | null>(null)
+  if (!imageGenerationGuardRef.current) imageGenerationGuardRef.current = new ImageGenerationOperationGuard()
+  imageGenerationGuardRef.current.activateProject(activeProject.id)
+  const imageGeneratorCreationRef = useRef<SingleFlightAction | null>(null)
+  if (!imageGeneratorCreationRef.current) imageGeneratorCreationRef.current = new SingleFlightAction()
 
   useEffect(() => {
     if (!presetsInitialized) initPresets()
@@ -199,6 +222,10 @@ const FreeCanvasBuilderInner = ({
     freeCanvasRef.current = freeCanvas
     selectedImageNodeRef.current = selectedImageNode
   }, [freeCanvas, selectedImageNode])
+
+  useEffect(() => {
+    setGenerationHistory(null)
+  }, [activeProject.id])
 
   const cardTypes = useMemo(() => [
     { type: 'subject', label: cardTypeLabel('subject') },
@@ -371,6 +398,85 @@ const FreeCanvasBuilderInner = ({
     })
   }, [freeCanvas, onChange])
 
+  const emitGenerationCanvas = useCallback((next: IFreeCanvasProject) => {
+    freeCanvasRef.current = next
+    onChange(next)
+  }, [onChange])
+
+  const createImageGenerator = useCallback(async () => {
+    if (!imageGenerationNodeV1) return
+    const gate = imageGeneratorCreationRef.current!
+    if (gate.busy) return gate.run(async () => undefined)
+    const projectId = activeProject.id
+    const operationId = imageGenerationGuardRef.current!.begin(projectId, '__create-image-generator__')
+    setImageGeneratorCreating(true)
+    try {
+      await gate.run(async () => {
+        let binding = { connectionId: '', modelId: '' }
+        try {
+          const assignment = (await modelManagementClient.listAssignments())
+            .find(item => item.slot === 'image.primary')
+          if (assignment) binding = { connectionId: assignment.connectionId, modelId: assignment.modelId }
+        } catch {
+          if (imageGenerationGuardRef.current!.isCurrent(projectId, '__create-image-generator__', operationId)) {
+            setUploadError('The image model assignment could not be loaded. You can configure it in Settings.')
+          }
+        }
+        if (!imageGenerationGuardRef.current!.isCurrent(projectId, '__create-image-generator__', operationId)) return
+        const current = freeCanvasRef.current
+        const node = createFreeCanvasImageGeneratorNode(
+          nextNodePosition(reactFlow, current.nodes.length),
+          binding
+        )
+        emitGenerationCanvas({ ...current, nodes: [...current.nodes, node], selectedNodeId: node.id })
+      })
+    } finally {
+      setImageGeneratorCreating(false)
+    }
+  }, [activeProject.id, emitGenerationCanvas, imageGenerationNodeV1, reactFlow])
+
+  const openImageGenerationHistory = useCallback((nodeId: string) => {
+    setGenerationHistory({ projectId: activeProject.id, nodeId })
+    const current = freeCanvasRef.current
+    if (current.selectedNodeId !== nodeId) emitGenerationCanvas({ ...current, selectedNodeId: nodeId })
+  }, [activeProject.id, emitGenerationCanvas])
+
+  const generateImage = useCallback((nodeId: string) => {
+    if (!imageGenerationNodeV1) return
+    const current = freeCanvasRef.current
+    const node = current.nodes.find((candidate): candidate is IFreeCanvasImageGeneratorNode => (
+      candidate.id === nodeId && candidate.kind === 'image-generator'
+    ))
+    if (!node) return
+    const sessions = imageGenerationSessionsRef.current!
+    if (sessions.isBusy(activeProject.id, nodeId)) return
+    const projectId = activeProject.id
+    const operationId = imageGenerationGuardRef.current!.begin(projectId, nodeId)
+    const operationIsCurrent = () => imageGenerationGuardRef.current!.isCurrent(projectId, nodeId, operationId)
+
+    const callbacks = {
+      onStatus: (status: Parameters<typeof applyImageGenerationStatus>[2]) => {
+        if (!operationIsCurrent()) return
+        emitGenerationCanvas(applyImageGenerationStatus(freeCanvasRef.current, nodeId, status))
+      },
+      onSucceeded: (result: Parameters<typeof applyImageGenerationSuccess>[2]) => {
+        if (!operationIsCurrent()) return
+        emitGenerationCanvas(applyImageGenerationSuccess(freeCanvasRef.current, nodeId, result))
+      },
+      onFailed: (error: unknown) => {
+        if (!operationIsCurrent()) return
+        emitGenerationCanvas(applyImageGenerationFailure(freeCanvasRef.current, nodeId, error))
+      }
+    }
+    const operation = node.meta.status === 'failed' && sessions.canRetry(activeProject.id, nodeId)
+      ? sessions.retry(activeProject.id, nodeId, callbacks)
+      : sessions.start(
+          buildImageGenerationRequest(activeProject.id, node, compileImageGeneratorPrompt(current, nodeId)),
+          callbacks
+        )
+    void operation.catch(() => undefined)
+  }, [activeProject.id, emitGenerationCanvas, imageGenerationNodeV1])
+
   const nodes = useMemo<FreeCanvasFlowNode[]>(() => freeCanvas.nodes.map(node => ({
     id: node.id,
     type: node.kind === 'image-generator' ? 'imageGeneratorNode' : 'freeCanvasNode',
@@ -390,9 +496,9 @@ const FreeCanvasBuilderInner = ({
       resultThumbnailUrl: node.kind === 'image-generator' && node.primaryAssetId
         ? canvasImageAssetUrl(node.primaryAssetId)
         : undefined,
-      onOpenImageHistory: setSelectedNodeId
+      onOpenImageHistory: openImageGenerationHistory
     }
-  })), [copyTextNode, editingNodeId, freeCanvas.nodes, freeCanvas.selectedNodeId, replaceTextRange, resizeImageNode, setSelectedNodeId, updateTextStyle])
+  })), [copyTextNode, editingNodeId, freeCanvas.nodes, freeCanvas.selectedNodeId, openImageGenerationHistory, replaceTextRange, resizeImageNode, updateTextStyle])
 
   const [flowNodes, setFlowNodes] = useState<FreeCanvasFlowNode[]>(nodes)
   useEffect(() => setFlowNodes(nodes), [nodes])
@@ -626,6 +732,8 @@ const FreeCanvasBuilderInner = ({
           quickPresets={quickPresets}
           onCreateText={createText}
           onCreateImage={createImage}
+          onCreateImageGenerator={imageGenerationNodeV1 ? () => { void createImageGenerator() } : undefined}
+          imageGeneratorCreating={imageGeneratorCreating}
           onToggleQuickDrawer={() => setQuickDrawerOpen(value => !value)}
           onOpenQuickPresetComposer={() => openQuickPresetComposer()}
           onEditQuickPreset={openQuickPresetComposer}
@@ -735,7 +843,20 @@ const FreeCanvasBuilderInner = ({
                   selectedImageGeneratorNode.id,
                   { promptDocument }
                 )}
-                onOpenHistory={setSelectedNodeId}
+                onGenerate={imageGenerationNodeV1 ? () => generateImage(selectedImageGeneratorNode.id) : undefined}
+                onOpenHistory={openImageGenerationHistory}
+              />
+            </div>
+          )}
+          {generationHistory?.projectId === activeProject.id && (
+            <div className="max-h-[46%] shrink-0 overflow-y-auto border-b border-gray-100 p-4">
+              <div className="mb-3 flex justify-end">
+                <button type="button" className="text-xs font-bold text-gray-600" onClick={() => setGenerationHistory(null)}>Close history</button>
+              </div>
+              <GenerationHistoryPanel
+                key={`${activeProject.id}:${generationHistory.nodeId}`}
+                projectId={activeProject.id}
+                nodeId={generationHistory.nodeId}
               />
             </div>
           )}
@@ -2484,11 +2605,13 @@ const TextNodeToolbar = ({
   </div>
 )
 
-const CanvasBottomToolbar = ({
+export const CanvasBottomToolbar = ({
   quickDrawerOpen,
   quickPresets,
   onCreateText,
   onCreateImage,
+  onCreateImageGenerator,
+  imageGeneratorCreating = false,
   onToggleQuickDrawer,
   onOpenQuickPresetComposer,
   onEditQuickPreset,
@@ -2498,6 +2621,8 @@ const CanvasBottomToolbar = ({
   quickPresets: IPreset[]
   onCreateText: () => void
   onCreateImage: () => void
+  onCreateImageGenerator?: () => void
+  imageGeneratorCreating?: boolean
   onToggleQuickDrawer: () => void
   onOpenQuickPresetComposer: () => void
   onEditQuickPreset: (preset: IPreset) => void
@@ -2553,6 +2678,9 @@ const CanvasBottomToolbar = ({
         <ToolbarButton title="Text" onClick={onCreateText}><Type className="h-4 w-4" /></ToolbarButton>
         <ToolbarButton title="Quick messages" onClick={onToggleQuickDrawer}><MessageSquare className="h-4 w-4" /></ToolbarButton>
         <ToolbarButton title="Image" onClick={onCreateImage}><ImageIcon className="h-4 w-4" /></ToolbarButton>
+        {onCreateImageGenerator && (
+          <ToolbarButton title="Image generator" onClick={onCreateImageGenerator} disabled={imageGeneratorCreating}><Brush className="h-4 w-4" /></ToolbarButton>
+        )}
       </div>
     </div>
 )
@@ -2700,8 +2828,8 @@ const restoreEditableCaret = (root: HTMLElement, offset: number): void => {
   selection.addRange(range)
 }
 
-const ToolbarButton = ({ title, onClick, children }: { title: string; onClick: () => void; children: ReactNode }) => (
-  <button type="button" className="flex h-10 w-10 items-center justify-center rounded-full text-gray-600 transition hover:bg-gray-950 hover:text-white" title={title} onClick={onClick}>
+const ToolbarButton = ({ title, onClick, children, disabled = false }: { title: string; onClick: () => void; children: ReactNode; disabled?: boolean }) => (
+  <button type="button" className="flex h-10 w-10 items-center justify-center rounded-full text-gray-600 transition hover:bg-gray-950 hover:text-white disabled:cursor-not-allowed disabled:opacity-40" title={title} disabled={disabled} onClick={() => { if (!disabled) onClick() }}>
     {children}
   </button>
 )

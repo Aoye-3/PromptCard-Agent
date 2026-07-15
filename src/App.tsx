@@ -33,12 +33,13 @@ import { mergeStoredProjectMetadata } from './domain/projects/project-storage-me
 import { createProjectSaveCoordinator, type ProjectSaveResult } from './domain/projects/project-save-coordinator'
 import { normalizeThreeStageTemplateSettings, type ThreeStageTemplateSettings } from './domain/three-stage/three-stage-definitions'
 import { createFreeCanvasImageNodeFromMedia } from './domain/free-canvas/free-canvas-project'
-import { createCaptureCanvasMediaNode, createCaptureCanvasUpdates } from './features/media/capture-canvas-placement'
+import { applyGeneratedResultCanvasPlacement, createCaptureCanvasMediaNode, createCaptureCanvasUpdates } from './features/media/capture-canvas-placement'
 import type { IPreset, CardType } from './models/Card.model'
 import type { IFreeCanvasProject, IPromptHistory, IPromptProject, IStoryboardProject, IThreeStageProject } from './models/PromptHistory.model'
 import type { AgentWorkspaceProposal } from './models/Agent.model'
 import type { IUserSettings } from './models/UserSettings.model'
 import type { MainTab, ProjectMode, SaveStatus } from './features/app/app-types'
+import { imageGenerationNodeV1Enabled } from './features/app/feature-flags'
 import type { RecentCaptureItem, TrashEntry } from './storage/storage-service-client'
 
 const DEFAULT_USER_SETTINGS: IUserSettings = {
@@ -837,15 +838,24 @@ function App() {
     ))
   }
 
-  const handlePlaceCaptureOnCanvas = async (capture: RecentCaptureItem) => {
+  const handlePlaceCaptureOnCanvas = async (
+    capture: RecentCaptureItem,
+    placement: { kind: 'image' } | { kind: 'reference'; targetNodeId: string } = { kind: 'image' }
+  ) => {
     if (!activeProjectId || activeProject?.type !== 'free-canvas' || !activeProject.freeCanvas) return
-    const mediaNode = createCaptureCanvasMediaNode(capture)
-    const imageNode = createFreeCanvasImageNodeFromMedia(mediaNode)
-    const updatedFreeCanvas = {
+    if (placement.kind === 'reference' && capture.purpose !== 'generatedResult') return
+    const generatedPlacement = capture.purpose === 'generatedResult'
+      ? applyGeneratedResultCanvasPlacement(activeProject.freeCanvas, capture, placement)
+      : null
+    if (generatedPlacement?.error) return
+    const mediaNode = generatedPlacement ? null : createCaptureCanvasMediaNode(capture)
+    const imageNode = mediaNode ? createFreeCanvasImageNodeFromMedia(mediaNode) : null
+    const updatedFreeCanvas = generatedPlacement?.project || {
       ...activeProject.freeCanvas,
-      nodes: [...activeProject.freeCanvas.nodes, imageNode],
-      selectedNodeId: imageNode.id
+      nodes: [...activeProject.freeCanvas.nodes, imageNode!],
+      selectedNodeId: imageNode!.id
     }
+    const placedNodeId = generatedPlacement?.nodeId || imageNode!.id
     const savedAt = Date.now()
     markProjectEdited(activeProjectId)
     setProjects(currentProjects => currentProjects.map(project =>
@@ -865,7 +875,7 @@ function App() {
         await storage.recentCaptures.update(
           capture.id,
           capture.revision,
-          createCaptureCanvasUpdates(capture, activeProjectId, mediaNode.id)
+          createCaptureCanvasUpdates(capture, activeProjectId, placedNodeId)
         )
       } catch (error) {
         console.error('Failed to update capture placement status:', error)
@@ -1186,9 +1196,18 @@ function App() {
   const content = activeTab === 'media' ? (
     <MediaScreen
       canPlaceOnCanvas={activeProject?.type === 'free-canvas' && Boolean(activeProject.freeCanvas)}
+      referenceTarget={activeProject?.type === 'free-canvas'
+        ? activeProject.freeCanvas?.nodes.find(node => (
+            node.id === activeProject.freeCanvas?.selectedNodeId && node.kind === 'image-generator'
+          )) || null
+        : null}
       onPlaceOnCanvas={async capture => {
         const storedCapture = await storage.recentCaptures.getById(capture.id)
         if (storedCapture) await handlePlaceCaptureOnCanvas(storedCapture)
+      }}
+      onPlaceAsReference={async (capture, targetNodeId) => {
+        const storedCapture = await storage.recentCaptures.getById(capture.id)
+        if (storedCapture) await handlePlaceCaptureOnCanvas(storedCapture, { kind: 'reference', targetNodeId })
       }}
       onOpenPromptLibrary={() => setActiveTab('library')}
     />
@@ -1239,6 +1258,7 @@ function App() {
       onRenameProject={() => handleRenameProject(activeProject)}
       onSave={handleSave}
       onChange={handleUpdateFreeCanvas}
+      imageGenerationNodeV1={imageGenerationNodeV1Enabled(userSettings)}
     />
   ) : projectMode === 'builder' && activeProject?.type === 'three-stage' && activeProject.threeStage ? (
     <ThreeStageBuilderScreen

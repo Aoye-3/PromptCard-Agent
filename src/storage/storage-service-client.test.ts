@@ -174,4 +174,36 @@ describe('storageServiceClient', () => {
       })
     )
   })
+
+  test('pages permanent image generation history by project and node without a delete API', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      runs: [{
+        id: 'run-1', projectId: 'project/1', nodeId: 'node 1', connectionId: 'connection-1',
+        providerId: 'volcengine', modelId: 'seedream', state: 'failed', createdAt: 1,
+        requestSnapshot: {
+          mode: 'generate', resolution: '2K', outputFormat: 'png', watermark: false,
+          promptDocument: { version: 1, segments: [{ type: 'text', text: 'Prompt' }] },
+          inputAssets: [], regions: [], remoteUrl: 'https://provider.example/output'
+        },
+        outputAssetIds: [],
+        error: { code: 'failed', message: 'Safe failure', retryable: false },
+        secret: 'raw-secret'
+      }],
+      nextCursor: 'next-page'
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const page = await storageServiceClient.imageGenerationRuns.getPage({
+      projectId: 'project/1', nodeId: 'node 1', cursor: 'cursor/1', limit: 25
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/storage-api/image-generation-runs?projectId=project%2F1&nodeId=node+1&cursor=cursor%2F1&limit=25',
+      expect.any(Object)
+    )
+    expect(page.nextCursor).toBe('next-page')
+    expect(JSON.stringify(page)).not.toContain('provider.example')
+    expect(JSON.stringify(page)).not.toContain('raw-secret')
+    expect(Reflect.has(storageServiceClient.imageGenerationRuns, 'delete')).toBe(false)
+  })
 })

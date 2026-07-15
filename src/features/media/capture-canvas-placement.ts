@@ -35,6 +35,39 @@ export const createCaptureCanvasUpdates = (
   linkedCanvasNodeId: nodeId
 })
 
+export type GeneratedResultCanvasPlacement = {
+  node: FreeCanvasMediaNode
+  connection: null | {
+    source: string
+    target: string
+    sourceHandle: 'image-output'
+    targetHandle: 'reference-image'
+  }
+}
+
+export const createGeneratedResultCanvasPlacement = (
+  capture: RecentCaptureItem,
+  placement: { kind: 'image' } | { kind: 'reference'; targetNodeId: string },
+  timestamp = Date.now(),
+  assetUrl: (assetId: string) => string = storage.assets.url
+): GeneratedResultCanvasPlacement => {
+  if (capture.purpose !== 'generatedResult') {
+    throw new Error('Only generated results can use generated-result placement')
+  }
+  const node = createCaptureCanvasMediaNode(capture, timestamp, assetUrl)
+  return {
+    node,
+    connection: placement.kind === 'reference'
+      ? {
+          source: node.id,
+          target: placement.targetNodeId,
+          sourceHandle: 'image-output',
+          targetHandle: 'reference-image'
+        }
+      : null
+  }
+}
+
 const fitCaptureForCanvas = (width: number, height: number): { width: number; height: number } => {
   const maximum = 360
   const safeWidth = Math.max(1, width || maximum)

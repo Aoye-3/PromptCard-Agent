@@ -60,6 +60,44 @@ export interface RecentCaptureRegistrationResult {
   captures: RecentCaptureItem[]
 }
 
+export type ImageGenerationRunState = 'queued' | 'running' | 'succeeded' | 'failed'
+
+export interface ImageGenerationRunSnapshot {
+  mode: string
+  promptDocument: {
+    version: number
+    segments: Array<{ type: 'text'; text: string } | { type: 'reference'; referenceId: string; label: string }>
+  }
+  inputAssets: Array<{ referenceId: string; assetId: string; order: number }>
+  regions: Array<Record<string, string | number>>
+  resolution: string
+  outputFormat: string
+  watermark: boolean
+}
+
+export interface ImageGenerationRun {
+  id: string
+  projectId: string
+  nodeId: string
+  connectionId: string
+  providerId: string
+  modelId: string
+  state: ImageGenerationRunState
+  requestSnapshot: ImageGenerationRunSnapshot
+  outputAssetIds: string[]
+  createdAt: number
+  startedAt?: number
+  finishedAt?: number
+  providerRequestId?: string
+  error?: { code: string; message: string; retryable: boolean }
+  usage?: Record<string, number>
+}
+
+export interface ImageGenerationRunPage {
+  runs: ImageGenerationRun[]
+  nextCursor: string | null
+}
+
 export class StorageRevisionConflict<T> extends Error {
   current: T
 
@@ -211,6 +249,25 @@ export const storageServiceClient = {
       })
     }
   },
+  imageGenerationRuns: {
+    async getPage(query: {
+      projectId: string
+      nodeId: string
+      cursor?: string | null
+      limit?: number
+    }): Promise<ImageGenerationRunPage> {
+      const parameters = new URLSearchParams({ projectId: query.projectId, nodeId: query.nodeId })
+      if (query.cursor) parameters.set('cursor', query.cursor)
+      if (query.limit !== undefined) parameters.set('limit', String(query.limit))
+      const page = await request<{ runs?: unknown[]; nextCursor?: unknown }>(
+        `/storage-api/image-generation-runs?${parameters.toString()}`
+      )
+      return {
+        runs: Array.isArray(page.runs) ? page.runs.flatMap(normalizeImageGenerationRun) : [],
+        nextCursor: typeof page.nextCursor === 'string' ? page.nextCursor : null
+      }
+    }
+  },
   projects: {
     async getAll(): Promise<IPromptProject[]> {
       return (await request<{ projects: IPromptProject[] }>('/storage-api/projects')).projects
@@ -321,3 +378,106 @@ const inferAssetContentType = (file: File): string | null => {
   if (extension === 'webm') return 'video/webm'
   return null
 }
+
+const normalizeImageGenerationRun = (candidate: unknown): ImageGenerationRun[] => {
+  if (!isRecord(candidate)) return []
+  const state = candidate.state
+  if (
+    !isRunState(state)
+    || !hasStrings(candidate, ['id', 'projectId', 'nodeId', 'connectionId', 'providerId', 'modelId'])
+    || !isNonNegativeInteger(candidate.createdAt)
+  ) return []
+  const requestSnapshot = normalizeRunSnapshot(candidate.requestSnapshot)
+  if (!requestSnapshot) return []
+  const run: ImageGenerationRun = {
+    id: candidate.id as string,
+    projectId: candidate.projectId as string,
+    nodeId: candidate.nodeId as string,
+    connectionId: candidate.connectionId as string,
+    providerId: candidate.providerId as string,
+    modelId: candidate.modelId as string,
+    state,
+    requestSnapshot,
+    outputAssetIds: Array.isArray(candidate.outputAssetIds)
+      ? candidate.outputAssetIds.filter((item): item is string => typeof item === 'string')
+      : [],
+    createdAt: candidate.createdAt as number
+  }
+  if (isNonNegativeInteger(candidate.startedAt)) run.startedAt = candidate.startedAt
+  if (isNonNegativeInteger(candidate.finishedAt)) run.finishedAt = candidate.finishedAt
+  if (typeof candidate.providerRequestId === 'string') run.providerRequestId = candidate.providerRequestId
+  if (isRecord(candidate.error) && hasStrings(candidate.error, ['code', 'message']) && typeof candidate.error.retryable === 'boolean') {
+    run.error = {
+      code: candidate.error.code as string,
+      message: candidate.error.message as string,
+      retryable: candidate.error.retryable
+    }
+  }
+  if (isRecord(candidate.usage)) {
+    run.usage = Object.fromEntries(Object.entries(candidate.usage).filter((entry): entry is [string, number] => typeof entry[1] === 'number'))
+  }
+  return [run]
+}
+
+const normalizeRunSnapshot = (candidate: unknown): ImageGenerationRunSnapshot | null => {
+  if (!isRecord(candidate) || !isRecord(candidate.promptDocument)) return null
+  const promptDocument = candidate.promptDocument
+  const segments: ImageGenerationRunSnapshot['promptDocument']['segments'] = []
+  if (Array.isArray(promptDocument.segments)) promptDocument.segments.forEach(segment => {
+    if (!isRecord(segment)) return
+    if (segment.type === 'text' && typeof segment.text === 'string') {
+      segments.push({ type: 'text', text: segment.text })
+      return
+    }
+    if (segment.type === 'reference' && typeof segment.referenceId === 'string' && typeof segment.label === 'string') {
+      segments.push({ type: 'reference', referenceId: segment.referenceId, label: segment.label })
+    }
+  })
+  const inputAssets = Array.isArray(candidate.inputAssets) ? candidate.inputAssets.flatMap(item => (
+    isRecord(item)
+    && typeof item.referenceId === 'string'
+    && typeof item.assetId === 'string'
+    && Number.isInteger(item.order)
+      ? [{ referenceId: item.referenceId, assetId: item.assetId, order: item.order as number }]
+      : []
+  )) : []
+  const regions = Array.isArray(candidate.regions) ? candidate.regions.flatMap(normalizeRunRegion) : []
+  return {
+    mode: typeof candidate.mode === 'string' ? candidate.mode : 'generate',
+    promptDocument: {
+      version: Number.isInteger(promptDocument.version) ? promptDocument.version as number : 1,
+      segments
+    },
+    inputAssets,
+    regions,
+    resolution: typeof candidate.resolution === 'string' ? candidate.resolution : '',
+    outputFormat: typeof candidate.outputFormat === 'string' ? candidate.outputFormat : '',
+    watermark: candidate.watermark === true
+  }
+}
+
+const normalizeRunRegion = (candidate: unknown): Array<Record<string, string | number>> => {
+  if (!isRecord(candidate) || typeof candidate.referenceId !== 'string') return []
+  if (candidate.type === 'point' && Number.isInteger(candidate.x) && Number.isInteger(candidate.y)) {
+    return [{ type: 'point', referenceId: candidate.referenceId, x: candidate.x as number, y: candidate.y as number }]
+  }
+  if (
+    candidate.type === 'bbox'
+    && Number.isInteger(candidate.x1) && Number.isInteger(candidate.y1)
+    && Number.isInteger(candidate.x2) && Number.isInteger(candidate.y2)
+  ) {
+    return [{
+      type: 'bbox', referenceId: candidate.referenceId,
+      x1: candidate.x1 as number, y1: candidate.y1 as number,
+      x2: candidate.x2 as number, y2: candidate.y2 as number
+    }]
+  }
+  return []
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object')
+const hasStrings = (value: Record<string, unknown>, keys: string[]): boolean => keys.every(key => typeof value[key] === 'string')
+const isNonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0
+const isRunState = (value: unknown): value is ImageGenerationRunState => (
+  value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed'
+)

@@ -130,6 +130,11 @@ async function makeFakeUv(name: string) {
     `>> "${logPath}" echo UV_CACHE_DIR=%UV_CACHE_DIR%`,
     `>> "${logPath}" echo UV_PYTHON_INSTALL_DIR=%UV_PYTHON_INSTALL_DIR%`,
     `>> "${logPath}" echo UV_PROJECT_ENVIRONMENT=%UV_PROJECT_ENVIRONMENT%`,
+    `>> "${logPath}" echo DEER_FLOW_HOME=%DEER_FLOW_HOME%`,
+    `>> "${logPath}" echo DEER_FLOW_CONFIG_PATH=%DEER_FLOW_CONFIG_PATH%`,
+    `>> "${logPath}" echo DEER_FLOW_EXTENSIONS_CONFIG_PATH=%DEER_FLOW_EXTENSIONS_CONFIG_PATH%`,
+    `>> "${logPath}" echo PROMPTCARD_LIBRARY_FILE=%PROMPTCARD_LIBRARY_FILE%`,
+    `>> "${logPath}" echo PYTHONPATH=%PYTHONPATH%`,
     'if "%1 %2"=="python install" (',
     '  mkdir "%UV_PYTHON_INSTALL_DIR%\\cpython-3.12.12-windows-x86_64-none" 2>nul',
     '  type nul > "%UV_PYTHON_INSTALL_DIR%\\cpython-3.12.12-windows-x86_64-none\\python.exe"',
@@ -188,18 +193,29 @@ describe('start-dev-with-agent.ps1', () => {
       const fixtureScript = path.join(fixtureScripts, path.basename(runtimeScript))
       await mkdir(fixtureScripts, { recursive: true })
       await copyFile(runtimeScript, fixtureScript)
+      const poisonedVenv = path.join(fakeUv.dir, 'agent-runtime', 'backend', '.venv')
+      await mkdir(path.join(poisonedVenv, 'Scripts'), { recursive: true })
+      await writeFile(path.join(poisonedVenv, 'Scripts', 'python.exe'), 'must not execute')
+      await writeFile(path.join(poisonedVenv, 'pyvenv.cfg'), 'home = C:\\hostile\\python\r\n')
       const expectedCache = path.join(fakeUv.dir, '.uv-cache')
       const expectedPythonInstall = path.join(fakeUv.dir, 'agent-runtime', 'backend', '.python')
       const expectedEnvironment = path.join(fakeUv.dir, 'agent-runtime', 'backend', '.venv')
+      const expectedRuntime = path.join(fakeUv.dir, 'agent-runtime')
       const expectedBackend = path.join(fakeUv.dir, 'agent-runtime', 'backend')
       const expectedPython = path.join(expectedPythonInstall, 'cpython-3.12.12-windows-x86_64-none', 'python.exe')
+      const expectedHarness = path.join(expectedBackend, 'packages', 'harness')
       const result = await runPowerShell([
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixtureScript
       ], {
         PATH: `${fakeUv.dir}${path.delimiter}${process.env.PATH || process.env.Path || ''}`,
         UV_CACHE_DIR: 'C:\\hostile\\cache',
         UV_PYTHON_INSTALL_DIR: 'C:\\hostile\\python',
-        UV_PROJECT_ENVIRONMENT: 'C:\\hostile\\venv'
+        UV_PROJECT_ENVIRONMENT: 'C:\\hostile\\venv',
+        DEER_FLOW_HOME: 'C:\\',
+        DEER_FLOW_CONFIG_PATH: 'C:\\hostile\\config.yaml',
+        DEER_FLOW_EXTENSIONS_CONFIG_PATH: 'C:\\hostile\\extensions.json',
+        PROMPTCARD_LIBRARY_FILE: 'C:\\hostile\\prompt-library.json',
+        PYTHONPATH: 'C:\\hostile\\pythonpath'
       })
 
       expect(result.code).not.toBe(0)
@@ -209,7 +225,12 @@ describe('start-dev-with-agent.ps1', () => {
       expect(log).toContain(`UV_CACHE_DIR=${expectedCache}`)
       expect(log).toContain(`UV_PYTHON_INSTALL_DIR=${expectedPythonInstall}`)
       expect(log).toContain(`UV_PROJECT_ENVIRONMENT=${expectedEnvironment}`)
-      expect(log).not.toContain('C:\\hostile')
+      expect(log).toContain(`DEER_FLOW_HOME=${path.join(expectedRuntime, '.deer-flow')}`)
+      expect(log).toContain(`DEER_FLOW_CONFIG_PATH=${path.join(expectedRuntime, 'config.yaml')}`)
+      expect(log).toContain(`DEER_FLOW_EXTENSIONS_CONFIG_PATH=${path.join(expectedRuntime, 'extensions_config.json')}`)
+      expect(log).toContain(`PROMPTCARD_LIBRARY_FILE=${path.join(fakeUv.dir, 'data', 'prompt-library-presets.json')}`)
+      expect(log).toContain(`PYTHONPATH=${expectedBackend};${expectedHarness}`)
+      expect(log).not.toContain('C:\\')
     }
   })
 

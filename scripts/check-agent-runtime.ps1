@@ -4,18 +4,10 @@ $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RuntimeRoot = Join-Path $RepoRoot "agent-runtime"
 $BackendRoot = Join-Path $RuntimeRoot "backend"
 $env:DEER_FLOW_PROJECT_ROOT = $RuntimeRoot
-if (!$env:DEER_FLOW_HOME) {
-  $env:DEER_FLOW_HOME = Join-Path $RuntimeRoot ".deer-flow"
-}
-if (!$env:DEER_FLOW_CONFIG_PATH) {
-  $env:DEER_FLOW_CONFIG_PATH = Join-Path $RuntimeRoot "config.yaml"
-}
-if (!$env:DEER_FLOW_EXTENSIONS_CONFIG_PATH) {
-  $env:DEER_FLOW_EXTENSIONS_CONFIG_PATH = Join-Path $RuntimeRoot "extensions_config.json"
-}
-if (!$env:PROMPTCARD_LIBRARY_FILE) {
-  $env:PROMPTCARD_LIBRARY_FILE = Join-Path $RepoRoot "data\prompt-library-presets.json"
-}
+$env:DEER_FLOW_HOME = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot ".deer-flow"))
+$env:DEER_FLOW_CONFIG_PATH = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot "config.yaml"))
+$env:DEER_FLOW_EXTENSIONS_CONFIG_PATH = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot "extensions_config.json"))
+$env:PROMPTCARD_LIBRARY_FILE = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "data\prompt-library-presets.json"))
 $RuntimeEnvironment = [System.IO.Path]::GetFullPath((Join-Path $BackendRoot ".venv"))
 $env:UV_CACHE_DIR = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".uv-cache"))
 $env:UV_PYTHON_INSTALL_DIR = [System.IO.Path]::GetFullPath((Join-Path $BackendRoot ".python"))
@@ -32,7 +24,7 @@ if (!$env:PROMPTCARD_AGENT_ADMIN_PASSWORD) {
 }
 
 $HarnessPath = Join-Path $BackendRoot "packages\harness"
-$env:PYTHONPATH = "$BackendRoot;$HarnessPath;$env:PYTHONPATH"
+$env:PYTHONPATH = "$BackendRoot;$HarnessPath"
 New-Item -ItemType Directory -Force -Path (Split-Path $RuntimeEnvironment -Parent) | Out-Null
 New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:UV_PYTHON_INSTALL_DIR | Out-Null

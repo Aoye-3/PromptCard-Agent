@@ -10,6 +10,7 @@ export type ImageGeneratorConnectionValidationErrorCode =
   | 'prompt_input_limit'
   | 'source_image_input_limit'
   | 'reference_image_input_limit'
+  | 'image_input_limit'
   | 'image_input_requires_image_source'
 
 export interface ImageGeneratorConnectionValidationError {
@@ -51,6 +52,15 @@ export const validateImageGeneratorConnection = (
   }
   if (candidate.targetHandle === 'reference-image' && inputCount >= 10) {
     return [{ code: 'reference_image_input_limit' }]
+  }
+  if (
+    (candidate.targetHandle === 'source-image' || candidate.targetHandle === 'reference-image')
+    && project.edges.filter(edge =>
+      edge.target === candidate.target
+      && (edge.targetHandle === 'source-image' || edge.targetHandle === 'reference-image')
+    ).length >= 10
+  ) {
+    return [{ code: 'image_input_limit' }]
   }
   return []
 }

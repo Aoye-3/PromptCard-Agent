@@ -106,6 +106,37 @@ describe('image generator canvas connections', () => {
     })).toEqual([{ code: 'reference_image_input_limit' }])
   })
 
+  test('rejects more than ten total source and reference image inputs', () => {
+    const images = Array.from({ length: 11 }, (_, index) => imageNode(`image-${index + 1}`))
+    const project = projectWith([
+      generatorNode as never,
+      ...images
+    ], [
+      {
+        id: 'source-edge',
+        source: images[0].id,
+        target: generatorNode.id,
+        targetHandle: 'source-image',
+        createdAt: 1
+      },
+      ...images.slice(1, 10).map((image, index) => ({
+        id: `reference-edge-${index + 1}`,
+        source: image.id,
+        target: generatorNode.id,
+        targetHandle: 'reference-image' as const,
+        inputOrder: index,
+        referenceId: `reference-${index + 1}`,
+        createdAt: index + 2
+      }))
+    ])
+
+    expect(validateImageGeneratorConnection(project, {
+      source: images[10].id,
+      target: generatorNode.id,
+      targetHandle: 'reference-image'
+    })).toEqual([{ code: 'image_input_limit' }])
+  })
+
   test('renumbers reference image inputOrder after removing a middle edge', () => {
     const project = projectWith([
       generatorNode as never,

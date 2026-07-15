@@ -323,12 +323,15 @@ MCP servers and skill states in a single file:
 
 PromptCard model connections do not require `DEEPSEEK_API_KEY` or `ARK_API_KEY` at process startup. Connection secrets are retrieved from keyring only after connection, model, capability, prompt/region, and reference-asset validation succeeds. See [Image Generation and Model Management](../../docs/architecture/image-generation-and-model-management.md).
 
+Real image generation is protected by the server-owned `PROMPTCARD_IMAGE_GENERATION_NODE_V1` rollout gate. It is disabled by default; set it to `true` in the runtime process environment only for rollout stages that permit real provider calls. Credential-free startup and health checks remain available while the gate is disabled.
+
 ### PromptCard image generation
 
 - The catalog currently exposes Seedream 5.0 Pro through the `volcengine-ark` adapter.
 - Supported modes are generate, edit, and region-edit, with at most 10 ordered reference images.
 - Supported resolutions are 1K and 2K; each request returns exactly one PNG or JPEG result and is non-streaming.
 - Point and bounding-box coordinates use the inclusive 0-999 coordinate space. Region edit is prompt-based; native mask upload is not advertised.
+- Input images have a 50 MB aggregate byte budget. The runtime permits at most two concurrent requests per connection and four image-generation requests globally.
 - Generation runs are durable PromptCard Storage schema-v3 history. API pages contain 1-100 rows, but there is no automatic total-history pruning; capacity is bounded by available disk space.
 
 ### LangSmith Tracing

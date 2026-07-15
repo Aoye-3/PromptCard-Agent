@@ -167,15 +167,22 @@ def make_service(
     connections: FakeConnections | None = None,
     provider: FakeProvider | None = None,
     fetcher: FakeFetcher | None = None,
+    max_input_bytes_total: int | None = None,
+    max_running_total: int | None = None,
 ) -> tuple[ImageGenerationService, FakeStorage, FakeProvider, FakeFetcher]:
     storage = storage or FakeStorage()
     provider = provider or FakeProvider()
     fetcher = fetcher or FakeFetcher()
+    limits = {
+        **({"max_input_bytes_total": max_input_bytes_total} if max_input_bytes_total is not None else {}),
+        **({"max_running_total": max_running_total} if max_running_total is not None else {}),
+    }
     service = ImageGenerationService(
         storage=storage,
         connections=connections or FakeConnections(),
         provider_factory=lambda _connection: provider,
         result_fetcher=fetcher,
+        **limits,
     )
     return service, storage, provider, fetcher
 
@@ -473,6 +480,79 @@ def test_limits_each_connection_to_two_in_flight_generations() -> None:
     assert calls == 2
 
 
+def test_rejects_reference_images_over_the_aggregate_byte_budget_before_credential_access() -> None:
+    storage = FakeStorage()
+    connections = FakeConnections()
+    service, _, provider, _ = make_service(
+        storage=storage,
+        connections=connections,
+        max_input_bytes_total=len(storage.asset.content) + 1,
+    )
+    generation_command = replace(
+        command("run-input-budget"),
+        inputs=(
+            GenerationAssetInput(reference_id="subject", asset_id="asset-one.png", order=0),
+            GenerationAssetInput(reference_id="background", asset_id="asset-two.png", order=1),
+        ),
+    )
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(generation_command)
+
+    assert exc_info.value.code == "input_images_too_large"
+    assert exc_info.value.retryable is False
+    assert connections.credential_reads == 0
+    assert provider.requests == []
+    assert storage.runs[generation_command.run_id]["state"] == "failed"
+
+
+def test_global_limit_cannot_be_bypassed_with_multiple_connections() -> None:
+    storage = FakeStorage()
+    started = threading.Event()
+    release = threading.Event()
+    lock = threading.Lock()
+    calls = 0
+
+    class BlockingProvider(FakeProvider):
+        def generate(self, request):
+            nonlocal calls
+            with lock:
+                calls += 1
+                if calls == 2:
+                    started.set()
+            assert release.wait(timeout=5)
+            return super().generate(request)
+
+    service, _, _, _ = make_service(
+        storage=storage,
+        provider=BlockingProvider(),
+        max_running_total=2,
+    )
+    first_command = replace(command("run-global-first"), connection_id="connection-one")
+    second_command = replace(command("run-global-second"), connection_id="connection-two")
+    blocked_command = replace(command("run-global-blocked"), connection_id="connection-three")
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(service.generate, first_command)
+            second = pool.submit(service.generate, second_command)
+            assert started.wait(timeout=5)
+
+            with pytest.raises(GenerationError) as exc_info:
+                service.generate(blocked_command)
+
+            assert exc_info.value.code == "generation_capacity_reached"
+            assert exc_info.value.retryable is True
+            release.set()
+            assert first.result(timeout=5).state == "succeeded"
+            assert second.result(timeout=5).state == "succeeded"
+    finally:
+        release.set()
+
+    assert calls == 2
+    assert storage.runs[blocked_command.run_id]["state"] == "failed"
+
+
 @pytest.mark.parametrize("commit_before_error", [False, True])
 def test_running_patch_ambiguous_failure_is_reconciled_to_failed_terminal(commit_before_error: bool) -> None:
     class StartPatchFailureStorage(FakeStorage):
@@ -564,10 +644,49 @@ def test_gateway_registers_image_generation_route() -> None:
     assert "/api/promptcard/runtime/image-generations" in paths
 
 
-def test_router_maps_camel_case_request_and_returns_only_local_result() -> None:
+def test_router_rejects_generation_when_server_feature_gate_is_disabled(monkeypatch) -> None:
     from app.gateway.deps import get_image_generation_service
     from app.gateway.routers.image_generation import router
 
+    monkeypatch.delenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", raising=False)
+
+    class UncalledService:
+        def generate(self, _generation_command: GenerationCommand) -> GenerationOutcome:
+            raise AssertionError("Disabled image generation reached the service")
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: UncalledService()
+    response = TestClient(app).post(
+        "/api/promptcard/runtime/image-generations",
+        json={
+            "projectId": "project-1",
+            "nodeId": "node-1",
+            "connectionId": "connection-1",
+            "modelId": "doubao-seedream-5-0-pro-260628",
+            "mode": "generate",
+            "promptDocument": {"segments": [{"type": "text", "text": "snow"}]},
+            "resolution": "1K",
+            "aspectRatio": "smart",
+            "outputFormat": "png",
+        },
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": {
+            "code": "image_generation_disabled",
+            "message": "Image generation is disabled by the server rollout gate",
+            "retryable": False,
+        }
+    }
+
+
+def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatch) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
     received: list[GenerationCommand] = []
 
     class EndpointService:
@@ -667,10 +786,11 @@ def test_router_accepts_snake_case_size_alias_and_forbids_unknown_fields() -> No
         assert client.post("/api/promptcard/runtime/image-generations", json={**payload, field: value}).status_code == 422
 
 
-def test_router_error_has_no_raw_secret_in_chain_traceback_or_response() -> None:
+def test_router_error_has_no_raw_secret_in_chain_traceback_or_response(monkeypatch) -> None:
     from app.gateway.deps import get_image_generation_service
     from app.gateway.routers.image_generation import ImageGenerationBody, generate_image, router
 
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
     raw_secret = "raw-handler-secret"
     payload = {
         "projectId": "project-1",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Annotated, Literal
 from uuid import uuid4
 
@@ -12,6 +13,7 @@ from app.gateway.image_generation.contracts import BBoxRegion, PointRegion, Prom
 from app.gateway.image_generation.service import GenerationAssetInput, GenerationCommand, GenerationError, GenerationOutcome, ImageGenerationService
 
 router = APIRouter(prefix="/api/promptcard/runtime", tags=["promptcard-runtime"])
+IMAGE_GENERATION_FEATURE_ENV = "PROMPTCARD_IMAGE_GENERATION_NODE_V1"
 
 
 class RequestModel(BaseModel):
@@ -96,6 +98,15 @@ async def generate_image(
     body: ImageGenerationBody,
     service: ImageGenerationService = Depends(get_image_generation_service),
 ) -> ImageGenerationResponse:
+    if not _image_generation_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "image_generation_disabled",
+                "message": "Image generation is disabled by the server rollout gate",
+                "retryable": False,
+            },
+        )
     command = _command(body)
     response_error: HTTPException | None = None
     try:
@@ -163,7 +174,7 @@ def _response(result: GenerationOutcome) -> ImageGenerationResponse:
 
 
 def _status_code(error: GenerationError) -> int:
-    if error.code in {"generation_busy", "rate_limited"}:
+    if error.code in {"generation_busy", "generation_capacity_reached", "rate_limited"}:
         return 429
     if error.retryable:
         return 503
@@ -186,7 +197,13 @@ def _safe_error_message(code: str) -> str:
         "credential_store_unavailable": "Model credential storage is unavailable",
         "credential_missing": "The selected model connection has no credential",
         "generation_busy": "This model connection already has two running generations",
+        "generation_capacity_reached": "Image generation service capacity is reached",
+        "input_images_too_large": "Reference images exceed the aggregate byte limit",
         "rate_limited": "Image provider rate limit reached",
         "timeout": "Image provider request timed out",
         "authentication_failed": "Image provider authentication failed",
     }.get(code, "Image generation failed")
+
+
+def _image_generation_enabled() -> bool:
+    return os.getenv(IMAGE_GENERATION_FEATURE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}

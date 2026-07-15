@@ -31,6 +31,8 @@ from app.gateway.model_management.catalog import model_by_id
 from app.gateway.model_management.connection_store import ModelConnectionStore, get_connection_store
 
 MAX_RUNNING_PER_CONNECTION = 2
+MAX_RUNNING_TOTAL = 4
+MAX_INPUT_IMAGE_BYTES_TOTAL = 50 * 1024 * 1024
 
 
 class GenerationError(RuntimeError):
@@ -140,6 +142,8 @@ class ImageGenerationService:
         result_fetcher: ImageResultFetcher,
         model_lookup: ModelLookup = model_by_id,
         max_running_per_connection: int = MAX_RUNNING_PER_CONNECTION,
+        max_running_total: int = MAX_RUNNING_TOTAL,
+        max_input_bytes_total: int = MAX_INPUT_IMAGE_BYTES_TOTAL,
     ) -> None:
         self._storage = storage
         self._connections = connections
@@ -147,7 +151,10 @@ class ImageGenerationService:
         self._result_fetcher = result_fetcher
         self._model_lookup = model_lookup
         self._max_running_per_connection = max_running_per_connection
+        self._max_running_total = max_running_total
+        self._max_input_bytes_total = max_input_bytes_total
         self._running: dict[str, int] = {}
+        self._running_total = 0
         self._running_lock = threading.Lock()
 
     def close(self) -> None:
@@ -174,13 +181,16 @@ class ImageGenerationService:
 
         self._start_run(command.run_id)
 
-        acquired = self._try_acquire(command.connection_id)
+        capacity_error = self._try_acquire(command.connection_id)
+        acquired = capacity_error is None
         failure: GenerationError | None = None
         outcome: GenerationOutcome | None = None
         provider_request_id: str | None = None
         try:
-            if not acquired:
+            if capacity_error == "connection":
                 raise GenerationError("generation_busy", "This model connection already has two running generations", True, command.run_id)
+            if capacity_error == "global":
+                raise GenerationError("generation_capacity_reached", "Image generation service capacity is reached", True, command.run_id)
 
             metadata = self._connections.resolve_metadata(command.connection_id)
             self._validate_capabilities(command, metadata)
@@ -418,12 +428,21 @@ class ImageGenerationService:
 
     def _provider_request(self, command: GenerationCommand) -> ImageGenerationRequest:
         inputs: list[ImageInput] = []
+        input_bytes_total = 0
         for source in command.inputs:
             try:
                 asset = self._storage.load_asset(source.asset_id)
                 validate_image_content(asset.content, asset.content_type)
             except Exception:
                 raise GenerationError("invalid_input_asset", "A reference image asset is missing or invalid", False, command.run_id) from None
+            input_bytes_total += len(asset.content)
+            if input_bytes_total > self._max_input_bytes_total:
+                raise GenerationError(
+                    "input_images_too_large",
+                    "Reference images exceed the aggregate byte limit",
+                    False,
+                    command.run_id,
+                )
             encoded = base64.b64encode(asset.content).decode("ascii")
             inputs.append(
                 ImageInput(
@@ -445,17 +464,21 @@ class ImageGenerationService:
             watermark=command.watermark,
         )
 
-    def _try_acquire(self, connection_id: str) -> bool:
+    def _try_acquire(self, connection_id: str) -> str | None:
         with self._running_lock:
+            if self._running_total >= self._max_running_total:
+                return "global"
             current = self._running.get(connection_id, 0)
             if current >= self._max_running_per_connection:
-                return False
+                return "connection"
             self._running[connection_id] = current + 1
-            return True
+            self._running_total += 1
+            return None
 
     def _release(self, connection_id: str) -> None:
         with self._running_lock:
             remaining = self._running.get(connection_id, 1) - 1
+            self._running_total = max(0, self._running_total - 1)
             if remaining > 0:
                 self._running[connection_id] = remaining
             else:

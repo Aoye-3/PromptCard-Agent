@@ -1,5 +1,6 @@
 import { Children, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   IFreeCanvasImageGeneratorNode,
@@ -19,6 +20,7 @@ import {
 } from '@/domain/image-generation/regions'
 import { ImageGeneratorInspector } from './ImageGeneratorInspector'
 import { RegionEditorDialog } from './RegionEditorDialog'
+import type { ImageGeneratorPromptSnapshot, PromptCompilerValidationErrorCode } from '@/domain/image-generation/prompt-compiler'
 
 const ONE_K_SQUARE_CAPABILITIES: ImageSizeCapabilities = {
   modelId: 'model-one-k-square',
@@ -117,6 +119,27 @@ const projectWith = (
   selectedNodeId: generatorNode.id,
   meta: {}
 })
+
+const promptSnapshot = (
+  canGenerate: boolean,
+  errorCode?: PromptCompilerValidationErrorCode
+): ImageGeneratorPromptSnapshot => ({
+  source: 'local',
+  promptDocument: { version: 1, segments: [{ type: 'text', text: 'Product render' }] },
+  prompt: 'Product render',
+  references: [],
+  inputAssets: [],
+  validationErrors: errorCode ? [{ code: errorCode }] : [],
+  canGenerate
+})
+
+const mountInspector = (element: ReactElement): ReactTestRenderer => {
+  let renderer!: ReactTestRenderer
+  act(() => {
+    renderer = create(element)
+  })
+  return renderer
+}
 
 describe('ImageGeneratorInspector', () => {
   it('renders provider-neutral binding and generation controls', () => {
@@ -426,6 +449,46 @@ describe('ImageGeneratorInspector', () => {
 
     expect(markup).toContain('data-image-generation-ready="false"')
     expect(markup).toContain('Resolve region bindings before generating')
+  })
+
+  it.each([
+    'stale_region_reference',
+    'unresolved_region_reference',
+    'missing_source_image'
+  ] as const)('does not invoke generation for a blocked %s snapshot even if its handler is fired', errorCode => {
+    const onGenerate = vi.fn()
+    const renderer = mountInspector(
+      <ImageGeneratorInspector
+        node={generatorNode}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        promptSnapshot={promptSnapshot(false, errorCode)}
+        onChange={vi.fn()}
+        onGenerate={onGenerate}
+      />
+    )
+    const button = renderer.root.findByProps({ 'aria-label': 'Generate image' })
+
+    expect(button.props.disabled).toBe(true)
+    act(() => button.props.onClick())
+    expect(onGenerate).not.toHaveBeenCalled()
+  })
+
+  it('invokes generation once from a mounted generate-ready Inspector', () => {
+    const onGenerate = vi.fn()
+    const renderer = mountInspector(
+      <ImageGeneratorInspector
+        node={generatorNode}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        promptSnapshot={promptSnapshot(true)}
+        onChange={vi.fn()}
+        onGenerate={onGenerate}
+      />
+    )
+    const button = renderer.root.findByProps({ 'aria-label': 'Generate image' })
+
+    expect(button.props.disabled).toBe(false)
+    act(() => button.props.onClick())
+    expect(onGenerate).toHaveBeenCalledTimes(1)
   })
 
   it('does not add an invalid second prompt connection to project state', () => {

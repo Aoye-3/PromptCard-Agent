@@ -30,6 +30,7 @@ export interface ImageGeneratorInspectorProps {
   resultThumbnailUrl?: string
   promptSnapshot?: ImageGeneratorPromptSnapshot
   onChange: (updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings' | 'regions' | 'meta'>>) => void
+  onGenerate?: () => void
   onPromptDocumentChange?: (document: PromptDocument) => void
   onOpenHistory?: (nodeId: string) => void
 }
@@ -43,6 +44,7 @@ export const ImageGeneratorInspector = ({
   resultThumbnailUrl = imageGeneratorResultUrl(node),
   promptSnapshot,
   onChange,
+  onGenerate,
   onPromptDocumentChange,
   onOpenHistory
 }: ImageGeneratorInspectorProps) => {
@@ -79,6 +81,11 @@ export const ImageGeneratorInspector = ({
   const updateCustomDimension = (dimension: 'width' | 'height', value: string) => {
     const parsed = value === '' ? undefined : Number(value)
     updateSizeSettings({ [dimension]: parsed })
+  }
+
+  const handleGenerate = () => {
+    if (!onGenerate || !promptSnapshot?.canGenerate) return
+    onGenerate()
   }
 
   return (
@@ -286,13 +293,24 @@ export const ImageGeneratorInspector = ({
           />
           Watermark
         </label>
-        <button
-          type="button"
-          className="rounded-[6px] px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-100"
-          onClick={() => onOpenHistory?.(node.id)}
-        >
-          History
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            aria-label="Generate image"
+            className="rounded-[6px] bg-gray-950 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
+            disabled={!onGenerate || !promptSnapshot?.canGenerate}
+            onClick={handleGenerate}
+          >
+            Generate
+          </button>
+          <button
+            type="button"
+            className="rounded-[6px] px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-100"
+            onClick={() => onOpenHistory?.(node.id)}
+          >
+            History
+          </button>
+        </div>
       </div>
     </section>
   )

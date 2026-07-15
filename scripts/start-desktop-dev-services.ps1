@@ -1,3 +1,7 @@
+param(
+  [switch]$InitializeOnly
+)
+
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -60,6 +64,8 @@ $env:PROMPTCARD_STORAGE_DATA_DIR = $DataDir
 $env:PROMPTCARD_LOGS_DIR = $LogsDir
 $env:DEER_FLOW_HOME = $RuntimeStateDir
 $env:PROMPTCARD_LIBRARY_FILE = Join-Path $DataDir "prompt-library-presets.json"
+
+if ($InitializeOnly) { return }
 
 $StartScript = Join-Path $RepoRoot "scripts\start-dev-with-agent.ps1"
 & powershell -NoProfile -ExecutionPolicy Bypass -File $StartScript -FrontendCommand "npm.cmd run dev"

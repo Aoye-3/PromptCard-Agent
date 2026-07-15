@@ -55,7 +55,7 @@ function isProcessRunning(pid: number) {
 function startHealthyServer() {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'application/json' })
-    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":2,"capabilities":{"assets":true,"sqlite":true}}')
+    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":3,"capabilities":{"assets":true,"sqlite":true}}')
   })
 
   return new Promise<string>((resolve) => {
@@ -328,6 +328,30 @@ describe('start-dev-with-agent.ps1', () => {
       expect(log).toContain(`PYTHONPATH=${expectedBackend};${expectedHarness}`)
       expect(log).not.toContain('C:\\')
     }
+  }, 45_000)
+
+  test('preserves workspace-local desktop profile paths when starting the agent runtime', async () => {
+    const fakeUv = await makeFakeUv('fake-uv-desktop-profile')
+    const fixtureScripts = path.join(fakeUv.dir, 'scripts')
+    const fixtureScript = path.join(fixtureScripts, path.basename(agentStartScriptPath))
+    await mkdir(fixtureScripts, { recursive: true })
+    await copyFile(agentStartScriptPath, fixtureScript)
+
+    const profileRoot = path.join(fakeUv.dir, 'logs', 'desktop-profile')
+    const expectedDeerFlowHome = path.join(profileRoot, 'agent-runtime', '.deer-flow')
+    const expectedLibraryFile = path.join(profileRoot, 'data', 'prompt-library-presets.json')
+    const result = await runPowerShell([
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixtureScript
+    ], {
+      PATH: `${fakeUv.dir}${path.delimiter}${process.env.PATH || process.env.Path || ''}`,
+      DEER_FLOW_HOME: expectedDeerFlowHome,
+      PROMPTCARD_LIBRARY_FILE: expectedLibraryFile
+    })
+
+    expect(result.code).not.toBe(0)
+    const log = await readFile(fakeUv.logPath, 'utf8')
+    expect(log).toContain(`DEER_FLOW_HOME=${expectedDeerFlowHome}`)
+    expect(log).toContain(`PROMPTCARD_LIBRARY_FILE=${expectedLibraryFile}`)
   }, 45_000)
 
   test('starts and checks the agent runtime without importing a plaintext model key', async () => {

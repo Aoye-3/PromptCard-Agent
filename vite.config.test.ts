@@ -17,4 +17,16 @@ describe('vite storage proxy', () => {
     expect(source).toContain("rewrite: () => '/health'")
     expect(source).toContain('target: `${storageUrl}/api`')
   })
+
+  test('does not watch generated backend, Rust, cache, or runtime files', async () => {
+    const source = await readFile(configPath, 'utf8')
+
+    expect(source).toContain('watch:')
+    expect(source).toContain("'**/agent-runtime/**'")
+    expect(source).toContain("'**/.venv/**'")
+    expect(source).toContain("'**/.uv-cache/**'")
+    expect(source).toContain("'**/src-tauri/**'")
+    expect(source).toContain("'**/logs/**'")
+    expect(source).toContain("'**/data/**'")
+  })
 })

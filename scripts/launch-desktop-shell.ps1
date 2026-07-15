@@ -9,6 +9,8 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $DesktopShellExecutable = Join-Path $RepoRoot "src-tauri\target\debug\promptcard-manager-dev-shell.exe"
 $StartDevWithAgentScript = Join-Path $RepoRoot "scripts\start-dev-with-agent.ps1"
+$StartDesktopDevServicesScript = Join-Path $RepoRoot "scripts\start-desktop-dev-services.ps1"
+& { . $StartDesktopDevServicesScript -InitializeOnly }
 $LogsDir = if ($env:PROMPTCARD_LOGS_DIR) { $env:PROMPTCARD_LOGS_DIR } else { Join-Path $RepoRoot "logs" }
 $RuntimeManifestPath = if ($env:PROMPTCARD_DEV_RUNTIME_MANIFEST) { $env:PROMPTCARD_DEV_RUNTIME_MANIFEST } else { Join-Path $LogsDir "dev-runtime.json" }
 $DesktopServicesOutLog = Join-Path $LogsDir "desktop-services.out.log"

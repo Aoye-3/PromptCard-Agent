@@ -8,7 +8,7 @@ echo.
 if not exist node_modules (
     echo Installing frontend dependencies...
     call npm.cmd install
-    if %errorlevel% neq 0 (
+    if errorlevel 1 (
         echo Dependency installation failed. Check network or npm configuration.
         if not "%PROMPTCARD_START_SKIP_PAUSE%"=="1" pause
         exit /b 1

@@ -104,6 +104,24 @@ describe('launch-desktop-shell.ps1', () => {
     expect(script).toContain('Starting Vite frontend')
   })
 
+  test('initializes the protected desktop profile before starting local services', async () => {
+    const launchScript = await readFile(scriptPath, 'utf8')
+    const profileScript = await readFile(path.resolve(__dirname, 'start-desktop-dev-services.ps1'), 'utf8')
+
+    expect(launchScript).toContain('$StartDesktopDevServicesScript')
+    expect(launchScript).toContain('. $StartDesktopDevServicesScript -InitializeOnly')
+    expect(profileScript).toContain('[switch]$InitializeOnly')
+    expect(profileScript).toContain('$env:PROMPTCARD_DESKTOP_PROFILE_ROOT = $ProfileRoot')
+    expect(profileScript).toContain('$env:PROMPTCARD_STORAGE_DATA_DIR = $DataDir')
+    expect(profileScript).toContain('$env:PROMPTCARD_LOGS_DIR = $LogsDir')
+    expect(profileScript).toContain('$env:DEER_FLOW_HOME = $RuntimeStateDir')
+
+    const initializeProfileAt = launchScript.indexOf('. $StartDesktopDevServicesScript -InitializeOnly')
+    const startServicesAt = launchScript.indexOf('$servicesOutput = & powershell')
+    expect(initializeProfileAt).toBeGreaterThanOrEqual(0)
+    expect(startServicesAt).toBeGreaterThan(initializeProfileAt)
+  })
+
   test('requires the frontend health check to identify the PromptCard app', async () => {
     const runtimeScript = await readFile(path.resolve(__dirname, 'dev-port-runtime.ps1'), 'utf8')
     const launchScript = await readFile(scriptPath, 'utf8')

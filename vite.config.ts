@@ -22,6 +22,16 @@ export default defineConfig({
   server: {
     port: frontendPort,
     open: process.env.PROMPTCARD_DESKTOP_DEV === '1' ? false : true,
+    watch: {
+      ignored: [
+        '**/agent-runtime/**',
+        '**/.venv/**',
+        '**/.uv-cache/**',
+        '**/src-tauri/**',
+        '**/logs/**',
+        '**/data/**'
+      ]
+    },
     proxy: {
       '/agent-health': {
         target: agentUrl,

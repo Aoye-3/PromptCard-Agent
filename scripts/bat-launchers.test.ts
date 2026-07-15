@@ -1,0 +1,14 @@
+import { describe, expect, test } from 'vitest'
+import { readFile } from 'node:fs/promises'
+import path from 'node:path'
+
+const launchers = ['start.bat', 'start-desktop.bat']
+
+describe.each(launchers)('%s', (launcher) => {
+  test('checks npm install failures at execution time inside the dependency block', async () => {
+    const source = await readFile(path.resolve(__dirname, '..', launcher), 'utf8')
+
+    expect(source).toContain('if errorlevel 1 (')
+    expect(source).not.toContain('if %errorlevel% neq 0 (')
+  })
+})

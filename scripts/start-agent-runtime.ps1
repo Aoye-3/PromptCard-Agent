@@ -1,13 +1,23 @@
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+function Test-WorkspacePath([string]$Path) {
+  $WorkspacePrefix = [System.IO.Path]::GetFullPath([string]$RepoRoot).TrimEnd('\') + '\'
+  return [System.IO.Path]::GetFullPath($Path).StartsWith($WorkspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
 $RuntimeRoot = Join-Path $RepoRoot "agent-runtime"
 $BackendRoot = Join-Path $RuntimeRoot "backend"
 $env:DEER_FLOW_PROJECT_ROOT = $RuntimeRoot
-$env:DEER_FLOW_HOME = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot ".deer-flow"))
+if (!$env:DEER_FLOW_HOME -or !(Test-WorkspacePath $env:DEER_FLOW_HOME)) {
+  $env:DEER_FLOW_HOME = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot ".deer-flow"))
+}
 $env:DEER_FLOW_CONFIG_PATH = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot "config.yaml"))
 $env:DEER_FLOW_EXTENSIONS_CONFIG_PATH = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot "extensions_config.json"))
-$env:PROMPTCARD_LIBRARY_FILE = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "data\prompt-library-presets.json"))
+if (!$env:PROMPTCARD_LIBRARY_FILE -or !(Test-WorkspacePath $env:PROMPTCARD_LIBRARY_FILE)) {
+  $env:PROMPTCARD_LIBRARY_FILE = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "data\prompt-library-presets.json"))
+}
 $RuntimeEnvironment = [System.IO.Path]::GetFullPath((Join-Path $BackendRoot ".venv"))
 $env:UV_CACHE_DIR = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".uv-cache"))
 $env:UV_PYTHON_INSTALL_DIR = [System.IO.Path]::GetFullPath((Join-Path $BackendRoot ".python"))
@@ -45,11 +55,6 @@ New-Item -ItemType Directory -Force -Path $env:DEER_FLOW_HOME | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path $RuntimeEnvironment -Parent) | Out-Null
 New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:UV_PYTHON_INSTALL_DIR | Out-Null
-
-function Test-WorkspacePath([string]$Path) {
-  $WorkspacePrefix = [System.IO.Path]::GetFullPath([string]$RepoRoot).TrimEnd('\') + '\'
-  return [System.IO.Path]::GetFullPath($Path).StartsWith($WorkspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)
-}
 
 function Get-WorkspacePython {
   $VenvPython = Join-Path $RuntimeEnvironment "Scripts\python.exe"

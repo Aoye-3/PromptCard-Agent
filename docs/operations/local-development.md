@@ -121,12 +121,10 @@ Keep generated runtime dependencies and caches ignored. The Agent scripts keep g
 - uv cache: `.uv-cache`
 - runtime port manifest: `logs/dev-runtime.json`
 - generated Tauri dynamic dev config: `logs/tauri.dev-runtime.conf.json`
-- DeepSeek key source resolution order:
-  1. `PROMPTCARD_AGENT_API_KEY_FILE`
-  2. `F:\.Agent-PromptCardManager\API-Key.txt`
-  3. `F:\.FinalProject\API-Key.txt`
+- PromptCard model connection metadata: `$DEER_FLOW_HOME/promptcard-model-connections.json`
+- PromptCard model credentials: operating-system keyring entries managed through Model Management
 
-Never commit API keys, local runtime caches, virtual environments, or generated DeerFlow data.
+The maintained launchers do not require `API-Key.txt`, `DEEPSEEK_API_KEY`, or `ARK_API_KEY`. The stack must start without model credentials; a credential is read from keyring only for a validated invocation. Never commit API keys, local runtime caches, virtual environments, or generated DeerFlow data.
 
 ## Troubleshooting
 

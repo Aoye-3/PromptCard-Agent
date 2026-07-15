@@ -8,4 +8,5 @@ Architecture documents explain the runtime topology, module boundaries, and cros
 - [Agent Runtime Boundary](./agent-runtime-boundary.md)
 - [Native Screenshot Capture](./native-screenshot-capture.md)
 - [Recent Capture To Prompt Registration](./recent-capture-prompt-registration.md)
+- [Image Generation And Model Management](./image-generation-and-model-management.md)
 - [Architecture Decisions](../decisions/README.md)

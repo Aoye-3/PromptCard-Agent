@@ -7,7 +7,7 @@ three-stage forms, Page constraints, or `threeStage.meta.freeCanvas` as its sour
 ## Data Model
 
 - Free Canvas content lives in `project.freeCanvas`.
-- `IFreeCanvasProject.nodes` stores text, image, and arrow nodes.
+- `IFreeCanvasProject.nodes` stores text, image, arrow, and provider-neutral `image-generator` nodes.
 - `IFreeCanvasProject.edges` stores user-created React Flow connections.
 - The default project is empty: no nodes, no edges, no required Page/Form fallback.
 - Old projects with `type: "three-stage"` and `meta.builderTemplateId: "free-canvas"` are migrated on load:
@@ -62,6 +62,36 @@ dialog show and edit only the name and template body; they do not display or wri
 - Existing `arrow` nodes remain supported for loading, rendering, and deletion, but the UI no longer has an active arrow creation button.
 - Removing any node removes connected Free Canvas edges.
 - Deleting the final node is valid and leaves an empty canvas.
+
+## Image Generation Nodes
+
+The `image-generator` node persists normalized intent rather than Seedream SDK fields. Its durable fields include mode, `connectionId + modelId` binding, resolution/ratio/format/watermark settings, a structured prompt document, optional point/bounding-box regions, the active run ID, and the current local result asset ID.
+
+Typed React Flow input handles enforce:
+
+- `prompt`: at most one text-node connection;
+- `source-image`: at most one image connection for edit/region-edit;
+- `reference-image`: ordered references, with at most ten total source/reference images;
+- output: the node's current local generated asset.
+
+Invalid edges are rejected before project persistence. Each image edge keeps a stable `referenceId`; reordering inputs changes the compiled `图1`/`图2` order without rebinding structured `@` mentions to a different asset.
+
+The prompt editor stores `{ type: "text" }` and `{ type: "reference" }` segments, never `contentEditable` HTML. Connected prompt text takes precedence over local node text. Quick messages insert ordinary structured text and may be combined with `@` references.
+
+The current Seedream catalog exposes:
+
+- `generate`, `edit`, and `region-edit` modes;
+- 1K/2K, smart/preset/custom aspect ratios, PNG/JPEG, and watermark selection;
+- point and bounding-box regions using integer 0-999 coordinates;
+- one output and no streaming, cancellation, 4K, native mask, sequential, or grouped output controls.
+
+Region editing keeps draft undo/redo inside the dialog until Save. Regions bind to a reference ID and are removed or rebound when their source disappears; the canvas does not claim native binary-mask support.
+
+Node UI state is limited to `idle`, `validating`, `running`, `succeeded`, and `failed`. It does not invent percentage progress. Retry and Generate Again create new permanent runs. A successful result becomes the node's current asset and a `generatedResult` Recent Capture; Media can place it back as a normal image or connect it as a later reference.
+
+Generation state is project scoped. Switching projects cannot let an in-flight completion write into the newly active canvas. Returning to the original project reconciles the persisted terminal run, while a running node with no matching in-memory session resets to idle.
+
+The node entry requires `settings.meta.featureFlags.imageGenerationNodeV1 === true`. Real generation additionally requires the Agent Runtime server flag and an assigned `image.primary` connection; see [Image Generation And Model Management](../architecture/image-generation-and-model-management.md).
 
 ## Image Annotations
 
@@ -140,6 +170,7 @@ The Free Canvas right panel has an `Agent` / `Prompt库` segmented switcher.
 npm.cmd run test -- --run src/domain/free-canvas/free-canvas-project.test.ts src/utils/agent-workspace.test.ts src/services/agent-runtime-service.test.ts src/utils/storage.test.ts
 npm.cmd run test:e2e -- free-canvas-image-crop.spec.ts
 npm.cmd run test:e2e -- free-canvas-text-node.spec.ts
+npx.cmd playwright test tests/e2e/model-management.spec.ts tests/e2e/image-generation-node.spec.ts --workers=1
 npm.cmd run build
 ```
 
@@ -154,3 +185,5 @@ Prompt library preview, and approving a `free_canvas_text_update` proposal.
 Quick-message manual checks should confirm the drawer and lightweight dialog have no note field,
 and that clicking a quick message inserts only a red preset text node even when the preset has
 reference media in Prompt Library.
+
+Image-generation manual checks should confirm connection/assignment selection, stable multi-reference `@` binding after reorder, invalid-edge rejection, 1K/2K/custom validation, point/bbox save and undo, failed-run retry as a new row, generated-result placement from Media, reload recovery, and history retention after project deletion. Do not perform a live Ark smoke test unless the user has configured a keyring credential and explicitly enabled the server rollout flag.

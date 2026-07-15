@@ -27,6 +27,8 @@ The floating toolbar's screenshot loop is a Windows-first native `xcap` capture 
 
 Capture Bar also imports WeChat/QQ-style clipboard images. Recent Captures can explicitly register one or many reviewed items into Prompt Library, or place image captures on Free Canvas, while all three consumers reuse one physical `assetId`. See [Recent Capture To Prompt Registration](./architecture/recent-capture-prompt-registration.md), [ADR-006](./decisions/ADR-006-explicit-capture-registration-and-shared-asset-identity.md), and [Storage Service API](./api/storage-service-api.md).
 
+Free Canvas can also host provider-neutral image-generation nodes. The first adapter is Doubao Seedream 5.0 Pro; credentials stay in the operating-system keyring, successful results become local assets and Recent Captures, and schema v3 keeps generation runs after node or project deletion. See [Image Generation And Model Management](./architecture/image-generation-and-model-management.md) and [ADR-008](./decisions/ADR-008-provider-neutral-image-generation.md).
+
 ## Product Vision
 
 PromptCard-Manager is evolving into an AIGC director's storyboard-script workstation. The product direction is to integrate Prompt management, AIGC script grids, storyboard images, and script planning into an external management board that reduces video workflow information overload before work enters video production tools.
@@ -60,7 +62,9 @@ When code changes, update the nearest documentation category in the same change.
 
 - Keep PromptCard UI integrations on the PromptCard Runtime Boundary (`/agent-api/promptcard/runtime/*`); do not couple new frontend work directly to DeerFlow-native thread, run, auth, model, tool, skill, or agent routes.
 - Preserve project-level Agent session isolation. New Chatbox surfaces need a stable `sessionKey`, their own message/proposal cache, and backend thread metadata validation before they reuse a DeerFlow `threadId`.
-- Keep DeepSeek model configuration unified in the Agent panel and backend local config. Do not create another browser-local model settings source.
+- Keep model catalog, connections, and `chat.primary`/`image.primary` assignments unified through Agent Runtime Model Management. Deprecated DeepSeek model-config routes are migration compatibility only.
+- Keep model credentials in the operating-system keyring and provider SDK calls behind Agent Runtime adapters. The browser may manage connections but must never persist or call a provider with a credential.
+- Keep image-generation history in PromptCard Storage schema v3. Do not embed runs in project JSON or delete run/output references when a project or node is removed.
 - Treat `workspaceContext.snapshot` as the per-request current workspace view. Do not use selected cards, current rows, or focused fields as the thread identity unless a future spec explicitly changes the product model.
 - Keep permission scopes narrow: `prompt-library-agent` is the only Prompt Library write proposal surface; `workspace-chatbot-agent` is for project-local card, storyboard, and three-stage edits.
 - Keep Free Canvas quick messages in the Prompt Library preset model (`category: "quick-message"`); see [ADR-001](./decisions/ADR-001-prompt-library-quick-messages.md).

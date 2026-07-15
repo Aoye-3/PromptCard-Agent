@@ -1,10 +1,10 @@
 # Storage Service API
 
-The local storage service is the durable source of truth for projects, Prompt Library presets, image asset metadata, and Recent Capture metadata. The frontend reaches it through the Vite proxy prefix `/storage-api/*`; the service itself exposes `/api/*` on port `8002`.
+The local storage service is the durable source of truth for projects, Prompt Library presets, asset metadata/bytes, Recent Capture metadata, and image-generation runs. The frontend reaches it through the Vite proxy prefix `/storage-api/*`; the service itself exposes `/api/*` on port `8002`.
 
 ## Health
 
-`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, and `recentCaptures`.
+`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, and `recentCaptures`. Image-generation history requires schema version `3`.
 
 - `GET /health`
 
@@ -16,7 +16,7 @@ Returns service status and the active data directory.
 - `GET /api/assets/{asset_id}`
 - `GET /api/assets/diagnostics`
 
-Asset uploads send the bytes as the request body, the MIME type in `Content-Type`, and the original filename in `X-File-Name`. The service accepts signature-validated image and video asset types supported by the asset store. The current app path stores files up to 20 MB and returns:
+Asset uploads send the bytes as the request body, the MIME type in `Content-Type`, and the original filename in `X-File-Name`. The service accepts signature-validated image and video asset types supported by the asset store. The service stores files up to 200 MB and returns:
 
 ```json
 {
@@ -30,6 +30,32 @@ Asset uploads send the bytes as the request body, the MIME type in `Content-Type
 The generated ID is safe to persist in project metadata and Recent Capture metadata. The read endpoint serves the original bytes with their stored content type. Invalid types, empty or oversized bodies return `400`; unknown or malformed IDs return `404`.
 
 `GET /api/assets/diagnostics` checks the asset manifest and reference graph. Active and Trash projects, active and Trash Prompt presets, and Recent Captures all participate in the reference scan. Registering or placing a capture therefore does not require a copied asset.
+
+Succeeded image-generation runs also participate in the reference scan through `outputAssetIds`. Deleting a project or capture record must not make a historical generated output appear orphaned.
+
+## Image Generation Runs
+
+- `POST /api/image-generation-runs`
+- `PATCH /api/image-generation-runs/{id}/state`
+- `GET /api/image-generation-runs?projectId=&nodeId=&cursor=&limit=`
+- `GET /api/image-generation-runs/{id}`
+
+There is intentionally no `DELETE` endpoint.
+
+Runs are append-only request snapshots with a strict state machine:
+
+```text
+queued -> running -> succeeded
+                  -> failed
+```
+
+Creation requires project, node, connection, provider, model, normalized request snapshot, and an empty `outputAssetIds` list. State patches may only contain fields allowed for their target state. Terminal records are immutable, and duplicate IDs return `409`.
+
+A succeeded patch must reference assets already registered in the same Storage service. Those output IDs become strong historical references. Project/node removal and permanent project Trash deletion do not cascade into generation runs, output assets, or generated-result captures.
+
+List results are ordered by `createdAt DESC, id DESC`, accept optional project/node filters, and use an opaque `nextCursor`. `limit` must be between 1 and 100. A retry or “generate again” action always creates another run rather than replacing the earlier record.
+
+Storage rejects credential-, token-, URL-, URI-, and path-like field names anywhere inside persisted generation payloads. Prompt text may contain those ordinary words; the restriction applies to field names and sensitive structure, not user prose.
 
 ## Recent Captures
 

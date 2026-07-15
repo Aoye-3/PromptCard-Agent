@@ -9,3 +9,4 @@ Architecture Decision Records capture durable product and engineering decisions 
 - [ADR-005: Capture Screenshots Natively From The Toolbar Display](./ADR-005-native-screenshot-session.md)
 - [ADR-006: Register Captures Explicitly And Reuse One Asset Identity](./ADR-006-explicit-capture-registration-and-shared-asset-identity.md)
 - [ADR-007: Use The Repository Data Root During Editable Development](./ADR-007-repository-data-root-for-editable-development.md)
+- [ADR-008: Isolate Image Providers Behind Model Slots And Durable Local Runs](./ADR-008-provider-neutral-image-generation.md)

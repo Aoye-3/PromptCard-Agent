@@ -2,18 +2,20 @@
 
 ## Scope and invariants
 
-PromptCard uses provider-neutral model connections and durable, local image-generation history. Canvas nodes bind `connectionId + modelId`; the browser never receives a provider credential or talks directly to a provider SDK.
+PromptCard uses provider-neutral model connections and durable, local image-generation history. Canvas nodes bind `connectionId + modelId`; the browser never receives a stored provider credential or talks directly to a provider SDK. [ADR-008](../decisions/ADR-008-provider-neutral-image-generation.md) records the rationale and rejected alternatives.
 
 The Gateway must start, report health, and serve the model catalog without any configured credential. Credentials are read only for a valid model invocation. A valid request with no credential fails as `credential_missing`; keyring failure is `credential_store_unavailable`.
 
 ## Data flow
 
-1. The canvas submits a normalized prompt document, local reference `assetId` values, optional point/bounding-box regions, resolution, output format, `connectionId`, and `modelId` to the PromptCard Runtime Boundary.
-2. The Gateway creates a queued run in PromptCard Storage, transitions it to running, then validates connection metadata, catalog capability, prompt/region references, and decoded local image assets.
+1. The canvas submits a normalized prompt document, local reference `assetId` values, optional point/bounding-box regions, resolution, output format, `connectionId`, and `modelId` to `POST /api/promptcard/runtime/image-generations`. The Runtime generates the immutable run ID; clients do not choose it.
+2. The Gateway creates a queued run in PromptCard Storage, transitions it to running, then validates connection metadata, catalog capability, prompt/region references, decoded local image assets, and request limits.
 3. Only after validation does the Gateway retrieve the connection credential from the operating-system keyring and construct the selected provider adapter.
 4. The Seedream adapter compiles ordered image mentions and region markup, then calls the Volcengine Ark SDK.
 5. The result fetcher accepts only the exact official HTTPS CDN host, revalidates and pins a public DNS address on every redirect hop, preserves Host/TLS SNI, limits downloads to 25 MB and 40 megapixels, and verifies PNG/JPEG/WebP bytes with Pillow.
 6. PromptCard Storage stores the generated file as a local asset, creates a `generatedResult` Recent Capture, and commits the run as succeeded. Failures commit a normalized failed state. Provider URLs and credentials are never persisted.
+
+The request may contain at most ten total input images and 50 MB of loaded input asset bytes. The Runtime permits two concurrent generations per connection and four globally. These are trusted server limits; frontend validation is only an earlier usability check.
 
 Run snapshots and API errors may contain technical identifiers and normalized error codes, but never credentials, authorization headers, provider URL query strings, local filesystem paths, or raw exception text.
 
@@ -75,6 +77,9 @@ Region edit uses Seedream prompt markup tied to a reference image. It is not a n
 | `rate_limited`, `timeout`, `provider_request_failed` | Retry according to `retryable`; inspect provider account/quota without logging secrets. |
 | `unsafe_image_url`, `image_download_failed`, `invalid_image_data` | Provider output failed the remote-result security/decoding boundary. |
 | `storage_write_failed`, `terminal_persistence_failed` | Verify PromptCard Storage health and disk space before retrying. |
+| `image_generation_disabled` | Enable the trusted server rollout flag only after dependencies and a connection are ready. |
+| `input_images_too_large` | Reduce the aggregate bytes of all source/reference images below 50 MB. |
+| `generation_busy`, `generation_capacity_reached` | Wait for the per-connection or global concurrency slot to become available. |
 
 ## Adding a second image provider
 
@@ -87,6 +92,11 @@ Region edit uses Seedream prompt markup tied to a reference image. It is not a n
 
 ## Rollout and rollback
 
-Use the hidden `imageGenerationNodeV1` feature flag to stage UI exposure: catalog/model migration first, mock-provider verification second, then the real node only when `image.primary` has a valid connection. Disabling the flag or provider entry stops new UI generations but leaves catalog-compatible connection metadata, run history, Recent Captures, and assets readable.
+New generation requires both rollout gates:
+
+- frontend user settings: `meta.featureFlags.imageGenerationNodeV1 === true`;
+- Agent Runtime environment: `PROMPTCARD_IMAGE_GENERATION_NODE_V1=true`.
+
+The server flag defaults to disabled and is checked before run creation, credential access, or provider invocation. Run `npm.cmd run agent:check`, create a Volcengine Ark connection, and assign it to `image.primary` before enabling the server flag. Disabling either gate stops new UI generations but leaves catalog-compatible connection metadata, run history, Recent Captures, and assets readable.
 
 Never roll PromptCard Storage back from schema v3 to v2. A code rollback must preserve forward-compatible reading of the v3 table or keep the current Storage service running until compatible code is restored.

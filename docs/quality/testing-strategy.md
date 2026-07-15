@@ -23,6 +23,10 @@ The current frontend test suite covers several core utilities and stores:
 - storage HTTP client timeout, structured-error, revision-conflict, missing-item, and asset-upload contracts
 - injectable FastAPI storage route contracts for assets, errors, preset batches, and browser migration
 - free-canvas image asset service behavior, including batch upload failure
+- image-generator contracts, typed edge cardinality, structured `@` references, size/region validation, project-scoped lifecycle reconciliation, permanent history UI, and generated-result Media reuse
+- model catalog/connection/assignment contracts, OS keyring storage and transactional legacy migration
+- Seedream prompt/provider mapping, sanitized errors, secure result download, input/concurrency limits, and terminal run persistence
+- PromptCard Storage schema v3 migration, generation-run state machine/pagination, output asset strong references, and Runtime-to-Storage SQLite integration
 
 Tests are run through Vitest.
 
@@ -43,7 +47,13 @@ For Agent Runtime work, also run:
 
 ```powershell
 npm.cmd run agent:check
+Push-Location agent-runtime\backend
+.\.venv\Scripts\python.exe -m pytest tests\test_image_generation_service.py tests\test_image_generation_storage_integration.py tests\test_seedream_prompt_compiler.py tests\test_seedream_provider.py tests\test_model_connections.py tests\test_credential_store.py -q
+.\.venv\Scripts\python.exe -m ruff check app tests
+Pop-Location
 ```
+
+The repository currently has one pre-existing full-Ruff `I001` import-order finding in `tests/test_promptcard_runtime_boundary.py`. Do not describe the full Ruff gate as green until that unrelated baseline item is resolved; changed-file Ruff checks must remain clean.
 
 For startup script work, run:
 
@@ -120,6 +130,18 @@ In restricted sandbox environments, Chromium launch may require elevated executi
 - Confirm the browser shows the closed-server message.
 - Confirm the Vite dev server stops listening on the `frontendUrl` port from `logs/dev-runtime.json`.
 
+### Image Generation Flow
+
+- Create a Volcengine Ark connection and confirm the credential field clears after submit and never appears in the DOM or API response.
+- Assign `doubao-seedream-5-0-pro-260628` to `image.primary`.
+- Create a Free Canvas image-generator node and connect prompt, source, and ordered reference images.
+- Confirm structured `@` tokens remain bound to the same asset after reordering while compiled image numbers change.
+- Validate 1K/2K and custom-size limits; confirm unsupported 4K/native mask/stream controls are absent.
+- Save point/bbox region intent, generate through a fake provider in automated tests, and confirm a local asset, `generatedResult` capture, and succeeded run are created.
+- Retry a failed run and confirm the retry has a different run ID and both records remain visible.
+- Reload/restart and confirm history/output access; permanently delete the project and confirm history and its output asset remain queryable.
+- Place the generated Media item back on canvas as a normal image and as a later reference.
+
 ## Quality Gates
 
 - Do not commit secrets.
@@ -131,9 +153,10 @@ In restricted sandbox environments, Chromium launch may require elevated executi
 - Save-concurrency Playwright tests must echo the request's real project ID and type. Use a request-start barrier before releasing delayed responses; fixed sleeps do not prove stale-response ordering.
 - Free-canvas image coverage must verify supported asset validation, path traversal rejection, drag-and-drop node creation, minimal image rendering, manual horizontal and vertical crop lines, line deletion, cancel behavior, and non-destructive derived-node creation.
 - For Agent collaboration changes, verify that Prompt library writes still require approval while card workspace edits can auto-apply.
+- For image-generation changes, verify the trusted server feature gate rejects before run creation/credential access, the browser never calls a provider directly, total inputs stay at or below ten, and all terminal paths persist either `succeeded` or `failed` without remote URLs or raw secrets.
 
 ## Roadmap / Not Yet Implemented
 
-- End-to-end browser tests are lightweight smoke coverage. Broader interaction coverage should be added around high-risk browser workflows.
+- Image-generation Playwright tests validate frontend workflows with routed service doubles. The Python cross-service integration test owns the real Runtime FastAPI -> PromptCardStorageClient -> Storage FastAPI/SQLite contract; neither layer is a live Ark smoke test.
 - Agent live-model tests depend on a local DeepSeek key and should not run in generic CI without secret configuration.
 - Durable Agent proposal audit tests are not applicable until such storage exists.

@@ -34,3 +34,14 @@ Environment overrides:
 - `PROMPTCARD_AGENT_PORT`: strict Agent Runtime port; defaults to a free local port when unset.
 - `PROMPTCARD_STORAGE_PORT`: strict storage service port; defaults to a free local port when unset.
 - `PROMPTCARD_DEV_RUNTIME_MANIFEST`: custom manifest path; defaults to `logs/dev-runtime.json`.
+- `PROMPTCARD_IMAGE_GENERATION_NODE_V1`: trusted Agent Runtime rollout gate for real image generation; disabled unless set to `true`, `1`, `yes`, or `on`.
+
+## Enabling Image Generation
+
+1. Run `npm.cmd run agent:check` and keep any repair/cache paths inside the current F: workspace.
+2. Start PromptCard without a credential; health and model catalog must still load.
+3. In Model Management, create a Volcengine Ark connection and assign Seedream to `image.primary`. The credential is saved to the OS keyring.
+4. Enable the frontend user-settings flag `meta.featureFlags.imageGenerationNodeV1` for the rollout cohort.
+5. Restart Agent Runtime with `PROMPTCARD_IMAGE_GENERATION_NODE_V1=true`.
+
+The server gate is checked before run creation, credential lookup, or SDK invocation. Turning it off is the safe first rollback step and does not remove model metadata, history, assets, or Recent Captures.

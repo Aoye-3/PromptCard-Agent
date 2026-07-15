@@ -64,6 +64,13 @@ def test_catalog_contains_deepseek_chat_and_ark_seedream_manifests(model_api):
         "mentionStrategy": "ordered-image-labels",
         "regionInputs": ["point", "bbox"],
         "resolutions": ["1K", "2K"],
+        "aspectRatios": ["smart", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "custom"],
+        "customSize": {
+            "minPixels": 921600,
+            "maxPixels": 4624220,
+            "minAspectRatio": 0.0625,
+            "maxAspectRatio": 16,
+        },
         "outputCount": 1,
         "streaming": False,
     }

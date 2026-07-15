@@ -81,6 +81,9 @@ class ImageGenerationRequest:
     inputs: tuple[ImageInput, ...]
     regions: tuple[ImageRegion, ...]
     resolution: str
+    aspect_ratio: str
+    width: int | None
+    height: int | None
     output_format: str
     watermark: bool
 

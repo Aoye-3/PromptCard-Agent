@@ -22,6 +22,30 @@ _SENSITIVE_ASSIGNMENT = re.compile(
 )
 _BEARER_TOKEN = re.compile(r"(?i)(\bbearer\s+)[^\s,;}'\"]+")
 
+# Volcengine's Seedream 5.0 Pro size reference table, documented for 1K/2K generation.
+_PRESET_SIZES: dict[tuple[str, str], str] = {
+    ("1K", "1:1"): "1024x1024",
+    ("1K", "4:3"): "1152x864",
+    ("1K", "3:4"): "864x1152",
+    ("1K", "16:9"): "1424x800",
+    ("1K", "9:16"): "800x1424",
+    ("1K", "3:2"): "1248x832",
+    ("1K", "2:3"): "832x1248",
+    ("1K", "21:9"): "1568x672",
+    ("2K", "1:1"): "2048x2048",
+    ("2K", "4:3"): "2368x1776",
+    ("2K", "3:4"): "1776x2368",
+    ("2K", "16:9"): "2816x1584",
+    ("2K", "9:16"): "1584x2816",
+    ("2K", "3:2"): "2496x1664",
+    ("2K", "2:3"): "1664x2496",
+    ("2K", "21:9"): "3136x1344",
+}
+_MIN_CUSTOM_PIXELS = 921600
+_MAX_CUSTOM_PIXELS = 4624220
+_MIN_CUSTOM_RATIO = 1 / 16
+_MAX_CUSTOM_RATIO = 16
+
 
 class VolcengineSeedreamProvider:
     def __init__(
@@ -38,6 +62,7 @@ class VolcengineSeedreamProvider:
     def generate(self, request: ImageGenerationRequest) -> ImageGenerationResult:
         if request.resolution not in {"1K", "2K"}:
             raise ProviderError("unsupported_resolution", "Seedream supports only 1K and 2K", False)
+        size = _sdk_size(request)
         if request.output_format not in {"png", "jpeg"}:
             raise ProviderError("unsupported_output_format", "Seedream supports only PNG and JPEG output", False)
 
@@ -53,7 +78,7 @@ class VolcengineSeedreamProvider:
                 model=request.model_id,
                 prompt=compiled.prompt,
                 image=list(compiled.images) if compiled.images else None,
-                size=request.resolution,
+                size=size,
                 output_format=request.output_format,
                 response_format="url",
                 watermark=request.watermark,
@@ -79,6 +104,29 @@ class VolcengineSeedreamProvider:
             image=ProviderImage(url=url, size=size if isinstance(size, str) and size else None),
             request_id=_request_id(response),
         )
+
+
+def _sdk_size(request: ImageGenerationRequest) -> str:
+    width = request.width
+    height = request.height
+    if request.aspect_ratio == "smart":
+        if width is not None or height is not None:
+            raise ProviderError("invalid_custom_size", "Width and height require a custom aspect ratio", False)
+        return request.resolution
+    if request.aspect_ratio == "custom":
+        if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
+            raise ProviderError("invalid_custom_size", "Custom width and height must be positive integers", False)
+        pixels = width * height
+        ratio = width / height
+        if not (_MIN_CUSTOM_PIXELS <= pixels <= _MAX_CUSTOM_PIXELS and _MIN_CUSTOM_RATIO <= ratio <= _MAX_CUSTOM_RATIO):
+            raise ProviderError("invalid_custom_size", "Custom dimensions exceed Seedream limits", False)
+        return f"{width}x{height}"
+    if width is not None or height is not None:
+        raise ProviderError("invalid_custom_size", "Width and height require a custom aspect ratio", False)
+    try:
+        return _PRESET_SIZES[(request.resolution, request.aspect_ratio)]
+    except KeyError:
+        raise ProviderError("unsupported_aspect_ratio", "Seedream does not support this aspect ratio", False) from None
 
 
 def _normalize_provider_error(error: Exception, api_key: str) -> ProviderError:

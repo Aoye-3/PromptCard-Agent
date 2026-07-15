@@ -88,6 +88,9 @@ class GenerationCommand:
     inputs: tuple[GenerationAssetInput, ...]
     regions: tuple[ImageRegion, ...]
     resolution: str
+    aspect_ratio: str
+    width: int | None
+    height: int | None
     output_format: str
     watermark: bool
 
@@ -347,6 +350,9 @@ class ImageGenerationService:
             raise GenerationError("too_many_images", "The selected model accepts fewer reference images", False, command.run_id)
         if command.resolution not in capabilities.get("resolutions", []):
             raise GenerationError("unsupported_resolution", "The selected model does not support this resolution", False, command.run_id)
+        if command.aspect_ratio not in capabilities.get("aspectRatios", []):
+            raise GenerationError("unsupported_aspect_ratio", "The selected model does not support this aspect ratio", False, command.run_id)
+        self._validate_size_intent(command, capabilities)
         if capabilities.get("outputCount") != 1 or capabilities.get("streaming") is not False:
             raise GenerationError("unsupported_model_capability", "The selected model capability contract is unsupported", False, command.run_id)
         if command.output_format not in {"png", "jpeg"}:
@@ -355,6 +361,60 @@ class ImageGenerationService:
             raise GenerationError("reference_image_required", "This generation mode requires a reference image", False, command.run_id)
         if command.mode == "region-edit" and not command.regions:
             raise GenerationError("region_required", "Region edit requires a selected region", False, command.run_id)
+
+    def _validate_size_intent(self, command: GenerationCommand, capabilities: dict[str, Any]) -> None:
+        if command.aspect_ratio != "custom":
+            if command.width is not None or command.height is not None:
+                raise GenerationError(
+                    "invalid_custom_size",
+                    "Width and height are only accepted for a custom aspect ratio",
+                    False,
+                    command.run_id,
+                )
+            return
+
+        width = command.width
+        height = command.height
+        if type(width) is not int or type(height) is not int or width <= 0 or height <= 0:
+            raise GenerationError(
+                "invalid_custom_size",
+                "Custom width and height must be positive integers",
+                False,
+                command.run_id,
+            )
+        custom_size = capabilities.get("customSize")
+        if not isinstance(custom_size, dict):
+            raise GenerationError(
+                "unsupported_model_capability",
+                "The selected model does not declare custom size limits",
+                False,
+                command.run_id,
+            )
+        min_pixels = custom_size.get("minPixels")
+        max_pixels = custom_size.get("maxPixels")
+        min_ratio = custom_size.get("minAspectRatio")
+        max_ratio = custom_size.get("maxAspectRatio")
+        if not all(isinstance(value, (int, float)) and not isinstance(value, bool) for value in (
+            min_pixels,
+            max_pixels,
+            min_ratio,
+            max_ratio,
+        )):
+            raise GenerationError(
+                "unsupported_model_capability",
+                "The selected model declares invalid custom size limits",
+                False,
+                command.run_id,
+            )
+        pixels = width * height
+        ratio = width / height
+        if not (min_pixels <= pixels <= max_pixels and min_ratio <= ratio <= max_ratio):
+            raise GenerationError(
+                "invalid_custom_size",
+                "Custom dimensions exceed the selected model limits",
+                False,
+                command.run_id,
+            )
 
     def _provider_request(self, command: GenerationCommand) -> ImageGenerationRequest:
         inputs: list[ImageInput] = []
@@ -378,6 +438,9 @@ class ImageGenerationService:
             inputs=tuple(inputs),
             regions=command.regions,
             resolution=command.resolution,
+            aspect_ratio=command.aspect_ratio,
+            width=command.width,
+            height=command.height,
             output_format=command.output_format,
             watermark=command.watermark,
         )
@@ -503,6 +566,9 @@ def _queued_run(command: GenerationCommand) -> dict[str, Any]:
             ],
             "regions": [_region_snapshot(region) for region in command.regions],
             "resolution": command.resolution,
+            "aspectRatio": command.aspect_ratio,
+            **({"width": command.width} if command.width is not None else {}),
+            **({"height": command.height} if command.height is not None else {}),
             "outputFormat": command.output_format,
             "watermark": command.watermark,
         },

@@ -153,6 +153,9 @@ def command(run_id: str = "run-1") -> GenerationCommand:
         inputs=(GenerationAssetInput(reference_id="subject", asset_id="asset-input.png", order=0),),
         regions=(PointRegion(reference_id="subject", x=200, y=300),),
         resolution="2K",
+        aspect_ratio="smart",
+        width=None,
+        height=None,
         output_format="png",
         watermark=False,
     )
@@ -193,6 +196,10 @@ def test_success_persists_state_localizes_result_and_returns_no_remote_url() -> 
     queued = storage.operations[0][1]
     assert queued["state"] == "queued"
     assert queued["requestSnapshot"]["inputAssets"] == [{"referenceId": "subject", "assetId": "asset-input.png", "order": 0}]
+    assert queued["requestSnapshot"]["resolution"] == "2K"
+    assert queued["requestSnapshot"]["aspectRatio"] == "smart"
+    assert "width" not in queued["requestSnapshot"]
+    assert "height" not in queued["requestSnapshot"]
     assert REMOTE_URL not in repr(queued)
 
     assert storage.operations[1][1][1]["state"] == "running"
@@ -222,6 +229,75 @@ def test_success_persists_state_localizes_result_and_returns_no_remote_url() -> 
     assert result.capture_id == "capture-generated"
     assert REMOTE_URL not in repr(result)
     assert "remote_url" not in result.__dataclass_fields__
+
+
+def test_custom_size_is_preserved_in_history_and_provider_request() -> None:
+    service, storage, provider, _fetcher = make_service()
+
+    service.generate(replace(command(), aspect_ratio="custom", width=2048, height=1024))
+
+    snapshot = storage.operations[0][1]["requestSnapshot"]
+    assert snapshot["aspectRatio"] == "custom"
+    assert snapshot["width"] == 2048
+    assert snapshot["height"] == 1024
+    assert provider.requests[0].aspect_ratio == "custom"
+    assert provider.requests[0].width == 2048
+    assert provider.requests[0].height == 1024
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        (1280, 720),
+        (5660, 817),
+        (3840, 240),
+        (240, 3840),
+    ],
+)
+def test_custom_size_accepts_inclusive_official_pixel_and_ratio_boundaries(width: int, height: int) -> None:
+    service, _storage, provider, _fetcher = make_service()
+
+    service.generate(replace(command(f"run-boundary-{width}-{height}"), aspect_ratio="custom", width=width, height=height))
+
+    assert provider.requests[0].width == width
+    assert provider.requests[0].height == height
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"aspect_ratio": "5:4"},
+        {"aspect_ratio": "custom", "width": None, "height": None},
+        {"aspect_ratio": "custom", "width": 2048, "height": None},
+        {"aspect_ratio": "custom", "width": True, "height": 1024},
+        {"aspect_ratio": "custom", "width": 1024.0, "height": 1024},
+        {"aspect_ratio": "custom", "width": 0, "height": 1024},
+        {"aspect_ratio": "custom", "width": 1024, "height": 899},
+        {"aspect_ratio": "custom", "width": 4624221, "height": 1},
+        {"aspect_ratio": "custom", "width": 16001, "height": 1000},
+        {"aspect_ratio": "custom", "width": 1000, "height": 16001},
+        {"aspect_ratio": "1:1", "width": 1024, "height": 1024},
+    ],
+)
+def test_invalid_size_intent_fails_before_asset_or_credential_access(changes: dict[str, Any]) -> None:
+    storage = FakeStorage()
+    connections = FakeConnections(credential_error=OSError("keyring raw-secret"))
+    provider = FakeProvider()
+    service, _, _, _ = make_service(storage=storage, connections=connections, provider=provider)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(replace(command("run-invalid-size"), **changes))
+
+    assert exc_info.value.code in {"unsupported_aspect_ratio", "invalid_custom_size"}
+    assert connections.credential_reads == 0
+    assert provider.requests == []
+    assert not any(operation == "load_asset" for operation, _payload in storage.operations)
+    assert storage.runs["run-invalid-size"]["state"] == "failed"
+    snapshot = storage.runs["run-invalid-size"]["requestSnapshot"]
+    if changes.get("width") is not None:
+        assert snapshot["width"] == changes["width"]
+    if changes.get("height") is not None:
+        assert snapshot["height"] == changes["height"]
 
 
 def test_resolved_connection_repr_never_contains_credential() -> None:
@@ -525,6 +601,9 @@ def test_router_maps_camel_case_request_and_returns_only_local_result() -> None:
             "inputs": [{"referenceId": "subject", "assetId": "asset-input.png", "order": 0}],
             "regions": [{"type": "point", "referenceId": "subject", "x": 20, "y": 30}],
             "resolution": "2K",
+            "aspectRatio": "custom",
+            "width": 2048,
+            "height": 1024,
             "outputFormat": "png",
             "watermark": False,
         },
@@ -543,6 +622,45 @@ def test_router_maps_camel_case_request_and_returns_only_local_result() -> None:
     }
     assert "url" not in repr(payload).lower()
     assert received[0].regions == (PointRegion(reference_id="subject", x=20, y=30),)
+    assert received[0].aspect_ratio == "custom"
+    assert (received[0].width, received[0].height) == (2048, 1024)
+
+
+def test_router_accepts_snake_case_size_alias_and_forbids_unknown_fields() -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import ImageGenerationBody, router
+
+    payload = {
+        "projectId": "project-1",
+        "nodeId": "node-1",
+        "connectionId": "connection-1",
+        "modelId": "doubao-seedream-5-0-pro-260628",
+        "mode": "generate",
+        "promptDocument": {"segments": [{"type": "text", "text": "snow"}]},
+        "resolution": "1K",
+        "aspect_ratio": "custom",
+        "width": 1280,
+        "height": 720,
+        "outputFormat": "png",
+    }
+
+    body = ImageGenerationBody.model_validate(payload)
+    assert body.aspect_ratio == "custom"
+    assert (body.width, body.height) == (1280, 720)
+
+    class UncalledService:
+        def generate(self, _command: GenerationCommand) -> GenerationOutcome:
+            raise AssertionError("Invalid router input reached the generation service")
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: UncalledService()
+    client = TestClient(app)
+
+    assert client.post("/api/promptcard/runtime/image-generations", json={**payload, "size": "1280x720"}).status_code == 422
+
+    for field, value in (("width", "1280"), ("height", 720.0), ("width", True)):
+        assert client.post("/api/promptcard/runtime/image-generations", json={**payload, field: value}).status_code == 422
 
 
 def test_router_error_has_no_raw_secret_in_chain_traceback_or_response() -> None:
@@ -560,6 +678,7 @@ def test_router_error_has_no_raw_secret_in_chain_traceback_or_response() -> None
         "inputs": [],
         "regions": [],
         "resolution": "2K",
+        "aspectRatio": "smart",
         "outputFormat": "png",
         "watermark": False,
     }

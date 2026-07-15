@@ -49,6 +49,9 @@ def generation_request(**overrides: Any) -> ImageGenerationRequest:
         "inputs": (ImageInput(reference_id="ref-1", image="data:image/png;base64,abc", order=0),),
         "regions": (),
         "resolution": "2K",
+        "aspect_ratio": "smart",
+        "width": None,
+        "height": None,
         "output_format": "png",
         "watermark": False,
     }
@@ -105,6 +108,80 @@ def test_maps_provider_neutral_request_to_exact_ark_sdk_arguments() -> None:
     assert "sequential_image_generation_options" not in sdk_arguments
     assert "mask" not in sdk_arguments
     assert sdk_arguments["size"] != "4K"
+
+
+@pytest.mark.parametrize(
+    ("resolution", "aspect_ratio", "expected_size"),
+    [
+        ("1K", "1:1", "1024x1024"),
+        ("1K", "4:3", "1152x864"),
+        ("1K", "3:4", "864x1152"),
+        ("1K", "16:9", "1424x800"),
+        ("1K", "9:16", "800x1424"),
+        ("1K", "3:2", "1248x832"),
+        ("1K", "2:3", "832x1248"),
+        ("1K", "21:9", "1568x672"),
+        ("2K", "1:1", "2048x2048"),
+        ("2K", "4:3", "2368x1776"),
+        ("2K", "3:4", "1776x2368"),
+        ("2K", "16:9", "2816x1584"),
+        ("2K", "9:16", "1584x2816"),
+        ("2K", "3:2", "2496x1664"),
+        ("2K", "2:3", "1664x2496"),
+        ("2K", "21:9", "3136x1344"),
+    ],
+)
+def test_maps_seedream_5_pro_official_ratio_presets_to_exact_size(
+    resolution: str,
+    aspect_ratio: str,
+    expected_size: str,
+) -> None:
+    images = FakeImages(response=SimpleNamespace(data=[SimpleNamespace(url="https://example.invalid/result.png")]))
+    provider = VolcengineSeedreamProvider(
+        api_key="secret-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    provider.generate(generation_request(resolution=resolution, aspect_ratio=aspect_ratio))
+
+    assert images.calls[0]["size"] == expected_size
+
+
+def test_maps_custom_size_to_exact_sdk_width_and_height() -> None:
+    images = FakeImages(response=SimpleNamespace(data=[SimpleNamespace(url="https://example.invalid/result.png")]))
+    provider = VolcengineSeedreamProvider(
+        api_key="secret-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    provider.generate(generation_request(aspect_ratio="custom", width=2048, height=1024))
+
+    assert images.calls[0]["size"] == "2048x1024"
+
+
+@pytest.mark.parametrize(
+    ("overrides", "expected_code"),
+    [
+        ({"aspect_ratio": "5:4"}, "unsupported_aspect_ratio"),
+        ({"aspect_ratio": "custom", "width": 2048, "height": None}, "invalid_custom_size"),
+        ({"aspect_ratio": "1:1", "width": 1024, "height": 1024}, "invalid_custom_size"),
+    ],
+)
+def test_rejects_invalid_size_intent_before_calling_sdk(overrides: dict[str, Any], expected_code: str) -> None:
+    images = FakeImages(response=None)
+    provider = VolcengineSeedreamProvider(
+        api_key="secret-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.generate(generation_request(**overrides))
+
+    assert exc_info.value.code == expected_code
+    assert images.calls == []
 
 
 @pytest.mark.parametrize("resolution", ["4K", "1024x1024"])

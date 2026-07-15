@@ -72,6 +72,9 @@ class ImageGenerationBody(RequestModel):
     inputs: list[AssetInputBody] = Field(default_factory=list)
     regions: list[RegionBody] = Field(default_factory=list)
     resolution: str
+    aspect_ratio: str = Field(default="smart", alias="aspectRatio")
+    width: Annotated[int, Field(strict=True, gt=0)] | None = None
+    height: Annotated[int, Field(strict=True, gt=0)] | None = None
     output_format: str = Field(alias="outputFormat")
     watermark: bool = False
 
@@ -139,6 +142,9 @@ def _command(body: ImageGenerationBody) -> GenerationCommand:
         ),
         regions=regions,
         resolution=body.resolution,
+        aspect_ratio=body.aspect_ratio,
+        width=body.width,
+        height=body.height,
         output_format=body.output_format,
         watermark=body.watermark,
     )

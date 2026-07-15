@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type UIEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react'
 import {
   storageServiceClient,
   type ImageGenerationRun,
@@ -14,6 +14,7 @@ export interface GenerationHistoryPanelProps {
     nodeId: string
     cursor?: string | null
     limit?: number
+    signal?: AbortSignal
   }) => Promise<ImageGenerationRunPage>
 }
 
@@ -27,29 +28,64 @@ export const GenerationHistoryPanel = ({
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const generationRef = useRef(0)
+  const requestsRef = useRef(new Map<string, AbortController>())
 
-  const fetchPage = useCallback(async (cursor: string | null, replace: boolean) => {
+  const abortRequests = useCallback(() => {
+    requestsRef.current.forEach(controller => controller.abort())
+    requestsRef.current.clear()
+  }, [])
+
+  const fetchPage = useCallback(async (
+    cursor: string | null,
+    replace: boolean,
+    generation: number
+  ) => {
+    const requestKey = cursor || '__initial__'
+    if (requestsRef.current.has(requestKey)) return
+    const controller = new AbortController()
+    requestsRef.current.set(requestKey, controller)
     setLoading(true)
     setError(null)
     try {
-      const page = await loadPage({ projectId, nodeId, cursor, limit: pageSize })
-      setRuns(current => replace ? page.runs : [...current, ...page.runs])
+      const page = await loadPage({
+        projectId,
+        nodeId,
+        cursor,
+        limit: pageSize,
+        signal: controller.signal
+      })
+      if (controller.signal.aborted || generation !== generationRef.current) return
+      setRuns(current => replace ? page.runs : appendUniqueRuns(current, page.runs))
       setNextCursor(page.nextCursor)
     } catch {
+      if (controller.signal.aborted || generation !== generationRef.current) return
       setError('Generation history could not be loaded')
     } finally {
-      setLoading(false)
+      if (requestsRef.current.get(requestKey) === controller) {
+        requestsRef.current.delete(requestKey)
+      }
+      if (!controller.signal.aborted && generation === generationRef.current) {
+        setLoading(requestsRef.current.size > 0)
+      }
     }
   }, [loadPage, nodeId, pageSize, projectId])
 
   useEffect(() => {
+    const generation = generationRef.current + 1
+    generationRef.current = generation
+    abortRequests()
     setRuns([])
     setNextCursor(null)
-    void fetchPage(null, true)
-  }, [fetchPage])
+    void fetchPage(null, true, generation)
+    return () => {
+      if (generationRef.current === generation) generationRef.current += 1
+      abortRequests()
+    }
+  }, [abortRequests, fetchPage])
 
   const loadMore = () => {
-    if (!loading && nextCursor) void fetchPage(nextCursor, false)
+    if (nextCursor) void fetchPage(nextCursor, false, generationRef.current)
   }
 
   return (
@@ -155,5 +191,12 @@ const GenerationRunCard = ({ run }: { run: ImageGenerationRun }) => {
 
 const assetUrl = (assetId: string): string => `/storage-api/assets/${encodeURIComponent(assetId)}`
 const stateLabel = (state: ImageGenerationRun['state']): string => state.charAt(0).toUpperCase() + state.slice(1)
+const appendUniqueRuns = (
+  current: readonly ImageGenerationRun[],
+  incoming: readonly ImageGenerationRun[]
+): ImageGenerationRun[] => {
+  const ids = new Set(current.map(run => run.id))
+  return [...current, ...incoming.filter(run => !ids.has(run.id) && ids.add(run.id))]
+}
 
 export default GenerationHistoryPanel

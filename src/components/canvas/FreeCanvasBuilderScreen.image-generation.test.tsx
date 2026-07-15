@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState, type ReactElement, type ReactNode } from 'react'
+import { Fragment, useState, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -40,10 +40,15 @@ vi.mock('@/components/canvas/image-generation/ImageGeneratorInspector', () => ({
   ImageGeneratorInspector: ({ onGenerate, onOpenHistory, node }: {
     onGenerate?: () => void
     onOpenHistory: (nodeId: string) => void
-    node: { id: string }
+    node: { id: string; meta: { status?: string } }
   }) => (
     <div data-image-generator-inspector>
-      <button type="button" data-builder-generate onClick={onGenerate}>Generate</button>
+      <button
+        type="button"
+        data-builder-generate
+        disabled={node.meta.status === 'validating' || node.meta.status === 'running'}
+        onClick={onGenerate}
+      >Generate</button>
       <button type="button" data-builder-history onClick={() => onOpenHistory(node.id)}>History</button>
     </div>
   )
@@ -122,8 +127,8 @@ const BuilderHost = ({
   initialCanvas: IFreeCanvasProject
   onWrite: (canvas: IFreeCanvasProject) => void
 }) => {
-  const [canvas, setCanvas] = useState(initialCanvas)
-  useEffect(() => setCanvas(initialCanvas), [activeProject.id, initialCanvas])
+  const [canvasState, setCanvasState] = useState({ projectId: activeProject.id, canvas: initialCanvas })
+  const canvas = canvasState.projectId === activeProject.id ? canvasState.canvas : initialCanvas
   return (
     <FreeCanvasBuilderScreen
       activeProject={activeProject}
@@ -134,7 +139,7 @@ const BuilderHost = ({
       onRenameProject={vi.fn()}
       onSave={vi.fn()}
       onChange={next => {
-        setCanvas(next)
+        setCanvasState({ projectId: activeProject.id, canvas: next })
         onWrite(next)
       }}
     />
@@ -301,6 +306,55 @@ describe('free canvas image generation feature entry', () => {
 
     expect(onWriteA).not.toHaveBeenCalled()
     expect(onWriteB).not.toHaveBeenCalled()
+  })
+
+  it('reconciles a project A run after A to B to A and allows another generation without writing B', async () => {
+    const pendingA = deferred<{ runId: string; assetId: string; captureId: string }>()
+    const secondRun = deferred<{ runId: string; assetId: string; captureId: string }>()
+    mocks.requestImageGeneration
+      .mockReturnValueOnce(pendingA.promise)
+      .mockReturnValueOnce(secondRun.promise)
+    const canvasA = generatorCanvas(1)
+    const canvasB = generatorCanvas(2)
+    let latestA = canvasA
+    const onWriteA = vi.fn((next: IFreeCanvasProject) => { latestA = next })
+    const onWriteB = vi.fn()
+    const renderer = mount(
+      <BuilderHost activeProject={project('project-a')} initialCanvas={canvasA} onWrite={onWriteA} />
+    )
+
+    click(renderer, 'data-builder-generate')
+    expect(latestA.nodes[0]).toMatchObject({ meta: { status: 'running' } })
+    await act(async () => {
+      renderer.update(<BuilderHost activeProject={project('project-b')} initialCanvas={canvasB} onWrite={onWriteB} />)
+    })
+    onWriteA.mockClear()
+    onWriteB.mockClear()
+    await act(async () => {
+      pendingA.resolve({ runId: 'run-a', assetId: 'asset-a', captureId: 'capture-a' })
+      await pendingA.promise
+    })
+    expect(onWriteA).not.toHaveBeenCalled()
+    expect(onWriteB).not.toHaveBeenCalled()
+
+    await act(async () => {
+      renderer.update(<BuilderHost activeProject={project('project-a')} initialCanvas={latestA} onWrite={onWriteA} />)
+    })
+    expect(latestA.nodes[0]).toMatchObject({
+      primaryAssetId: 'asset-a',
+      activeRunId: 'run-a',
+      meta: { status: 'succeeded', resultCaptureId: 'capture-a' }
+    })
+    expect(onWriteB).not.toHaveBeenCalled()
+    const generateButton = renderer.root.findByProps({ 'data-builder-generate': true })
+    expect(generateButton.props.disabled).toBe(false)
+
+    act(() => generateButton.props.onClick())
+    expect(mocks.requestImageGeneration).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      secondRun.resolve({ runId: 'run-a-2', assetId: 'asset-a-2', captureId: 'capture-a-2' })
+      await secondRun.promise
+    })
   })
 
   it('opens history through the mounted builder inspector for the selected project and node', () => {

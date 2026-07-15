@@ -203,6 +203,7 @@ const FreeCanvasBuilderInner = ({
     : null
   const isCanvasKeyboardLocked = Boolean(annotationEditorNode || cropNode)
   const freeCanvasRef = useRef(freeCanvas)
+  const onChangeRef = useRef(onChange)
   const selectedImageNodeRef = useRef<IFreeCanvasImageNode | null>(selectedImageNode)
   const copiedImageNodeRef = useRef<IFreeCanvasImageNode | null>(null)
   const fileDragDepthRef = useRef(0)
@@ -227,8 +228,9 @@ const FreeCanvasBuilderInner = ({
 
   useEffect(() => {
     freeCanvasRef.current = freeCanvas
+    onChangeRef.current = onChange
     selectedImageNodeRef.current = selectedImageNode
-  }, [freeCanvas, selectedImageNode])
+  }, [freeCanvas, onChange, selectedImageNode])
 
   useEffect(() => {
     setGenerationHistory(null)
@@ -407,8 +409,39 @@ const FreeCanvasBuilderInner = ({
 
   const emitGenerationCanvas = useCallback((next: IFreeCanvasProject) => {
     freeCanvasRef.current = next
-    onChange(next)
-  }, [onChange])
+    onChangeRef.current(next)
+  }, [])
+
+  useEffect(() => {
+    const projectId = activeProject.id
+    const guard = imageGenerationGuardRef.current!
+    const sessions = imageGenerationSessionsRef.current!
+    for (const node of freeCanvasRef.current.nodes) {
+      if (
+        node.kind !== 'image-generator'
+        || (node.meta.status !== 'validating' && node.meta.status !== 'running')
+      ) continue
+      const operationId = guard.begin(projectId, node.id)
+      const operationIsCurrent = () => guard.isCurrent(projectId, node.id, operationId)
+      const reconciled = sessions.reconcile(projectId, node.id, {
+        onStatus: status => {
+          if (!operationIsCurrent()) return
+          emitGenerationCanvas(applyImageGenerationStatus(freeCanvasRef.current, node.id, status))
+        },
+        onSucceeded: result => {
+          if (!operationIsCurrent()) return
+          emitGenerationCanvas(applyImageGenerationSuccess(freeCanvasRef.current, node.id, result))
+        },
+        onFailed: error => {
+          if (!operationIsCurrent()) return
+          emitGenerationCanvas(applyImageGenerationFailure(freeCanvasRef.current, node.id, error))
+        }
+      })
+      if (!reconciled && operationIsCurrent()) {
+        emitGenerationCanvas(applyImageGenerationStatus(freeCanvasRef.current, node.id, 'idle'))
+      }
+    }
+  }, [activeProject.id, emitGenerationCanvas])
 
   const createImageGenerator = useCallback(async () => {
     if (!imageGenerationNodeV1) return

@@ -40,6 +40,41 @@ export class ImageGenerationSessionManager {
     return Boolean(this.sessions.get(sessionKey(projectId, nodeId))?.active)
   }
 
+  reconcile(
+    projectId: string,
+    nodeId: string,
+    callbacks: ImageGenerationSessionCallbacks
+  ): boolean {
+    const entry = this.sessions.get(sessionKey(projectId, nodeId))
+    if (!entry) return false
+
+    if (entry.active) {
+      void entry.active
+        .then(result => {
+          callbacks.onStatus('succeeded')
+          callbacks.onSucceeded?.(result)
+        })
+        .catch(error => {
+          callbacks.onStatus('failed')
+          callbacks.onFailed?.(error)
+        })
+      return true
+    }
+
+    const state = entry.controller.state
+    if (state.status === 'succeeded') {
+      callbacks.onStatus('succeeded')
+      callbacks.onSucceeded?.(state.result)
+      return true
+    }
+    if (state.status === 'failed') {
+      callbacks.onStatus('failed')
+      callbacks.onFailed?.(state.error)
+      return true
+    }
+    return false
+  }
+
   start(
     request: ImageGenerationRequest,
     callbacks: ImageGenerationSessionCallbacks

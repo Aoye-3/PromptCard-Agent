@@ -114,6 +114,94 @@ describe('free canvas project domain', () => {
     })
   })
 
+  test('round-trips aligned image region bindings when earlier malformed geometry is discarded', () => {
+    const normalized = createFreeCanvasProject(100, {
+      nodes: [{
+        id: 'bound-region-generator',
+        kind: 'image-generator',
+        binding: { connectionId: 'connection-1', modelId: 'image-model-1' },
+        regions: [
+          { type: 'point', x: 'not-a-number', y: 20 },
+          { type: 'bbox', x: 100, y: 200, width: 300, height: 400 }
+        ],
+        meta: {
+          imageRegionBindings: [
+            { regionId: 'region-bad', referenceId: 'reference-bad' },
+            { regionId: 'region-good', referenceId: 'reference-good' }
+          ]
+        }
+      } as never]
+    })
+    const project = createFreeCanvasProject(101, normalized)
+
+    expect(project.nodes[0]).toMatchObject({
+      regions: [{ type: 'bbox', x: 100, y: 200, width: 300, height: 400 }],
+      meta: {
+        imageRegionBindings: [{ regionId: 'region-good', referenceId: 'reference-good' }]
+      }
+    })
+  })
+
+  test('normalizes multiple discarded, missing, and extra region bindings without shifting identities', () => {
+    const project = createFreeCanvasProject(100, {
+      nodes: [{
+        id: 'mixed-bound-region-generator',
+        kind: 'image-generator',
+        binding: { connectionId: 'connection-1', modelId: 'image-model-1' },
+        regions: [
+          { type: 'point', x: Number.NaN, y: 20 },
+          { type: 'bbox', x: 100, y: 200, width: 300, height: 400 },
+          { type: 'bbox', x: 10, y: 20, width: 0, height: 30 },
+          { type: 'point', x: 500, y: 600 },
+          { type: 'bbox', x: 700, y: 800, width: 50, height: 60 }
+        ],
+        meta: {
+          imageRegionBindings: [
+            { regionId: 'region-discarded-point', referenceId: 'reference-discarded-point' },
+            { regionId: 'region-first', referenceId: 'reference-first' },
+            { regionId: 'region-discarded-box', referenceId: 'reference-discarded-box' },
+            null,
+            { regionId: 'region-last', referenceId: 'reference-last' },
+            { regionId: 'region-extra', referenceId: 'reference-extra' }
+          ]
+        }
+      } as never]
+    })
+
+    expect(project.nodes[0]).toMatchObject({
+      regions: [
+        { type: 'bbox', x: 100, y: 200, width: 300, height: 400 },
+        { type: 'point', x: 500, y: 600 },
+        { type: 'bbox', x: 700, y: 800, width: 50, height: 60 }
+      ],
+      meta: {
+        imageRegionBindings: [
+          { regionId: 'region-first', referenceId: 'reference-first' },
+          { regionId: 'region-1', referenceId: '' },
+          { regionId: 'region-last', referenceId: 'reference-last' }
+        ]
+      }
+    })
+  })
+
+  test('keeps legacy image regions without binding metadata safe', () => {
+    const project = createFreeCanvasProject(100, {
+      nodes: [{
+        id: 'legacy-unbound-region-generator',
+        kind: 'image-generator',
+        binding: { connectionId: 'connection-1', modelId: 'image-model-1' },
+        regions: [{ type: 'bbox', x: 100, y: 200, width: 300, height: 400 }],
+        meta: { inspectorTab: 'regions' }
+      } as never]
+    })
+
+    expect(project.nodes[0]).toMatchObject({
+      regions: [{ type: 'bbox', x: 100, y: 200, width: 300, height: 400 }],
+      meta: { inspectorTab: 'regions' }
+    })
+    expect(project.nodes[0].meta).not.toHaveProperty('imageRegionBindings')
+  })
+
   test('round-trips typed image generator edge metadata', () => {
     const project = createFreeCanvasProject(100, {
       nodes: [

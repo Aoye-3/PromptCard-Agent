@@ -579,6 +579,7 @@ const normalizeImageGeneratorNode = (
   const validationWarnings = hasValidBinding
     ? existingWarnings
     : [...new Set([...existingWarnings, 'invalid_image_model_binding'])]
+  const normalizedRegions = normalizeImageRegionsAndBindings(node.regions, meta)
 
   return {
     id: node.id || `free-image-generator-${timestamp}`,
@@ -593,10 +594,12 @@ const normalizeImageGeneratorNode = (
       : { connectionId: '', modelId: '' },
     settings: normalizeImageGeneratorSettings(node.settings),
     promptDocument: normalizePromptDocument(node.promptDocument),
-    regions: normalizeImageRegions(node.regions),
+    regions: normalizedRegions.regions,
     ...(typeof node.activeRunId === 'string' ? { activeRunId: node.activeRunId } : {}),
     ...(typeof node.primaryAssetId === 'string' ? { primaryAssetId: node.primaryAssetId } : {}),
-    meta: validationWarnings.length > 0 ? { ...meta, validationWarnings } : meta
+    meta: validationWarnings.length > 0
+      ? { ...normalizedRegions.meta, validationWarnings }
+      : normalizedRegions.meta
   }
 }
 
@@ -678,6 +681,42 @@ const normalizeImageRegions = (regions: ImageRegion[] | undefined): ImageRegion[
     }
   })
   return normalized
+}
+
+const normalizeImageRegionsAndBindings = (
+  regions: ImageRegion[] | undefined,
+  meta: Record<string, unknown>
+): { regions: ImageRegion[]; meta: Record<string, unknown> } => {
+  const sourceBindings = meta.imageRegionBindings
+  if (!Array.isArray(sourceBindings)) {
+    return { regions: normalizeImageRegions(regions), meta }
+  }
+
+  const normalizedRegions: ImageRegion[] = []
+  const normalizedBindings: Array<{ regionId: string; referenceId: string }> = []
+  const sourceRegions = Array.isArray(regions) ? regions : []
+
+  sourceRegions.forEach((region, sourceIndex) => {
+    const normalizedRegion = normalizeImageRegions([region])[0]
+    if (!normalizedRegion) return
+
+    const binding = sourceBindings[sourceIndex]
+    const normalizedIndex = normalizedRegions.length
+    normalizedRegions.push(normalizedRegion)
+    normalizedBindings.push(
+      binding
+      && typeof binding === 'object'
+      && typeof binding.regionId === 'string'
+      && typeof binding.referenceId === 'string'
+        ? { regionId: binding.regionId, referenceId: binding.referenceId }
+        : { regionId: `region-${normalizedIndex}`, referenceId: '' }
+    )
+  })
+
+  return {
+    regions: normalizedRegions,
+    meta: { ...meta, imageRegionBindings: normalizedBindings }
+  }
 }
 
 const finiteNumber = (value: unknown): number | null => (

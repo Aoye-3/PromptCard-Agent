@@ -29,6 +29,8 @@ __pycache__/
 coverage
 *.lcov
 .nyc_output
+.playwright-browsers/
+test-results/
 
 # Production
 dist

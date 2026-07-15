@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { createServer, type Server } from 'node:http'
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 
@@ -120,6 +120,26 @@ async function makeMarkerCommand(markerName: string) {
   }
 }
 
+async function makeFakeUv(name: string) {
+  const dir = path.dirname(await makeRuntimeManifestPath(`${name}.runtime.json`))
+  const logPath = path.join(dir, `${name}.log`)
+  const uvPath = path.join(dir, 'uv.cmd')
+  await writeFile(uvPath, [
+    '@echo off',
+    `>> "${logPath}" echo ARGS=%*`,
+    `>> "${logPath}" echo UV_CACHE_DIR=%UV_CACHE_DIR%`,
+    `>> "${logPath}" echo UV_PYTHON_INSTALL_DIR=%UV_PYTHON_INSTALL_DIR%`,
+    `>> "${logPath}" echo UV_PROJECT_ENVIRONMENT=%UV_PROJECT_ENVIRONMENT%`,
+    'if "%1 %2"=="python install" (',
+    '  mkdir "%UV_PYTHON_INSTALL_DIR%\\cpython-3.12.12-windows-x86_64-none" 2>nul',
+    '  type nul > "%UV_PYTHON_INSTALL_DIR%\\cpython-3.12.12-windows-x86_64-none\\python.exe"',
+    '  exit /b 0',
+    ')',
+    'exit /b 23'
+  ].join('\r\n'))
+  return { dir, logPath }
+}
+
 function runPowerShell(args: string[], env: NodeJS.ProcessEnv = {}) {
   return new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve, reject) => {
     const child = spawn(powershell, args, { cwd: repoRoot, windowsHide: true, env: { ...process.env, ...env } })
@@ -158,6 +178,41 @@ async function expectScriptSupportsTestParameters() {
 }
 
 describe('start-dev-with-agent.ps1', () => {
+  test('overrides hostile uv paths and provisions only the workspace-local Python', async () => {
+    for (const [name, runtimeScript] of [
+      ['check', agentCheckScriptPath],
+      ['start', agentStartScriptPath]
+    ] as const) {
+      const fakeUv = await makeFakeUv(`fake-uv-${name}`)
+      const fixtureScripts = path.join(fakeUv.dir, 'scripts')
+      const fixtureScript = path.join(fixtureScripts, path.basename(runtimeScript))
+      await mkdir(fixtureScripts, { recursive: true })
+      await copyFile(runtimeScript, fixtureScript)
+      const expectedCache = path.join(fakeUv.dir, '.uv-cache')
+      const expectedPythonInstall = path.join(fakeUv.dir, 'agent-runtime', 'backend', '.python')
+      const expectedEnvironment = path.join(fakeUv.dir, 'agent-runtime', 'backend', '.venv')
+      const expectedBackend = path.join(fakeUv.dir, 'agent-runtime', 'backend')
+      const expectedPython = path.join(expectedPythonInstall, 'cpython-3.12.12-windows-x86_64-none', 'python.exe')
+      const result = await runPowerShell([
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixtureScript
+      ], {
+        PATH: `${fakeUv.dir}${path.delimiter}${process.env.PATH || process.env.Path || ''}`,
+        UV_CACHE_DIR: 'C:\\hostile\\cache',
+        UV_PYTHON_INSTALL_DIR: 'C:\\hostile\\python',
+        UV_PROJECT_ENVIRONMENT: 'C:\\hostile\\venv'
+      })
+
+      expect(result.code).not.toBe(0)
+      const log = await readFile(fakeUv.logPath, 'utf8')
+      expect(log).toContain('ARGS=python install 3.12.12')
+      expect(log).toContain(`ARGS=sync --project ${expectedBackend} --python ${expectedPython}`)
+      expect(log).toContain(`UV_CACHE_DIR=${expectedCache}`)
+      expect(log).toContain(`UV_PYTHON_INSTALL_DIR=${expectedPythonInstall}`)
+      expect(log).toContain(`UV_PROJECT_ENVIRONMENT=${expectedEnvironment}`)
+      expect(log).not.toContain('C:\\hostile')
+    }
+  })
+
   test('starts and checks the agent runtime without importing a plaintext model key', async () => {
     const sources = await Promise.all([readFile(agentCheckScriptPath, 'utf8'), readFile(agentStartScriptPath, 'utf8')])
 

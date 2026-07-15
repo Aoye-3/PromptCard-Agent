@@ -138,7 +138,15 @@ type ErrorEnvelope = {
 
 async function request<T>(url: string, init?: RequestInit, timeoutMs = 10_000): Promise<T> {
   const controller = new AbortController()
-  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+  const externalSignal = init?.signal
+  let timedOut = false
+  const abortFromExternalSignal = () => controller.abort(externalSignal?.reason)
+  if (externalSignal?.aborted) abortFromExternalSignal()
+  else externalSignal?.addEventListener('abort', abortFromExternalSignal, { once: true })
+  const timeoutId = globalThis.setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
   let response: Response
   try {
     response = await fetch(url, {
@@ -150,15 +158,20 @@ async function request<T>(url: string, init?: RequestInit, timeoutMs = 10_000): 
       }
     })
   } catch (error) {
-    const timedOut = error instanceof DOMException && error.name === 'AbortError'
+    const externallyAborted = !timedOut && externalSignal?.aborted
     throw new StorageHttpError(
       0,
-      timedOut ? 'timeout' : 'service_unavailable',
-      timedOut ? 'Storage request timed out.' : 'Storage service is unavailable.',
+      timedOut ? 'timeout' : externallyAborted ? 'request_aborted' : 'service_unavailable',
+      timedOut
+        ? 'Storage request timed out.'
+        : externallyAborted
+          ? 'Storage request was cancelled.'
+          : 'Storage service is unavailable.',
       error
     )
   } finally {
     globalThis.clearTimeout(timeoutId)
+    externalSignal?.removeEventListener('abort', abortFromExternalSignal)
   }
 
   const payload = await response.json().catch(() => null) as (T & ErrorEnvelope) | ErrorEnvelope | null
@@ -255,12 +268,14 @@ export const storageServiceClient = {
       nodeId: string
       cursor?: string | null
       limit?: number
+      signal?: AbortSignal
     }): Promise<ImageGenerationRunPage> {
       const parameters = new URLSearchParams({ projectId: query.projectId, nodeId: query.nodeId })
       if (query.cursor) parameters.set('cursor', query.cursor)
       if (query.limit !== undefined) parameters.set('limit', String(query.limit))
       const page = await request<{ runs?: unknown[]; nextCursor?: unknown }>(
-        `/storage-api/image-generation-runs?${parameters.toString()}`
+        `/storage-api/image-generation-runs?${parameters.toString()}`,
+        { signal: query.signal }
       )
       return {
         runs: Array.isArray(page.runs) ? page.runs.flatMap(normalizeImageGenerationRun) : [],

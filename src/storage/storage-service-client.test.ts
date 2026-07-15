@@ -119,6 +119,52 @@ describe('storageServiceClient', () => {
     await request
   })
 
+  test('combines an external abort signal and removes its listener and timeout after success', async () => {
+    vi.useFakeTimers()
+    const external = new AbortController()
+    const addListener = vi.spyOn(external.signal, 'addEventListener')
+    const removeListener = vi.spyOn(external.signal, 'removeEventListener')
+    let fetchSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      fetchSignal = init?.signal || undefined
+      return Promise.resolve(new Response(JSON.stringify({ runs: [], nextCursor: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' }
+      }))
+    }))
+
+    await storageServiceClient.imageGenerationRuns.getPage({
+      projectId: 'project-1', nodeId: 'node-1', signal: external.signal
+    })
+
+    expect(addListener).toHaveBeenCalledWith('abort', expect.any(Function), { once: true })
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function))
+    expect(vi.getTimerCount()).toBe(0)
+    external.abort()
+    expect(fetchSignal?.aborted).toBe(false)
+  })
+
+  test('keeps the 10 second timeout active while composing an external signal', async () => {
+    vi.useFakeTimers()
+    const external = new AbortController()
+    const addListener = vi.spyOn(external.signal, 'addEventListener')
+    const removeListener = vi.spyOn(external.signal, 'removeEventListener')
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    })))
+
+    const pending = expect(storageServiceClient.imageGenerationRuns.getPage({
+      projectId: 'project-1', nodeId: 'node-1', signal: external.signal
+    })).rejects.toMatchObject({ code: 'timeout', status: 0 })
+    await vi.advanceTimersByTimeAsync(10_000)
+
+    await pending
+    expect(external.signal.aborted).toBe(false)
+    expect(addListener).toHaveBeenCalled()
+    expect(removeListener).toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   test('rejects unsupported upload files before sending a request', async () => {
     const fetchMock = vi.fn()
     vi.stubGlobal('fetch', fetchMock)

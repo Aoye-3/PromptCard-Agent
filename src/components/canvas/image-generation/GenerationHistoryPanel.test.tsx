@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { GenerationHistoryPanel, GenerationHistoryPanelView } from './GenerationHistoryPanel'
 import type { ImageGenerationRun, ImageGenerationRunPage } from '@/storage/storage-service-client'
 
@@ -46,6 +46,11 @@ const deferred = <T,>() => {
 const mountedRunIds = (renderer: ReactTestRenderer): string[] => renderer.root
   .findAll(node => typeof node.props['data-generation-run'] === 'string')
   .map(node => node.props['data-generation-run'] as string)
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
 
 describe('GenerationHistoryPanelView', () => {
   it('shows permanent success/failure details and pagination without delete controls', () => {
@@ -160,5 +165,30 @@ describe('GenerationHistoryPanel async isolation', () => {
     expect(signal?.aborted).toBe(true)
     await act(async () => { pending.resolve(page([runFor('run-late', 'project-1', 'node-1')])) })
     expect(renderer.toJSON()).toBeNull()
+  })
+
+  it('aborts the real Storage fetch on identity switch and unmount', async () => {
+    const fetchSignals: AbortSignal[] = []
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal
+      if (!signal) throw new Error('Expected a fetch signal')
+      fetchSignals.push(signal)
+      signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(<GenerationHistoryPanel projectId="project-old" nodeId="node-1" />)
+    })
+
+    await act(async () => {
+      renderer.update(<GenerationHistoryPanel projectId="project-new" nodeId="node-2" />)
+    })
+    expect(fetchSignals).toHaveLength(2)
+    expect(fetchSignals[0].aborted).toBe(true)
+    expect(fetchSignals[1].aborted).toBe(false)
+
+    await act(async () => { renderer.unmount() })
+    expect(fetchSignals[1].aborted).toBe(true)
   })
 })

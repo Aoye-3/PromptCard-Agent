@@ -146,7 +146,8 @@ For Feishu card updates, DeerFlow stores the running card's `message_id` per inb
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) package manager
-- API keys for your chosen LLM provider
+- A supported operating-system keyring backend for stored provider credentials
+- API credentials are optional at startup and required only when the selected model is called
 
 ### Installation
 
@@ -191,6 +192,8 @@ Set your API keys:
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
+PromptCard-managed model connections are different from DeerFlow YAML model examples: their credentials are entered through the model-management API and stored in the operating-system keyring. The Gateway can start without them. Do not put PromptCard connection credentials in `.env`, project files, browser storage, or startup scripts.
+
 ### Running
 
 **Full Application** (from project root):
@@ -212,6 +215,8 @@ make gateway
 ```
 
 Direct access: LangGraph at http://localhost:2024, Gateway at http://localhost:8001
+
+Before using Seedream, run `npm.cmd run agent:check` from the PromptCard repository root. It verifies `keyring` and `volcengine-python-sdk[ark]`; any repair command it prints targets the repository-local F: environment and cache.
 
 ---
 
@@ -315,6 +320,16 @@ MCP servers and skill states in a single file:
 - `DEER_FLOW_EXTENSIONS_CONFIG_PATH` - Override extensions_config.json location
 - Model API keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, etc.
 - Tool API keys: `TAVILY_API_KEY`, `GITHUB_TOKEN`, etc.
+
+PromptCard model connections do not require `DEEPSEEK_API_KEY` or `ARK_API_KEY` at process startup. Connection secrets are retrieved from keyring only after connection, model, capability, prompt/region, and reference-asset validation succeeds. See [Image Generation and Model Management](../../docs/architecture/image-generation-and-model-management.md).
+
+### PromptCard image generation
+
+- The catalog currently exposes Seedream 5.0 Pro through the `volcengine-ark` adapter.
+- Supported modes are generate, edit, and region-edit, with at most 10 ordered reference images.
+- Supported resolutions are 1K and 2K; each request returns exactly one PNG or JPEG result and is non-streaming.
+- Point and bounding-box coordinates use the inclusive 0-999 coordinate space. Region edit is prompt-based; native mask upload is not advertised.
+- Generation runs are durable PromptCard Storage schema-v3 history. API pages contain 1-100 rows, but there is no automatic total-history pruning; capacity is bounded by available disk space.
 
 ### LangSmith Tracing
 

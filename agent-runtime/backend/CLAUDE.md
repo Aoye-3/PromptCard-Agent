@@ -308,6 +308,16 @@ Proxied through nginx: `/api/langgraph/*` → Gateway LangGraph-compatible runti
 - Config values starting with `$` resolved as environment variables
 - Missing provider modules surface actionable install hints from reflection resolvers (for example `uv add langchain-google-genai`)
 
+### PromptCard Model Management and Image Generation
+
+- PromptCard connections are provider-neutral metadata in `$DEER_FLOW_HOME/promptcard-model-connections.json`; secrets are referenced by `credentialRef` and stored under the `dev.promptcard.manager.shell` operating-system keyring service.
+- Gateway startup, health, and catalog access must not require a credential. Credential lookup occurs only after connection/model/capability, prompt/region, and reference-asset validation; a credential-less call returns `credential_missing`.
+- Do not add plaintext key-file discovery, provider-key environment injection, secret logging, frontend persistence, or secrets to generation snapshots.
+- `ImageGenerationProvider` adapters own vendor translation. Catalog capabilities and provider construction must be updated together when adding a provider; the canvas contract remains `connectionId + modelId`.
+- PromptCard Storage schema v3 owns immutable terminal generation history and generated assets. Listing is cursor-paginated with a 1-100 page size and no automatic total retention limit.
+- Rollout may hide the UI behind `imageGenerationNodeV1`. Rollback disables the entry/provider path but preserves v3 history and assets; never downgrade the Storage database to schema v2.
+- Operational details, migration, backups, limits, errors, and the provider-extension checklist live in [the repository architecture guide](../../docs/architecture/image-generation-and-model-management.md).
+
 ### vLLM Provider (`packages/harness/deerflow/models/vllm_provider.py`)
 
 - `VllmChatModel` subclasses `langchain_openai:ChatOpenAI` for vLLM 0.19.0 OpenAI-compatible endpoints

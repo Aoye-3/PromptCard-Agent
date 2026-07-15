@@ -113,7 +113,7 @@ PromptCard-Manager 不替代视频生成、图像生成或剪辑工具，而是�
 - Frontend: Vite, React, TypeScript, Tailwind, Zustand.
 - Durable app data: local `promptcard-storage` service writing JSON files under `data/`.
 - Agent Runtime: Python service under `agent-runtime/`, exposed to the frontend only through `/agent-api/promptcard/runtime/*`.
-- Model service: DeepSeek-only runtime configuration managed from the Agent panel.
+- Model service: provider-neutral connection and model catalog managed from the Agent panel; chat and image slots bind `connectionId + modelId`.
 - Agent Chatbox isolation: each Agent surface has its own `sessionKey` and DeerFlow `threadId`.
 
 Key docs:
@@ -123,6 +123,13 @@ Key docs:
 - [Agent Runtime API](./docs/api/agent-runtime-api.md)
 - [Frontend Application](./docs/frontend/app-shell.md)
 - [Agent Runtime Backend](./docs/backend/agent-runtime.md)
+- [Image Generation and Model Management](./docs/architecture/image-generation-and-model-management.md)
+
+## Secure model connections and image generation
+
+The Agent Runtime starts and serves health/catalog routes without a configured model credential. Credentials are entered through model management and stored in the operating-system keyring; startup scripts do not read plaintext key files, extract `sk-` values, or write provider keys into environment variables. A model call without a configured credential returns `credential_missing`.
+
+Run `npm.cmd run agent:check` before enabling image generation. It verifies the Python keyring and Volcengine Ark SDK and prints a workspace-local F: repair command when either dependency is unavailable. Seedream generation history is durable in PromptCard Storage schema v3 and is not deleted when a canvas node or project is removed.
 
 ## Free Canvas Builder Direction
 
@@ -162,7 +169,7 @@ uv run pytest tests/test_promptcard_runtime_boundary.py tests/test_model_config.
 ## Agent Runtime Rules
 
 - Frontend code should call the PromptCard Runtime Boundary, not DeerFlow internals.
-- DeepSeek config is stored backend-side; API keys must not be stored in browser localStorage or returned in plaintext.
+- Connection metadata is stored backend-side and provider credentials stay in the operating-system keyring; credentials must never enter browser storage, project JSON, generation history, logs, or API responses.
 - Agent panel diagnostics, Prompt Library Agent, Card Builder, Storyboard Builder, and Three-stage Builder must not share chat state.
 - Required session keys:
   - `diagnostics:agent-panel`

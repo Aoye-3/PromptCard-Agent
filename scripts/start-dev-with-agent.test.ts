@@ -6,6 +6,8 @@ import { spawn } from 'node:child_process'
 
 const repoRoot = path.resolve(__dirname, '..')
 const scriptPath = path.join(repoRoot, 'scripts', 'start-dev-with-agent.ps1')
+const agentCheckScriptPath = path.join(repoRoot, 'scripts', 'check-agent-runtime.ps1')
+const agentStartScriptPath = path.join(repoRoot, 'scripts', 'start-agent-runtime.ps1')
 const viteConfigPath = path.join(repoRoot, 'vite.config.ts')
 const powershell = 'powershell'
 const servers: Server[] = []
@@ -156,6 +158,32 @@ async function expectScriptSupportsTestParameters() {
 }
 
 describe('start-dev-with-agent.ps1', () => {
+  test('starts and checks the agent runtime without importing a plaintext model key', async () => {
+    const sources = await Promise.all([readFile(agentCheckScriptPath, 'utf8'), readFile(agentStartScriptPath, 'utf8')])
+
+    for (const source of sources) {
+      expect(source).not.toContain('API-Key.txt')
+      expect(source).not.toContain('PROMPTCARD_AGENT_API_KEY_FILE')
+      expect(source).not.toContain('DEEPSEEK_API_KEY')
+      expect(source).not.toContain('sk-')
+      expect(source).not.toMatch(/C:\\(?:Users|Program Files)/)
+    }
+  })
+
+  test('checks secure image runtime dependencies with a workspace-local repair command', async () => {
+    const source = await readFile(agentCheckScriptPath, 'utf8')
+
+    expect(source).toContain('import keyring')
+    expect(source).toContain('from volcenginesdkarkruntime import Ark')
+    expect(source).toContain('uv sync --project')
+    expect(source).toContain('UV_CACHE_DIR')
+    expect(source).toContain('UV_PYTHON_INSTALL_DIR')
+    expect(source).toContain('$RuntimeEnvironment')
+    expect(source).toContain("'model_credentials': 'configured at invocation'")
+    expect(source).not.toContain('from app.gateway.app import create_app')
+    expect(source).not.toContain('get_app_config')
+  })
+
   test('parses as valid PowerShell', async () => {
     const command = [
       '$errors = $null',

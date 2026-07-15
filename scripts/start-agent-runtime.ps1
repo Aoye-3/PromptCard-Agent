@@ -3,24 +3,6 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RuntimeRoot = Join-Path $RepoRoot "agent-runtime"
 $BackendRoot = Join-Path $RuntimeRoot "backend"
-$ApiKeyCandidates = @(
-  $env:PROMPTCARD_AGENT_API_KEY_FILE,
-  "F:\.Agent-PromptCardManager\API-Key.txt",
-  "F:\.FinalProject\API-Key.txt"
-) | Where-Object { $_ -and $_.Trim() }
-$ApiKeyFile = $ApiKeyCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-
-if (!$ApiKeyFile) {
-  throw "DeepSeek API key file was not found. Checked PROMPTCARD_AGENT_API_KEY_FILE, F:\.Agent-PromptCardManager\API-Key.txt, and F:\.FinalProject\API-Key.txt"
-}
-
-$ApiFileText = Get-Content -LiteralPath $ApiKeyFile -Raw
-$ApiKeyMatch = [regex]::Match($ApiFileText, "sk-[A-Za-z0-9_-]{12,}")
-if (!$ApiKeyMatch.Success) {
-  throw "No DeepSeek-style API key was found in the local API file."
-}
-
-$env:DEEPSEEK_API_KEY = $ApiKeyMatch.Value
 $env:DEER_FLOW_PROJECT_ROOT = $RuntimeRoot
 if (!$env:DEER_FLOW_HOME) {
   $env:DEER_FLOW_HOME = Join-Path $RuntimeRoot ".deer-flow"
@@ -35,7 +17,10 @@ if (!$env:PROMPTCARD_LIBRARY_FILE) {
   $env:PROMPTCARD_LIBRARY_FILE = Join-Path $RepoRoot "data\prompt-library-presets.json"
 }
 $RuntimeEnvironment = if ($env:UV_PROJECT_ENVIRONMENT) { $env:UV_PROJECT_ENVIRONMENT } else { Join-Path $BackendRoot ".venv" }
-$BundledPython = "C:\Users\123\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+$env:UV_CACHE_DIR = if ($env:UV_CACHE_DIR) { $env:UV_CACHE_DIR } else { Join-Path $RepoRoot ".uv-cache" }
+$env:UV_PYTHON_INSTALL_DIR = if ($env:UV_PYTHON_INSTALL_DIR) { $env:UV_PYTHON_INSTALL_DIR } else { Join-Path $BackendRoot ".python" }
+$env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
+$env:UV_LINK_MODE = "copy"
 if (!$env:GATEWAY_HOST) {
   $env:GATEWAY_HOST = "127.0.0.1"
 }
@@ -66,6 +51,8 @@ $env:PYTHONPATH = "$BackendRoot;$HarnessPath;$env:PYTHONPATH"
 
 New-Item -ItemType Directory -Force -Path $env:DEER_FLOW_HOME | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path $RuntimeEnvironment -Parent) | Out-Null
+New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
+New-Item -ItemType Directory -Force -Path $env:UV_PYTHON_INSTALL_DIR | Out-Null
 Push-Location $BackendRoot
 try {
   $RuntimeUvicorn = Join-Path $RuntimeEnvironment "Scripts\uvicorn.exe"
@@ -73,12 +60,7 @@ try {
     & $RuntimeUvicorn app.gateway.app:app --host $env:GATEWAY_HOST --port ([int]$env:GATEWAY_PORT)
   }
   else {
-    $env:UV_CACHE_DIR = if ($env:UV_CACHE_DIR) { $env:UV_CACHE_DIR } else { Join-Path $RepoRoot ".uv-cache" }
-    $env:UV_LINK_MODE = "copy"
-    $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
-    $env:UV_PYTHON = if (Test-Path $BundledPython) { $BundledPython } else { "C:\Program Files\Python311\python.exe" }
-    New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
-    uv run uvicorn app.gateway.app:app --host $env:GATEWAY_HOST --port ([int]$env:GATEWAY_PORT)
+    uv run --python 3.12 uvicorn app.gateway.app:app --host $env:GATEWAY_HOST --port ([int]$env:GATEWAY_PORT)
   }
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

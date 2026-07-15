@@ -3,24 +3,6 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $RuntimeRoot = Join-Path $RepoRoot "agent-runtime"
 $BackendRoot = Join-Path $RuntimeRoot "backend"
-$ApiKeyCandidates = @(
-  $env:PROMPTCARD_AGENT_API_KEY_FILE,
-  "F:\.Agent-PromptCardManager\API-Key.txt",
-  "F:\.FinalProject\API-Key.txt"
-) | Where-Object { $_ -and $_.Trim() }
-$ApiKeyFile = $ApiKeyCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-
-if (!$ApiKeyFile) {
-  throw "DeepSeek API key file was not found. Checked PROMPTCARD_AGENT_API_KEY_FILE, F:\.Agent-PromptCardManager\API-Key.txt, and F:\.FinalProject\API-Key.txt"
-}
-
-$ApiFileText = Get-Content -LiteralPath $ApiKeyFile -Raw
-$ApiKeyMatch = [regex]::Match($ApiFileText, "sk-[A-Za-z0-9_-]{12,}")
-if (!$ApiKeyMatch.Success) {
-  throw "No DeepSeek-style API key was found in the local API file."
-}
-
-$env:DEEPSEEK_API_KEY = $ApiKeyMatch.Value
 $env:DEER_FLOW_PROJECT_ROOT = $RuntimeRoot
 if (!$env:DEER_FLOW_HOME) {
   $env:DEER_FLOW_HOME = Join-Path $RuntimeRoot ".deer-flow"
@@ -35,7 +17,10 @@ if (!$env:PROMPTCARD_LIBRARY_FILE) {
   $env:PROMPTCARD_LIBRARY_FILE = Join-Path $RepoRoot "data\prompt-library-presets.json"
 }
 $RuntimeEnvironment = if ($env:UV_PROJECT_ENVIRONMENT) { $env:UV_PROJECT_ENVIRONMENT } else { Join-Path $BackendRoot ".venv" }
-$BundledPython = "C:\Users\123\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
+$env:UV_CACHE_DIR = if ($env:UV_CACHE_DIR) { $env:UV_CACHE_DIR } else { Join-Path $RepoRoot ".uv-cache" }
+$env:UV_PYTHON_INSTALL_DIR = if ($env:UV_PYTHON_INSTALL_DIR) { $env:UV_PYTHON_INSTALL_DIR } else { Join-Path $BackendRoot ".python" }
+$env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
+$env:UV_LINK_MODE = "copy"
 if (!$env:AUTH_JWT_SECRET) {
   $env:AUTH_JWT_SECRET = "promptcard-local-agent-runtime-dev-secret"
 }
@@ -49,22 +34,24 @@ if (!$env:PROMPTCARD_AGENT_ADMIN_PASSWORD) {
 $HarnessPath = Join-Path $BackendRoot "packages\harness"
 $env:PYTHONPATH = "$BackendRoot;$HarnessPath;$env:PYTHONPATH"
 New-Item -ItemType Directory -Force -Path (Split-Path $RuntimeEnvironment -Parent) | Out-Null
+New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
+New-Item -ItemType Directory -Force -Path $env:UV_PYTHON_INSTALL_DIR | Out-Null
 
 Push-Location $BackendRoot
 try {
   $RuntimePython = Join-Path $RuntimeEnvironment "Scripts\python.exe"
+  $RuntimeCheck = "import keyring; from volcenginesdkarkruntime import Ark; print({'secure_image_runtime': True, 'model_credentials': 'configured at invocation'})"
   if (Test-Path $RuntimePython) {
-    & $RuntimePython -c "from deerflow.config import get_app_config; cfg=get_app_config(); print({'models':[m.name for m in cfg.models], 'agents_api': cfg.agents_api.enabled, 'vision': cfg.models[0].supports_vision, 'tool_search': cfg.tool_search.enabled, 'tools':[t.name for t in cfg.tools]})"
+    & $RuntimePython -c $RuntimeCheck
   }
   else {
-    $env:UV_CACHE_DIR = if ($env:UV_CACHE_DIR) { $env:UV_CACHE_DIR } else { Join-Path $RepoRoot ".uv-cache" }
-    $env:UV_LINK_MODE = "copy"
-    $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
-    $env:UV_PYTHON = if (Test-Path $BundledPython) { $BundledPython } else { "C:\Program Files\Python311\python.exe" }
-    New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
-    uv run python -c "from deerflow.config import get_app_config; cfg=get_app_config(); print({'models':[m.name for m in cfg.models], 'agents_api': cfg.agents_api.enabled, 'vision': cfg.models[0].supports_vision, 'tool_search': cfg.tool_search.enabled, 'tools':[t.name for t in cfg.tools]})"
+    uv run --python 3.12 python -c $RuntimeCheck
   }
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  if ($LASTEXITCODE -ne 0) {
+    $RepairCommand = "`$env:UV_CACHE_DIR='$env:UV_CACHE_DIR'; `$env:UV_PYTHON_INSTALL_DIR='$env:UV_PYTHON_INSTALL_DIR'; `$env:UV_PROJECT_ENVIRONMENT='$RuntimeEnvironment'; uv sync --project '$BackendRoot' --python 3.12"
+    Write-Error "Agent runtime dependencies are incomplete. keyring and the Ark SDK are required. Repair the workspace-local F: environment with: $RepairCommand"
+    exit $LASTEXITCODE
+  }
 }
 finally {
   Pop-Location

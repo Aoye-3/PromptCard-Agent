@@ -156,6 +156,10 @@ class PromptCardRuntimeService:
         return {"success": True, "message": "Connection ok."}
 
     async def send_message(self, body: PromptCardRuntimeMessageRequest, request: Request) -> dict[str, Any]:
+        config = _request_config(request)
+        runtime_model = read_model_config(config)
+        if not str(runtime_model.get("apiKey") or "").strip():
+            raise ModelManagementError("credential_missing")
         thread_id = body.thread_id
         permission_scope = body.permission_scope or (
             "workspace-chatbot-agent" if body.workspace_context else "prompt-library-agent"
@@ -177,8 +181,8 @@ class PromptCardRuntimeService:
             body.workspace_context,
             permission_scope=permission_scope,
         )
-        apply_model_config_to_runtime(_request_config(request))
-        model_name = default_model_name(_request_config(request))
+        apply_model_config_to_runtime(config, runtime_model)
+        model_name = default_model_name(config)
         run_payload = await thread_runs.wait_run(
             thread_id=thread_id,
             body=thread_runs.RunCreateRequest(

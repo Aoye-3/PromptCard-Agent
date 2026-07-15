@@ -12,8 +12,10 @@ const viteConfigPath = path.join(repoRoot, 'vite.config.ts')
 const powershell = 'powershell'
 const servers: Server[] = []
 const tempDirs: string[] = []
+const runtimeProcesses: Array<ReturnType<typeof spawn>> = []
 
 afterEach(async () => {
+  await Promise.all(runtimeProcesses.splice(0).map(stopProcessTree))
   await Promise.all(
     servers.splice(0).map(
       (server) =>
@@ -24,6 +26,31 @@ afterEach(async () => {
   )
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
 })
+
+async function stopProcessTree(child: ReturnType<typeof spawn>) {
+  if (!child.pid || child.exitCode !== null) return
+  const pid = child.pid
+  await new Promise<void>((resolve) => {
+    const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
+    killer.on('error', () => resolve())
+    killer.on('close', () => resolve())
+  })
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (!(await isProcessRunning(pid))) return
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  throw new Error(`Could not stop agent runtime process tree ${pid}`)
+}
+
+function isProcessRunning(pid: number) {
+  return new Promise<boolean>((resolve) => {
+    const child = spawn('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { windowsHide: true })
+    let stdout = ''
+    child.stdout.on('data', chunk => { stdout += chunk.toString() })
+    child.on('error', () => resolve(false))
+    child.on('close', () => resolve(stdout.includes(`"${pid}"`)))
+  })
+}
 
 function startHealthyServer() {
   const server = createServer((_, response) => {
@@ -120,6 +147,39 @@ async function makeMarkerCommand(markerName: string) {
   }
 }
 
+async function getAvailablePort() {
+  const server = createServer()
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', resolve)
+  })
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('Expected a TCP server address')
+  const port = address.port
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  return port
+}
+
+async function waitForHealthyRuntime(
+  child: ReturnType<typeof spawn>,
+  url: string,
+  output: () => string,
+  timeoutMs = 30_000
+) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) throw new Error(`Agent runtime exited before health: ${output()}`)
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(1_000) })
+      if (response.ok) return response
+    } catch {
+      // Runtime is still starting.
+    }
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
+  throw new Error(`Agent runtime did not become healthy: ${output()}`)
+}
+
 async function makeFakeUv(name: string) {
   const dir = path.dirname(await makeRuntimeManifestPath(`${name}.runtime.json`))
   const logPath = path.join(dir, `${name}.log`)
@@ -183,6 +243,42 @@ async function expectScriptSupportsTestParameters() {
 }
 
 describe('start-dev-with-agent.ps1', () => {
+  test('starts a healthy agent runtime without model-key environment variables', async () => {
+    const port = await getAvailablePort()
+    let stdout = ''
+    let stderr = ''
+    const credentialFreeEnv = { ...process.env }
+    for (const key of ['DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY']) {
+      delete credentialFreeEnv[key]
+    }
+    const child = spawn(powershell, [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', agentStartScriptPath
+    ], {
+      cwd: repoRoot,
+      windowsHide: true,
+      env: {
+        ...credentialFreeEnv,
+        GATEWAY_HOST: '127.0.0.1',
+        GATEWAY_PORT: String(port)
+      }
+    })
+    runtimeProcesses.push(child)
+    child.stdout?.on('data', chunk => { stdout += chunk.toString() })
+    child.stderr?.on('data', chunk => { stderr += chunk.toString() })
+
+    try {
+      const response = await waitForHealthyRuntime(
+        child,
+        `http://127.0.0.1:${port}/health`,
+        () => `${stdout}\n${stderr}`
+      )
+      await expect(response.json()).resolves.toMatchObject({ status: 'healthy' })
+      expect(child.exitCode).toBeNull()
+    } finally {
+      await stopProcessTree(child)
+    }
+  }, 45_000)
+
   test('overrides hostile uv paths and provisions only the workspace-local Python', async () => {
     for (const [name, runtimeScript] of [
       ['check', agentCheckScriptPath],

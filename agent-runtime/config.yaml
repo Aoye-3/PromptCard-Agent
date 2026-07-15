@@ -9,7 +9,6 @@ models:
     display_name: DeepSeek Chat
     use: langchain_deepseek:ChatDeepSeek
     model: deepseek-chat
-    api_key: $DEEPSEEK_API_KEY
     base_url: https://api.deepseek.com
     timeout: 600.0
     max_retries: 2

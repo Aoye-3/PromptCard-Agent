@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 import app.gateway.promptcard_runtime as promptcard_runtime_module
-from app.gateway.model_management.connection_store import ModelConnectionStore
+from app.gateway.model_management.connection_store import ModelConnectionStore, ModelManagementError
 from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.promptcard_runtime import (
@@ -432,6 +432,27 @@ def test_send_message_uses_configured_default_model(monkeypatch, model_store):
     assert result["text"] == "ok"
     assert result["diagnostics"]["sessionKey"] == "workspace:card:project-1"
     assert result["diagnostics"]["projectId"] == "project-1"
+
+
+def test_send_message_reports_missing_credential_before_creating_thread(monkeypatch, model_store):
+    service = PromptCardRuntimeService()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=_config(api_key=""))))
+
+    async def forbidden_create_thread(*args, **kwargs):
+        raise AssertionError("a missing credential must fail before creating a thread")
+
+    monkeypatch.setattr("app.gateway.promptcard_runtime.threads.create_thread", forbidden_create_thread)
+
+    import anyio
+
+    with pytest.raises(ModelManagementError) as error:
+        anyio.run(
+            service.send_message,
+            PromptCardRuntimeMessageRequest(content="hello"),
+            request,
+        )
+
+    assert error.value.code == "credential_missing"
 
 
 def test_validate_thread_metadata_allows_matching_session():

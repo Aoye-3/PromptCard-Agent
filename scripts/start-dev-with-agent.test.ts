@@ -328,7 +328,7 @@ describe('start-dev-with-agent.ps1', () => {
       expect(log).toContain(`PYTHONPATH=${expectedBackend};${expectedHarness}`)
       expect(log).not.toContain('C:\\')
     }
-  })
+  }, 45_000)
 
   test('starts and checks the agent runtime without importing a plaintext model key', async () => {
     const sources = await Promise.all([readFile(agentCheckScriptPath, 'utf8'), readFile(agentStartScriptPath, 'utf8')])

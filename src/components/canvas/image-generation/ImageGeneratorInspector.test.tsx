@@ -1,4 +1,4 @@
-import { Children, isValidElement, type ReactElement, type ReactNode } from 'react'
+import { Children, isValidElement, useState, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { describe, expect, it, vi } from 'vitest'
@@ -291,7 +291,7 @@ describe('ImageGeneratorInspector', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
-  it('does not persist an invalid custom dimension interaction', () => {
+  it('persists an invalid custom dimension draft so validation can be shown', () => {
     const onChange = vi.fn()
     const tree = ImageGeneratorInspector({
       node: {
@@ -313,7 +313,58 @@ describe('ImageGeneratorInspector', () => {
 
     onWidthChange({ target: { value: '1199' } })
 
-    expect(onChange).not.toHaveBeenCalled()
+    expect(onChange).toHaveBeenCalledWith({
+      settings: {
+        ...generatorNode.settings,
+        resolution: '1K',
+        aspectRatio: 'custom',
+        width: 1_199,
+        height: 768
+      }
+    })
+  })
+
+  it('mounts the custom size draft and enables generation only after both dimensions are valid', () => {
+    const onGenerate = vi.fn()
+    const onChange = vi.fn()
+    const initialNode: IFreeCanvasImageGeneratorNode = {
+      ...generatorNode,
+      binding: { ...generatorNode.binding, modelId: ONE_K_SQUARE_CAPABILITIES.modelId },
+      settings: { ...generatorNode.settings, resolution: '1K', aspectRatio: '1:1' }
+    }
+    const Host = () => {
+      const [node, setNode] = useState(initialNode)
+      return (
+        <ImageGeneratorInspector
+          node={node}
+          sizeCapabilities={ONE_K_SQUARE_CAPABILITIES}
+          promptSnapshot={promptSnapshot(true)}
+          onChange={updates => {
+            onChange(updates)
+            setNode(current => ({ ...current, ...updates }))
+          }}
+          onGenerate={onGenerate}
+        />
+      )
+    }
+    const renderer = mountInspector(<Host />)
+    const aspectRatio = () => renderer.root.findByProps({ 'aria-label': 'Aspect ratio' })
+    const generate = () => renderer.root.findByProps({ 'aria-label': 'Generate image' })
+
+    act(() => aspectRatio().props.onChange({ target: { value: 'custom' } }))
+    expect(aspectRatio().props.value).toBe('custom')
+    expect(generate().props.disabled).toBe(true)
+    act(() => generate().props.onClick())
+    expect(onGenerate).not.toHaveBeenCalled()
+
+    act(() => renderer.root.findByProps({ 'aria-label': 'Custom width' }).props.onChange({ target: { value: '1200' } }))
+    expect(generate().props.disabled).toBe(true)
+    act(() => renderer.root.findByProps({ 'aria-label': 'Custom height' }).props.onChange({ target: { value: '768' } }))
+    expect(generate().props.disabled).toBe(false)
+
+    act(() => generate().props.onClick())
+    expect(onGenerate).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledTimes(3)
   })
 
   it('persists supported resolution and custom dimension interactions', () => {

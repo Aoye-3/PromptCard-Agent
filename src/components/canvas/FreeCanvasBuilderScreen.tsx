@@ -210,9 +210,14 @@ const FreeCanvasBuilderInner = ({
   if (!imageGenerationSessionsRef.current) imageGenerationSessionsRef.current = new ImageGenerationSessionManager()
   const imageGenerationGuardRef = useRef<ImageGenerationOperationGuard | null>(null)
   if (!imageGenerationGuardRef.current) imageGenerationGuardRef.current = new ImageGenerationOperationGuard()
-  imageGenerationGuardRef.current.activateProject(activeProject.id)
   const imageGeneratorCreationRef = useRef<SingleFlightAction | null>(null)
   if (!imageGeneratorCreationRef.current) imageGeneratorCreationRef.current = new SingleFlightAction()
+
+  useEffect(() => {
+    const guard = imageGenerationGuardRef.current!
+    guard.activateProject(activeProject.id)
+    return () => guard.deactivateProject(activeProject.id)
+  }, [activeProject.id])
 
   useEffect(() => {
     if (!presetsInitialized) initPresets()
@@ -431,7 +436,9 @@ const FreeCanvasBuilderInner = ({
         emitGenerationCanvas({ ...current, nodes: [...current.nodes, node], selectedNodeId: node.id })
       })
     } finally {
-      setImageGeneratorCreating(false)
+      if (imageGenerationGuardRef.current!.isCurrent(projectId, '__create-image-generator__', operationId)) {
+        setImageGeneratorCreating(false)
+      }
     }
   }, [activeProject.id, emitGenerationCanvas, imageGenerationNodeV1, reactFlow])
 

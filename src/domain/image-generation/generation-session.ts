@@ -105,6 +105,12 @@ export class ImageGenerationOperationGuard {
     this.operations.clear()
   }
 
+  deactivateProject(projectId: string): void {
+    if (projectId !== this.activeProjectId) return
+    this.activeProjectId = null
+    this.operations.clear()
+  }
+
   begin(projectId: string, nodeId: string): string {
     const operationId = `image-generation-operation-${++this.sequence}`
     this.operations.set(sessionKey(projectId, nodeId), operationId)

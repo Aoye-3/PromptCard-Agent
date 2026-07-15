@@ -68,6 +68,7 @@ export const ImageGeneratorInspector = ({
   )) || false
   const generationBusy = status === 'validating' || status === 'running'
   const generationConfigured = Boolean(node.binding.connectionId && node.binding.modelId)
+  const generationSizeValid = Boolean(activeSizeCapabilities && sizeValidationErrors.length === 0)
 
   const updateSettings = (updates: Partial<IFreeCanvasImageGeneratorNode['settings']>) => {
     onChange({ settings: { ...node.settings, ...updates } })
@@ -75,18 +76,25 @@ export const ImageGeneratorInspector = ({
 
   const updateSizeSettings = (updates: Partial<ImageSizeSettings>) => {
     if (!activeSizeCapabilities) return
-    const settings = { ...node.settings, ...updates }
-    if (validateImageSizeSettings(settings, activeSizeCapabilities).length > 0) return
+    if (
+      updates.resolution !== undefined
+      && !activeSizeCapabilities.resolutions.includes(updates.resolution)
+    ) return
+    if (
+      updates.aspectRatio !== undefined
+      && !activeSizeCapabilities.aspectRatios.includes(updates.aspectRatio as FreeCanvasImageAspectRatio)
+    ) return
     updateSettings(updates as Partial<IFreeCanvasImageGeneratorNode['settings']>)
   }
 
   const updateCustomDimension = (dimension: 'width' | 'height', value: string) => {
     const parsed = value === '' ? undefined : Number(value)
+    if (parsed !== undefined && !Number.isFinite(parsed)) return
     updateSizeSettings({ [dimension]: parsed })
   }
 
   const handleGenerate = () => {
-    if (!onGenerate || !promptSnapshot?.canGenerate || generationBusy || !generationConfigured) return
+    if (!onGenerate || !promptSnapshot?.canGenerate || generationBusy || !generationConfigured || !generationSizeValid) return
     onGenerate()
   }
 
@@ -147,7 +155,7 @@ export const ImageGeneratorInspector = ({
       {activeSizeCapabilities && sizeValidationErrors.length > 0 && recommendedSize && (
         <div role="alert" className="space-y-2 rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-950">
           <p className="font-bold">These size settings are not supported by {activeSizeCapabilities.modelId}.</p>
-          <p className="font-semibold">Confirm a supported default before generating; the current settings were not changed.</p>
+          <p className="font-semibold">Complete or correct the size settings before generating, or restore a supported default.</p>
           <button
             type="button"
             data-confirm-image-size
@@ -224,7 +232,7 @@ export const ImageGeneratorInspector = ({
         </label>
       </div>
 
-      {activeSizeCapabilities?.aspectRatios.includes('custom') && activeSizeCapabilities.customSize && (
+      {node.settings.aspectRatio === 'custom' && activeSizeCapabilities?.aspectRatios.includes('custom') && activeSizeCapabilities.customSize && (
         <fieldset className="space-y-2 rounded-[6px] border border-gray-200 p-3">
           <legend className="px-1 text-xs font-black text-gray-700">Custom dimensions</legend>
           <div className="grid grid-cols-2 gap-3">
@@ -300,7 +308,7 @@ export const ImageGeneratorInspector = ({
             type="button"
             aria-label="Generate image"
             className="rounded-[6px] bg-gray-950 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
-            disabled={!onGenerate || !promptSnapshot?.canGenerate || generationBusy || !generationConfigured}
+            disabled={!onGenerate || !promptSnapshot?.canGenerate || generationBusy || !generationConfigured || !generationSizeValid}
             onClick={handleGenerate}
           >
             {status === 'failed' ? 'Retry' : 'Generate'}

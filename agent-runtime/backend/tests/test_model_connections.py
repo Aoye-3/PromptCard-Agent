@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 import app.gateway.promptcard_runtime as promptcard_runtime_module
 from app.gateway.model_management.connection_store import ModelConnectionStore, ModelManagementError
+from app.gateway.model_management.contracts import ConnectionRequest
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.routers import model_management
 
@@ -71,6 +72,8 @@ def test_catalog_contains_deepseek_chat_and_ark_seedream_manifests(model_api):
             "minAspectRatio": 0.0625,
             "maxAspectRatio": 16,
         },
+        "outputFormats": ["png", "jpeg"],
+        "watermark": True,
         "outputCount": 1,
         "streaming": False,
     }
@@ -203,8 +206,8 @@ def test_connection_write_validates_provider_and_http_base_url(model_api, payloa
 
 
 def test_assignments_validate_modality_connection_state_and_delete_references(model_api):
-    client, _, _ = model_api
-    deepseek = _create_connection(client, "deepseek", enabled=True)
+    client, store, _ = model_api
+    deepseek = _create_connection(client, "deepseek", enabled=True, credential="sk-ready")
     ark = _create_connection(client, "volcengine-ark", enabled=True)
     disabled = _create_connection(client, "deepseek", enabled=False)
 
@@ -213,14 +216,14 @@ def test_assignments_validate_modality_connection_state_and_delete_references(mo
         json={"connectionId": ark["id"], "modelId": "doubao-seedream-5-0-pro-260628"},
     )
     assert wrong_modality.status_code == 422
-    assert wrong_modality.json()["detail"] == "incompatible_model_slot"
+    assert wrong_modality.json()["detail"]["code"] == "incompatible_model_slot"
 
     disabled_connection = client.put(
         "/api/promptcard/runtime/model-assignments/chat.primary",
         json={"connectionId": disabled["id"], "modelId": "deepseek-chat"},
     )
     assert disabled_connection.status_code == 422
-    assert disabled_connection.json()["detail"] == "connection_disabled"
+    assert disabled_connection.json()["detail"]["code"] == "connection_disabled"
 
     missing_connection = client.put(
         "/api/promptcard/runtime/model-assignments/chat.primary",
@@ -230,7 +233,9 @@ def test_assignments_validate_modality_connection_state_and_delete_references(mo
         },
     )
     assert missing_connection.status_code == 422
-    assert missing_connection.json()["detail"] == "connection_not_found"
+    assert missing_connection.json()["detail"]["code"] == "connection_not_found"
+
+    store.record_test(deepseek["id"], success=True)
 
     assigned = client.put(
         "/api/promptcard/runtime/model-assignments/chat.primary",
@@ -250,7 +255,7 @@ def test_assignments_validate_modality_connection_state_and_delete_references(mo
         f"/api/promptcard/runtime/model-connections/{deepseek['id']}"
     )
     assert rejected_delete.status_code == 409
-    assert rejected_delete.json()["detail"] == "connection_is_assigned"
+    assert rejected_delete.json()["detail"]["code"] == "connection_is_assigned"
 
     for changes in [
         {"providerId": "volcengine-ark", "enabled": True},
@@ -269,7 +274,222 @@ def test_assignments_validate_modality_connection_state_and_delete_references(mo
             },
         )
         assert rejected_update.status_code == 409
-        assert rejected_update.json()["detail"] == "connection_is_assigned"
+        assert rejected_update.json()["detail"]["code"] == "connection_is_assigned"
+
+
+def test_assignment_requires_credential_and_successful_latest_test(model_api):
+    client, store, _ = model_api
+    missing_credential = _create_connection(client, "deepseek")
+
+    response = client.put(
+        "/api/promptcard/runtime/model-assignments/chat.primary",
+        json={"connectionId": missing_credential["id"], "modelId": "deepseek-chat"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "credential_missing",
+        "message": "The model connection has no configured credential.",
+        "action": "update_credential",
+        "retryable": False,
+        "field": "connectionId",
+    }
+
+    untested = _create_connection(client, "deepseek", credential="sk-untested")
+    response = client.put(
+        "/api/promptcard/runtime/model-assignments/chat.primary",
+        json={"connectionId": untested["id"], "modelId": "deepseek-chat"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "connection_not_tested"
+
+    store.record_test(untested["id"], success=False)
+    response = client.put(
+        "/api/promptcard/runtime/model-assignments/chat.primary",
+        json={"connectionId": untested["id"], "modelId": "deepseek-chat"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "connection_test_failed"
+
+
+@pytest.mark.parametrize(
+    ("sdk_status", "error_code"),
+    [
+        ("missing", "ark_sdk_missing"),
+        ("incompatible", "ark_sdk_incompatible"),
+        ("check_failed", "ark_sdk_check_failed"),
+    ],
+)
+def test_image_assignment_requires_ready_ark_sdk(
+    model_api,
+    monkeypatch,
+    sdk_status,
+    error_code,
+):
+    client, store, _ = model_api
+    connection = _create_connection(
+        client,
+        "volcengine-ark",
+        credential="ark-ready-credential",
+    )
+    store.record_test(connection["id"], success=True)
+    monkeypatch.setattr(
+        model_management,
+        "collect_image_generation_status",
+        lambda: _diagnostic_status(sdk_status, error_code),
+    )
+
+    response = client.put(
+        "/api/promptcard/runtime/model-assignments/image.primary",
+        json={
+            "connectionId": connection["id"],
+            "modelId": "doubao-seedream-5-0-pro-260628",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == error_code
+
+
+def test_ark_connection_test_requires_ready_sdk_before_credential_or_probe(
+    model_api,
+    monkeypatch,
+):
+    client, _, credentials = model_api
+    connection = _create_connection(
+        client,
+        "volcengine-ark",
+        credential="ark-never-read",
+    )
+    monkeypatch.setattr(
+        model_management,
+        "collect_image_generation_status",
+        lambda: _diagnostic_status("missing", "ark_sdk_missing"),
+    )
+    credentials.get = lambda connection_id: (_ for _ in ()).throw(
+        AssertionError("credential read before SDK readiness")
+    )
+    monkeypatch.setattr(
+        model_management,
+        "probe_connection",
+        lambda *args: (_ for _ in ()).throw(
+            AssertionError("provider probe before SDK readiness")
+        ),
+    )
+
+    response = client.post(
+        f"/api/promptcard/runtime/model-connections/{connection['id']}/test"
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "ark_sdk_missing"
+
+
+def test_assignment_can_be_deleted_and_connection_dependencies_are_explicit(model_api):
+    client, store, _ = model_api
+    connection = _create_connection(client, "deepseek", credential="sk-ready")
+    store.record_test(connection["id"], success=True)
+    assigned = client.put(
+        "/api/promptcard/runtime/model-assignments/chat.primary",
+        json={"connectionId": connection["id"], "modelId": "deepseek-chat"},
+    )
+    assert assigned.status_code == 200
+
+    dependencies = client.get(
+        f"/api/promptcard/runtime/model-connections/{connection['id']}/dependencies"
+    )
+    assert dependencies.status_code == 200
+    assert dependencies.json() == {
+        "assignments": ["chat.primary"],
+        "canvasNodeCount": None,
+        "canvasNodeCountAvailable": False,
+    }
+
+    deleted = client.delete("/api/promptcard/runtime/model-assignments/chat.primary")
+    assert deleted.status_code == 204
+    assert client.get("/api/promptcard/runtime/model-assignments").json() == {
+        "assignments": []
+    }
+    assert client.delete(
+        f"/api/promptcard/runtime/model-connections/{connection['id']}"
+    ).status_code == 204
+
+
+def test_material_connection_changes_invalidate_last_test(model_api):
+    client, store, credentials = model_api
+    connection = _create_connection(client, "deepseek", credential="sk-first")
+    store.record_test(connection["id"], success=True)
+
+    renamed = client.put(
+        f"/api/promptcard/runtime/model-connections/{connection['id']}",
+        json={
+            "providerId": "deepseek",
+            "displayName": "Renamed only",
+            "apiBase": "https://api.deepseek.com",
+            "enabled": True,
+        },
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["lastTest"]["ok"] is True
+
+    credential_changed = client.put(
+        f"/api/promptcard/runtime/model-connections/{connection['id']}",
+        json={
+            "providerId": "deepseek",
+            "displayName": "Renamed only",
+            "apiBase": "https://api.deepseek.com",
+            "enabled": True,
+            "credential": "sk-second",
+        },
+    )
+    assert credential_changed.status_code == 200
+    assert "lastTest" not in credential_changed.json()
+    assert credentials.get(connection["id"]) == "sk-second"
+
+
+def test_legacy_chat_save_invalidates_last_test_when_credential_changes(model_api):
+    _, store, _ = model_api
+    first = store.save_legacy_chat(
+        ConnectionRequest(
+            providerId="deepseek",
+            displayName="DeepSeek",
+            apiBase="https://api.deepseek.com",
+            enabled=True,
+            credential="sk-first",
+        ),
+        "deepseek-chat",
+    )
+    store.record_test(first["id"], success=True)
+
+    updated = store.save_legacy_chat(
+        ConnectionRequest(
+            providerId="deepseek",
+            displayName="DeepSeek",
+            apiBase="https://api.deepseek.com",
+            enabled=True,
+            credential="sk-second",
+        ),
+        "deepseek-chat",
+    )
+
+    assert "lastTest" not in updated
+
+
+def test_model_management_errors_use_safe_structured_envelope(model_api):
+    client, _, _ = model_api
+
+    response = client.get(
+        "/api/promptcard/runtime/model-connections/123e4567-e89b-12d3-a456-426614174000/dependencies"
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "connection_not_found",
+        "message": "The model connection was not found.",
+        "action": "refresh_connections",
+        "retryable": False,
+        "field": "connectionId",
+    }
 
 
 def test_connection_test_uses_stored_secret_without_returning_it(model_api, monkeypatch, caplog):
@@ -349,7 +569,7 @@ def test_create_validates_corrupt_state_before_credential_mutation(model_api):
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "invalid_connection_store"
+    assert response.json()["detail"]["code"] == "invalid_connection_store"
     assert credentials.values == {}
 
 
@@ -379,7 +599,7 @@ def test_connection_test_revalidates_persisted_endpoint_before_credential_read(m
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "invalid_api_base"
+    assert response.json()["detail"]["code"] == "invalid_api_base"
 
 
 def test_connection_test_normalizes_last_test_persistence_failure(model_api, monkeypatch):
@@ -397,7 +617,7 @@ def test_connection_test_normalizes_last_test_persistence_failure(model_api, mon
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"] == "invalid_connection_store"
+    assert response.json()["detail"]["code"] == "invalid_connection_store"
 
 
 def test_connection_test_normalizes_store_migration_failure(model_api, monkeypatch):
@@ -413,7 +633,7 @@ def test_connection_test_normalizes_store_migration_failure(model_api, monkeypat
     )
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "credential_store_unavailable"
+    assert response.json()["detail"]["code"] == "credential_store_unavailable"
 
 
 @pytest.mark.parametrize("operation", ["get", "post", "put", "test"])
@@ -455,7 +675,7 @@ def test_model_routes_normalize_storage_io_failures(model_api, monkeypatch, oper
             )
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "connection_store_unavailable"
+    assert response.json()["detail"]["code"] == "connection_store_unavailable"
     assert "private storage path" not in response.text
 
 
@@ -492,7 +712,7 @@ def test_migration_io_failures_are_stable_on_get(model_api, monkeypatch, failure
         response = safe_client.get("/api/promptcard/runtime/model-connections")
 
     assert response.status_code == 503
-    assert response.json()["detail"] == "migration_failed"
+    assert response.json()["detail"]["code"] == "migration_failed"
     assert "private" not in response.text
 
 
@@ -518,3 +738,28 @@ def _create_connection(
     response = client.post("/api/promptcard/runtime/model-connections", json=payload)
     assert response.status_code == 201
     return response.json()
+
+
+def _diagnostic_status(status: str, error_code: str | None) -> dict:
+    return {
+        "serverEnabled": True,
+        "checkedAt": 1,
+        "credentialStore": {"available": True},
+        "providers": [
+            {
+                "providerId": "volcengine-ark",
+                "status": status,
+                "sdk": {
+                    "packageName": "volcengine-python-sdk",
+                    "installedVersion": None,
+                    "requiredVersion": "5.0.36",
+                    "compatible": status == "ready",
+                    "error": (
+                        None
+                        if error_code is None
+                        else {"code": error_code, "message": "safe"}
+                    ),
+                },
+            }
+        ],
+    }

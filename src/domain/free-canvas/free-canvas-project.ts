@@ -104,7 +104,7 @@ export const createFreeCanvasImageNodeFromMedia = (
   sourceNodeId: media.sourceNodeId || null,
   crop: media.crop || null,
   annotations: [],
-  meta: { legacyMediaNodeId: media.id }
+  meta: { ...media.meta, legacyMediaNodeId: media.id }
 })
 
 export const createFreeCanvasImageAnnotation = (

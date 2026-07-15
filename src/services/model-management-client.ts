@@ -1,79 +1,54 @@
+import {
+  getRuntimeErrorPresentation,
+  type ImageGenerationProviderDiagnostic,
+  type ImageGenerationProviderStatus,
+  type ImageGenerationStatus,
+  type ModelAssignment,
+  type ModelAssignmentInput,
+  type ModelCatalog,
+  type ModelConnection,
+  type ModelConnectionDependencies,
+  type ModelConnectionInput,
+  type ModelConnectionTestResult,
+  type ModelSlot
+} from '@/domain/models/model-management'
+
+export type {
+  ImageGenerationProviderDiagnostic,
+  ImageGenerationProviderStatus,
+  ImageGenerationStatus,
+  ModelAssignment,
+  ModelAssignmentInput,
+  ModelCapabilities,
+  ModelCatalog,
+  ModelCatalogEntry,
+  ModelConnection,
+  ModelConnectionDependencies,
+  ModelConnectionInput,
+  ModelConnectionTestResult,
+  ModelConnectionTestState,
+  ModelModality,
+  ModelProvider,
+  ModelSlot
+} from '@/domain/models/model-management'
+
 const MODEL_MANAGEMENT_BASE = '/agent-api/promptcard/runtime'
 
-export type ModelModality = 'chat' | 'image'
-export type ModelSlot = 'chat.primary' | 'image.primary'
+export class ModelManagementClientError extends Error {
+  code: string
+  action: string
+  retryable: boolean
+  field?: string
 
-export interface ModelProvider {
-  id: string
-  displayName: string
-  defaultApiBase: string
-}
-
-export interface ModelCapabilities {
-  modes?: string[]
-  maxReferenceImages?: number
-  mentionStrategy?: string
-  regionInputs?: string[]
-  resolutions?: string[]
-  outputCount?: number
-  streaming?: boolean
-}
-
-export interface ModelCatalogEntry {
-  id: string
-  providerId: string
-  displayName: string
-  modality: ModelModality
-  capabilities?: ModelCapabilities
-}
-
-export interface ModelCatalog {
-  providers: ModelProvider[]
-  models: ModelCatalogEntry[]
-}
-
-export interface ModelConnectionTestState {
-  ok: boolean
-  checkedAt: number
-  message: string
-}
-
-export interface ModelConnection {
-  id: string
-  providerId: string
-  displayName: string
-  apiBase: string
-  enabled: boolean
-  credentialConfigured: boolean
-  credentialMask?: string | null
-  createdAt: number
-  updatedAt: number
-  lastTest?: ModelConnectionTestState
-}
-
-export interface ModelConnectionInput {
-  providerId: string
-  displayName: string
-  apiBase: string
-  enabled: boolean
-  credential?: string
-  clearCredential?: boolean
-}
-
-export interface ModelAssignment {
-  slot: ModelSlot
-  connectionId: string
-  modelId: string
-}
-
-export interface ModelAssignmentInput {
-  connectionId: string
-  modelId: string
-}
-
-export interface ModelConnectionTestResult {
-  success: boolean
-  message: string
+  constructor(code: string, retryable: boolean, field?: string) {
+    const presentation = getRuntimeErrorPresentation(code)
+    super(presentation.message)
+    this.name = 'ModelManagementClientError'
+    this.code = code
+    this.action = presentation.action
+    this.retryable = retryable
+    this.field = field
+  }
 }
 
 type FetchImplementation = typeof fetch
@@ -87,8 +62,11 @@ export const createModelManagementClient = (
       ...init
     })
     if (!response.ok) {
-      const message = await response.text().catch(() => response.statusText)
-      throw new Error(message || response.statusText)
+      const payload = await response.json().catch(() => null)
+      const detail = isRecord(payload) && isRecord(payload.detail) ? payload.detail : {}
+      const code = safeErrorIdentifier(detail.code, 'runtime_request_failed')
+      const field = safeErrorIdentifier(detail.field)
+      throw new ModelManagementClientError(code, detail.retryable === true, field)
     }
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>
@@ -131,7 +109,36 @@ export const createModelManagementClient = (
     },
 
     updateAssignment: (slot: ModelSlot, input: ModelAssignmentInput): Promise<ModelAssignment> =>
-      request(`/model-assignments/${encodeURIComponent(slot)}`, jsonRequest('PUT', input))
+      request(`/model-assignments/${encodeURIComponent(slot)}`, jsonRequest('PUT', input)),
+
+    clearAssignment: (slot: ModelSlot): Promise<void> =>
+      request(`/model-assignments/${encodeURIComponent(slot)}`, { method: 'DELETE', headers: jsonHeaders() }),
+
+    getConnectionDependencies: async (connectionId: string): Promise<ModelConnectionDependencies> => {
+      const payload = await request<Record<string, unknown>>(
+        `/model-connections/${encodeURIComponent(connectionId)}/dependencies`
+      )
+      return {
+        assignments: Array.isArray(payload.assignments)
+          ? payload.assignments.filter(isModelSlot)
+          : [],
+        canvasNodeCount: isNonNegativeInteger(payload.canvasNodeCount) ? payload.canvasNodeCount : null,
+        canvasNodeCountAvailable: payload.canvasNodeCountAvailable === true
+      }
+    },
+
+    getImageGenerationStatus: async (): Promise<ImageGenerationStatus> => {
+      const payload = await request<Record<string, unknown>>('/image-generation-status')
+      const credentialStore = isRecord(payload.credentialStore) ? payload.credentialStore : {}
+      return {
+        serverEnabled: payload.serverEnabled === true,
+        checkedAt: isNonNegativeInteger(payload.checkedAt) ? payload.checkedAt : 0,
+        credentialStore: { available: credentialStore.available === true },
+        providers: Array.isArray(payload.providers)
+          ? payload.providers.flatMap(normalizeProviderDiagnostic)
+          : []
+      }
+    }
   }
 }
 
@@ -179,6 +186,28 @@ const normalizeConnection = (value: unknown): ModelConnection => {
   }
 }
 
+const normalizeProviderDiagnostic = (value: unknown): ImageGenerationProviderDiagnostic[] => {
+  if (!isRecord(value) || !isRecord(value.sdk) || !isProviderStatus(value.status)) return []
+  const sdk = value.sdk
+  const error = isRecord(sdk.error)
+    ? {
+        code: safeErrorIdentifier(sdk.error.code, 'ark_sdk_check_failed'),
+        message: getRuntimeErrorPresentation(safeErrorIdentifier(sdk.error.code, 'ark_sdk_check_failed')).message
+      }
+    : null
+  return [{
+    providerId: typeof value.providerId === 'string' ? value.providerId : '',
+    status: value.status,
+    sdk: {
+      packageName: typeof sdk.packageName === 'string' ? sdk.packageName : '',
+      installedVersion: typeof sdk.installedVersion === 'string' ? sdk.installedVersion : null,
+      requiredVersion: typeof sdk.requiredVersion === 'string' ? sdk.requiredVersion : '',
+      compatible: sdk.compatible === true,
+      error
+    }
+  }]
+}
+
 const jsonRequest = (method: string, body: unknown): RequestInit => ({
   method,
   headers: jsonHeaders(),
@@ -201,3 +230,13 @@ const readCookie = (name: string): string | undefined => {
     .find(part => part.startsWith(prefix))
     ?.slice(prefix.length)
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object')
+const isNonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0
+const isModelSlot = (value: unknown): value is ModelSlot => value === 'chat.primary' || value === 'image.primary'
+const isProviderStatus = (value: unknown): value is ImageGenerationProviderStatus => (
+  value === 'ready' || value === 'missing' || value === 'incompatible' || value === 'check_failed'
+)
+const safeErrorIdentifier = (value: unknown, fallback = ''): string => (
+  typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : fallback
+)

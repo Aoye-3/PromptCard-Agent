@@ -79,7 +79,7 @@ export class ImageGenerationSessionManager {
     request: ImageGenerationRequest,
     callbacks: ImageGenerationSessionCallbacks
   ): Promise<ImageGenerationResult> {
-    const key = sessionKey(request.projectId, request.nodeId)
+    const key = sessionKey(request.projectId, request.nodeId || request.conversationId || '')
     const existing = this.sessions.get(key)
     if (existing?.active) return existing.active
 

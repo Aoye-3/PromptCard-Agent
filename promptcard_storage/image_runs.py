@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import json
 import re
 from copy import deepcopy
@@ -13,6 +14,7 @@ _CREATE_FIELDS = {
     "id",
     "projectId",
     "nodeId",
+    "conversationId",
     "connectionId",
     "providerId",
     "modelId",
@@ -49,10 +51,14 @@ def normalize_new_image_run(item: dict[str, Any], now: int) -> dict[str, Any]:
     if output_asset_ids:
         raise ValueError("Queued image generation runs cannot have output assets")
 
+    node_id = _identity_string(item.get("nodeId"), "nodeId")
+    conversation_id = _identity_string(item.get("conversationId"), "conversationId")
+    if node_id is None and conversation_id is None:
+        raise ValueError("Image generation run requires nodeId or conversationId")
+
     created = {
         "id": _required_string(item, "id"),
         "projectId": _required_string(item, "projectId"),
-        "nodeId": _required_string(item, "nodeId"),
         "connectionId": _required_string(item, "connectionId"),
         "providerId": _required_string(item, "providerId"),
         "modelId": _required_string(item, "modelId"),
@@ -61,7 +67,26 @@ def normalize_new_image_run(item: dict[str, Any], now: int) -> dict[str, Any]:
         "outputAssetIds": [],
         "createdAt": _timestamp(item.get("createdAt", now), "createdAt"),
     }
+    if node_id is not None:
+        created["nodeId"] = node_id
+    if conversation_id is not None:
+        created["conversationId"] = conversation_id
     return created
+
+
+def image_conversation_title(request_snapshot: dict[str, Any], created_at: int) -> str:
+    prompt_document = request_snapshot.get("promptDocument")
+    segments = prompt_document.get("segments") if isinstance(prompt_document, dict) else None
+    visible_parts = []
+    if isinstance(segments, list):
+        for segment in segments:
+            if isinstance(segment, dict) and segment.get("type") == "text" and isinstance(segment.get("text"), str):
+                visible_parts.append(segment["text"])
+    visible_text = " ".join(" ".join(visible_parts).split())
+    if visible_text:
+        return visible_text[:32]
+    date = dt.datetime.fromtimestamp(created_at / 1000, tz=dt.timezone.utc).strftime("%Y-%m-%d")
+    return f"图片创作 {date}"
 
 
 def transition_image_run(current: dict[str, Any], patch: dict[str, Any], now: int) -> dict[str, Any]:
@@ -150,6 +175,14 @@ def _required_string(item: dict[str, Any], field: str) -> str:
 
 def _optional_string(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value:
+        raise ValueError(f"Image generation run {field} must be a non-empty string")
+    return value
+
+
+def _identity_string(value: Any, field: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
         raise ValueError(f"Image generation run {field} must be a non-empty string")
     return value
 

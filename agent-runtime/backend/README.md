@@ -323,7 +323,7 @@ MCP servers and skill states in a single file:
 
 PromptCard model connections do not require `DEEPSEEK_API_KEY` or `ARK_API_KEY` at process startup. Connection secrets are retrieved from keyring only after connection, model, capability, prompt/region, and reference-asset validation succeeds. See [Image Generation and Model Management](../../docs/architecture/image-generation-and-model-management.md).
 
-Real image generation is protected by the server-owned `PROMPTCARD_IMAGE_GENERATION_NODE_V1` rollout gate. It is disabled by default; set it to `true` in the runtime process environment only for rollout stages that permit real provider calls. Credential-free startup and health checks remain available while the gate is disabled.
+Real image generation is protected by the server-owned `PROMPTCARD_IMAGE_GENERATION_NODE_V1` rollout gate. A directly started Runtime treats an absent flag as disabled; the combined development launcher defaults it to `1` unless explicitly overridden. Production Runtime processes must opt into rollout. Credential-free startup and health checks remain available while the gate is disabled.
 
 ### PromptCard image generation
 
@@ -333,6 +333,9 @@ Real image generation is protected by the server-owned `PROMPTCARD_IMAGE_GENERAT
 - Point and bounding-box coordinates use the inclusive 0-999 coordinate space. Region edit is prompt-based; native mask upload is not advertised.
 - Input images have a 50 MB aggregate byte budget. The runtime permits at most two concurrent requests per connection and four image-generation requests globally.
 - Generation runs are durable PromptCard Storage schema-v3 history. API pages contain 1-100 rows, but there is no automatic total-history pruning; capacity is bounded by available disk space.
+- `GET /api/promptcard/runtime/image-generation-status` re-detects keyring and Ark SDK readiness without installing packages or executing commands.
+- `image.primary` assignment requires an enabled connection, a keyring credential, matching provider/model/modality, the latest successful connection test, and a compatible Ark SDK. Material connection changes clear the recorded test.
+- Connection dependencies report assignment references and an explicit nullable canvas-node count. Until Storage-backed counting is wired, clients must treat an unavailable count as unknown and block deletion.
 
 ### LangSmith Tracing
 
@@ -432,7 +435,7 @@ uv run pytest
 
 ## License
 
-See the [LICENSE](../LICENSE) file in the project root.
+See the [LICENSE](../../LICENSE) file in the project root.
 
 ## Contributing
 

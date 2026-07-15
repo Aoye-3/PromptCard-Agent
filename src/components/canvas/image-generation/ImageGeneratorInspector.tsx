@@ -18,6 +18,12 @@ import {
   type ImageRegionSource
 } from '@/domain/image-generation/regions'
 import { imageGeneratorResultUrl, imageGeneratorStatus } from '../nodes/ImageGeneratorNode'
+import {
+  imageGenerationModeForWorkflow,
+  migrateImageGenerationWorkflow,
+  validateImageGenerationWorkflow,
+  type ImageGenerationWorkflow
+} from '@/domain/image-generation/workflow'
 import { ReferencePromptEditor } from './ReferencePromptEditor'
 import { RegionEditorDialog } from './RegionEditorDialog'
 
@@ -32,6 +38,8 @@ export interface ImageGeneratorInspectorProps {
   onChange: (updates: Partial<Pick<IFreeCanvasImageGeneratorNode, 'mode' | 'settings' | 'regions' | 'meta'>>) => void
   onGenerate?: () => void
   onPromptDocumentChange?: (document: PromptDocument) => void
+  onMoveReference?: (referenceId: string, direction: -1 | 1) => void
+  onRemoveReference?: (referenceId: string) => void
   onOpenHistory?: (nodeId: string) => void
 }
 
@@ -46,6 +54,8 @@ export const ImageGeneratorInspector = ({
   onChange,
   onGenerate,
   onPromptDocumentChange,
+  onMoveReference,
+  onRemoveReference,
   onOpenHistory
 }: ImageGeneratorInspectorProps) => {
   const activeSizeCapabilities = sizeCapabilities?.modelId === node.binding.modelId
@@ -69,6 +79,18 @@ export const ImageGeneratorInspector = ({
   const generationBusy = status === 'validating' || status === 'running'
   const generationConfigured = Boolean(node.binding.connectionId && node.binding.modelId)
   const generationSizeValid = Boolean(activeSizeCapabilities && sizeValidationErrors.length === 0)
+  const sourceImageCount = promptSnapshot?.references.filter(reference => reference.role === 'source-image').length || 0
+  const imageInputCount = promptSnapshot?.references.length || 0
+  const persistedWorkflow = readImageGenerationWorkflow(node.meta.imageGenerationWorkflow)
+  const workflow = persistedWorkflow || migrateImageGenerationWorkflow(node.mode, imageInputCount)
+  const missingWorkflowInputs = promptSnapshot
+    ? validateImageGenerationWorkflow(workflow, {
+        prompt: promptSnapshot.prompt,
+        sourceImageCount,
+        imageInputCount,
+        regionCount: node.regions.length
+      })
+    : []
 
   const updateSettings = (updates: Partial<IFreeCanvasImageGeneratorNode['settings']>) => {
     onChange({ settings: { ...node.settings, ...updates } })
@@ -94,7 +116,7 @@ export const ImageGeneratorInspector = ({
   }
 
   const handleGenerate = () => {
-    if (!onGenerate || !promptSnapshot?.canGenerate || generationBusy || !generationConfigured || !generationSizeValid) return
+    if (!onGenerate || !promptSnapshot?.canGenerate || missingWorkflowInputs.length > 0 || generationBusy || !generationConfigured || !generationSizeValid) return
     onGenerate()
   }
 
@@ -118,8 +140,24 @@ export const ImageGeneratorInspector = ({
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-xs font-black text-gray-950">Prompt</h3>
             <span className="text-[10px] font-semibold text-gray-400">
-              {promptSnapshot.source === 'connected' ? 'Connected snapshot' : 'Local'}
+              {promptSnapshot.source === 'connected' ? '当前使用上游提示词' : promptSnapshot.source === 'local' ? '当前使用本地提示词' : '尚无提示词'}
             </span>
+          </div>
+          <div className="flex gap-2">
+            {promptSnapshot.source === 'connected' && (
+              <button
+                type="button"
+                className="rounded-[6px] border border-gray-200 px-2 py-1 text-[11px] font-bold"
+                onClick={() => onPromptDocumentChange(promptSnapshot.promptDocument)}
+              >复制为本地内容</button>
+            )}
+            {promptSnapshot.source === 'local' && (
+              <button
+                type="button"
+                className="rounded-[6px] border border-gray-200 px-2 py-1 text-[11px] font-bold"
+                onClick={() => onPromptDocumentChange({ version: 1, segments: [] })}
+              >使用上游</button>
+            )}
           </div>
           <ReferencePromptEditor
             document={promptSnapshot.promptDocument}
@@ -127,6 +165,8 @@ export const ImageGeneratorInspector = ({
             unresolvedReferenceIds={promptSnapshot.validationErrors.flatMap(error => (
               error.code === 'unresolved_reference' && error.referenceId ? [error.referenceId] : []
             ))}
+            onMoveReference={onMoveReference}
+            onRemoveReference={onRemoveReference}
             onChange={onPromptDocumentChange}
           />
         </div>
@@ -174,15 +214,23 @@ export const ImageGeneratorInspector = ({
 
       <div className="grid grid-cols-2 gap-3">
         <label className="text-xs font-bold text-gray-700">
-          <span className="mb-1 block">Generation mode</span>
+          <span className="mb-1 block">生成工作流</span>
           <select
+            aria-label="Image generation workflow"
             className="nodrag w-full rounded-[6px] border border-gray-200 bg-white px-2 py-2 text-xs"
-            value={node.mode}
-            onChange={event => onChange({ mode: event.target.value as IFreeCanvasImageGeneratorNode['mode'] })}
+            value={workflow}
+            onChange={event => {
+              const next = event.target.value as ImageGenerationWorkflow
+              onChange({
+                mode: imageGenerationModeForWorkflow(next),
+                meta: { ...node.meta, imageGenerationWorkflow: next }
+              })
+            }}
           >
-            <option value="generate">Generate</option>
-            <option value="edit">Edit</option>
-            <option value="region-edit">Region edit</option>
+            <option value="text-to-image">文生图</option>
+            <option value="reference-generate">参考图生成</option>
+            <option value="smart-edit">智能改图</option>
+            <option value="region-edit">局部修改</option>
           </select>
         </label>
 
@@ -273,24 +321,20 @@ export const ImageGeneratorInspector = ({
         </div>
       )}
 
+      {node.mode !== 'generate' && regionCapabilities && !regionSources.some(source => source.role === 'source-image') && (
+        <div role="alert" className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-950">
+          Source image required. Connect an image to the source-image input before editing.
+        </div>
+      )}
+
       {node.mode !== 'generate' && regionCapabilities && (
-        <details className="rounded-[6px] border border-gray-200">
-          <summary className="cursor-pointer px-3 py-2 text-xs font-black text-gray-800">Edit image regions</summary>
-          <RegionEditorDialog
-            scopeKey={node.id}
-            mode={node.mode}
-            capabilities={regionCapabilities}
-            sources={regionSources}
-            initialRegions={boundRegions}
-            onSave={regions => {
-              const serialized = serializeBoundImageRegions(regions)
-              onChange({
-                regions: serialized.regions,
-                meta: { ...node.meta, imageRegionBindings: serialized.bindings }
-              })
-            }}
-          />
-        </details>
+        <RegionEditorLauncher
+          node={node}
+          capabilities={regionCapabilities}
+          sources={regionSources}
+          initialRegions={boundRegions}
+          onChange={onChange}
+        />
       )}
 
       <div className="flex items-center justify-between border-t border-gray-100 pt-3">
@@ -304,11 +348,16 @@ export const ImageGeneratorInspector = ({
           Watermark
         </label>
         <div className="flex items-center gap-2">
+          {missingWorkflowInputs.length > 0 && (
+            <p role="status" className="text-[11px] font-bold text-amber-800">
+              缺少输入：{missingWorkflowInputs.map(missingWorkflowInputLabel).join('、')}
+            </p>
+          )}
           <button
             type="button"
             aria-label="Generate image"
             className="rounded-[6px] bg-gray-950 px-3 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-gray-300"
-            disabled={!onGenerate || !promptSnapshot?.canGenerate || generationBusy || !generationConfigured || !generationSizeValid}
+            disabled={!onGenerate || !promptSnapshot?.canGenerate || missingWorkflowInputs.length > 0 || generationBusy || !generationConfigured || !generationSizeValid}
             onClick={handleGenerate}
           >
             {status === 'failed' ? 'Retry' : 'Generate'}
@@ -327,3 +376,74 @@ export const ImageGeneratorInspector = ({
 }
 
 export default ImageGeneratorInspector
+
+const readImageGenerationWorkflow = (value: unknown): ImageGenerationWorkflow | null => (
+  value === 'text-to-image'
+  || value === 'reference-generate'
+  || value === 'smart-edit'
+  || value === 'region-edit'
+) ? value : null
+
+const missingWorkflowInputLabel = (input: ReturnType<typeof validateImageGenerationWorkflow>[number]): string => {
+  if (input === 'prompt') return '提示词'
+  if (input === 'reference-image') return '参考图'
+  if (input === 'source-image') return '主图'
+  return '区域'
+}
+
+const RegionEditorLauncher = ({
+  node,
+  capabilities,
+  sources,
+  initialRegions,
+  onChange
+}: {
+  node: IFreeCanvasImageGeneratorNode
+  capabilities: ImageRegionCapabilities
+  sources: readonly ImageRegionSource[]
+  initialRegions: ReturnType<typeof restoreBoundImageRegions>
+  onChange: ImageGeneratorInspectorProps['onChange']
+}) => {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const close = () => {
+    setOpen(false)
+    queueMicrotask(() => triggerRef.current?.focus())
+  }
+
+  return (
+    <div className="rounded-[6px] border border-gray-200 p-2">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="w-full px-2 py-1 text-left text-xs font-black text-gray-800"
+        onClick={() => setOpen(true)}
+      >打开区域编辑器</button>
+      {open && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-6" onMouseDown={event => {
+          if (event.currentTarget === event.target) close()
+        }}>
+          <div className="max-h-[92vh] w-full max-w-5xl overflow-auto">
+            <RegionEditorDialog
+              scopeKey={node.id}
+              mode={node.mode === 'edit' ? 'edit' : 'region-edit'}
+              capabilities={capabilities}
+              sources={sources}
+              initialRegions={initialRegions}
+              onSave={regions => {
+                const serialized = serializeBoundImageRegions(regions)
+                onChange({
+                  regions: serialized.regions,
+                  meta: { ...node.meta, imageRegionBindings: serialized.bindings }
+                })
+                close()
+              }}
+              onClose={close}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+import { useRef, useState } from 'react'

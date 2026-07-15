@@ -1,9 +1,11 @@
 # Seedream 图片生成节点前端交互接入 PRD
 
+> 历史状态说明：本文记录的是早期“可执行 `image-generator` 节点作为主入口”的产品方案。该入口和节点执行模型已经被项目级图片生成 Agent 取代。现行行为以 [ADR-010](../decisions/ADR-010-project-image-generation-conversations.md)、[Free Canvas 技术文档](../frontend/free-canvas.md)和[实施状态](./005-seedream-image-node-frontend-implementation-status.md)为准。本文保留用于解释需求演进，不应继续作为新开发验收依据。
+
 ## 1. 文档信息
 
-- 版本：`v1.0`
-- 状态：`Active`
+- 版本：`v1.1`
+- 状态：`Superseded by ADR-010`
 - 创建日期：`2026-07-15`
 - 产品负责人：待确认
 - 设计负责人：待确认
@@ -12,6 +14,7 @@
 - 关联实施计划：[Doubao Seedream 5.0 Pro 画布图片节点与模型管理重构实施计划](../superpowers/plans/2026-07-14-seedream-image-node-integration.md)
 - 关联架构：[Image Generation and Model Management](../architecture/image-generation-and-model-management.md)
 - 关联决策：[ADR-008 Provider-neutral Image Generation](../decisions/ADR-008-provider-neutral-image-generation.md)
+- 取代决策：[ADR-010 Project Image Generation Conversations And Durable Canvas Placements](../decisions/ADR-010-project-image-generation-conversations.md)
 
 ## 2. 背景与问题
 

@@ -7,9 +7,11 @@ const settings = (meta: IUserSettings['meta']): IUserSettings => ({
 })
 
 describe('imageGenerationNodeV1 feature flag', () => {
-  it('is closed by default and only opens for an explicit persisted boolean', () => {
-    expect(imageGenerationNodeV1Enabled(settings({}))).toBe(false)
-    expect(imageGenerationNodeV1Enabled(settings({ featureFlags: { imageGenerationNodeV1: 'true' } }))).toBe(false)
-    expect(imageGenerationNodeV1Enabled(settings({ featureFlags: { imageGenerationNodeV1: true } }))).toBe(true)
+  it('uses the environment rollout default until an explicit persisted boolean overrides it', () => {
+    expect(imageGenerationNodeV1Enabled(settings({}), true)).toBe(true)
+    expect(imageGenerationNodeV1Enabled(settings({}), false)).toBe(false)
+    expect(imageGenerationNodeV1Enabled(settings({ featureFlags: { imageGenerationNodeV1: 'true' } }), true)).toBe(true)
+    expect(imageGenerationNodeV1Enabled(settings({ featureFlags: { imageGenerationNodeV1: false } }), true)).toBe(false)
+    expect(imageGenerationNodeV1Enabled(settings({ featureFlags: { imageGenerationNodeV1: true } }), false)).toBe(true)
   })
 })

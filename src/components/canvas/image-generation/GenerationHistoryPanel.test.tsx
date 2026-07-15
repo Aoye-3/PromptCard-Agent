@@ -59,20 +59,80 @@ describe('GenerationHistoryPanelView', () => {
       <GenerationHistoryPanelView runs={[succeeded, failed]} nextCursor="cursor-2" loading={false} onLoadMore={onLoadMore} />
     )
 
-    expect(markup).toContain('Succeeded')
-    expect(markup).toContain('Failed')
+    expect(markup).toContain('已完成')
+    expect(markup).toContain('失败')
     expect(markup).toContain('seedream')
     expect(markup).toContain('2K')
     expect(markup).toContain('A polished product')
     expect(markup).toContain('/storage-api/assets/asset-input.png')
     expect(markup).toContain('/storage-api/assets/asset-output.png')
     expect(markup).toContain('Provider rate limit reached')
-    expect(markup).toContain('Load more')
+    expect(markup).toContain('加载更多')
     expect(markup).not.toContain('Delete')
+  })
+
+  it('filters statuses and exposes retry and successful result actions through callbacks', () => {
+    const onRetry = vi.fn()
+    const onSetCurrentResult = vi.fn()
+    const onPlaceOnCanvas = vi.fn()
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(
+        <GenerationHistoryPanelView
+          runs={[succeeded, failed]}
+          nextCursor={null}
+          loading={false}
+          statusFilter="failed"
+          onStatusFilterChange={vi.fn()}
+          onLoadMore={vi.fn()}
+          onRetry={onRetry}
+          onSetCurrentResult={onSetCurrentResult}
+          onPlaceOnCanvas={onPlaceOnCanvas}
+        />
+      )
+    })
+
+    expect(mountedRunIds(renderer)).toEqual(['run-failed'])
+    act(() => renderer.root.findByProps({ children: '重试' }).props.onClick())
+    expect(onRetry).toHaveBeenCalledWith(failed)
+
+    act(() => renderer.update(
+      <GenerationHistoryPanelView
+        runs={[succeeded, failed]}
+        nextCursor={null}
+        loading={false}
+        statusFilter="succeeded"
+        onStatusFilterChange={vi.fn()}
+        onLoadMore={vi.fn()}
+        onRetry={onRetry}
+        onSetCurrentResult={onSetCurrentResult}
+        onPlaceOnCanvas={onPlaceOnCanvas}
+      />
+    ))
+    act(() => renderer.root.findByProps({ children: '设为当前结果' }).props.onClick())
+    act(() => renderer.root.findByProps({ children: '放入画布' }).props.onClick())
+    expect(onSetCurrentResult).toHaveBeenCalledWith(succeeded, 'asset-output.png')
+    expect(onPlaceOnCanvas).toHaveBeenCalledWith(succeeded, 'asset-output.png')
   })
 })
 
 describe('GenerationHistoryPanel async isolation', () => {
+  it('switches between current node and current project without sending a node id for project scope', async () => {
+    const loadPage = vi.fn(() => Promise.resolve(page([])))
+    let renderer!: ReactTestRenderer
+    await act(async () => {
+      renderer = create(<GenerationHistoryPanel projectId="project-1" nodeId="node-1" loadPage={loadPage} />)
+    })
+
+    act(() => renderer.root.findByProps({ children: '当前项目' }).props.onClick())
+    await act(async () => {})
+
+    expect(loadPage).toHaveBeenLastCalledWith(expect.objectContaining({
+      projectId: 'project-1', nodeId: undefined, cursor: null, limit: 25
+    }))
+    expect(renderer.root.findByProps({ children: '当前项目' }).props['aria-pressed']).toBe(true)
+  })
+
   it('ignores an old project response that resolves after the new project', async () => {
     const oldRequest = deferred<ImageGenerationRunPage>()
     const newRequest = deferred<ImageGenerationRunPage>()
@@ -108,7 +168,7 @@ describe('GenerationHistoryPanel async isolation', () => {
     await act(async () => {
       renderer = create(<GenerationHistoryPanel projectId="project-old" nodeId="node-1" loadPage={loadPage} />)
     })
-    act(() => renderer.root.findByProps({ children: 'Load more' }).props.onClick())
+    act(() => renderer.root.findByProps({ children: '加载更多' }).props.onClick())
     act(() => renderer.update(
       <GenerationHistoryPanel projectId="project-new" nodeId="node-2" loadPage={loadPage} />
     ))
@@ -130,7 +190,7 @@ describe('GenerationHistoryPanel async isolation', () => {
     })
 
     act(() => {
-      const onClick = renderer.root.findByProps({ children: 'Load more' }).props.onClick
+      const onClick = renderer.root.findByProps({ children: '加载更多' }).props.onClick
       onClick()
       onClick()
     })
@@ -146,7 +206,7 @@ describe('GenerationHistoryPanel async isolation', () => {
       ], 'cursor-3'))
     })
     expect(mountedRunIds(renderer)).toEqual(['run-1', 'run-2'])
-    expect(renderer.root.findByProps({ children: 'Load more' })).toBeTruthy()
+    expect(renderer.root.findByProps({ children: '加载更多' })).toBeTruthy()
   })
 
   it('aborts the pending request and performs no render after unmount', async () => {

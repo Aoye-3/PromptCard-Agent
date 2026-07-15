@@ -26,7 +26,7 @@ The current frontend test suite covers several core utilities and stores:
 - image-generator contracts, typed edge cardinality, structured `@` references, size/region validation, project-scoped lifecycle reconciliation, permanent history UI, and generated-result Media reuse
 - model catalog/connection/assignment contracts, OS keyring storage and transactional legacy migration
 - Seedream prompt/provider mapping, sanitized errors, secure result download, input/concurrency limits, and terminal run persistence
-- PromptCard Storage schema v3 migration, generation-run state machine/pagination, output asset strong references, and Runtime-to-Storage SQLite integration
+- PromptCard Storage schema v3→v4 migration, project conversation/run pagination, placement state machine, output asset strong references, and Runtime-to-Storage SQLite integration
 
 Tests are run through Vitest.
 
@@ -53,7 +53,7 @@ Push-Location agent-runtime\backend
 Pop-Location
 ```
 
-The repository currently has one pre-existing full-Ruff `I001` import-order finding in `tests/test_promptcard_runtime_boundary.py`. Do not describe the full Ruff gate as green until that unrelated baseline item is resolved; changed-file Ruff checks must remain clean.
+The full Runtime Ruff gate currently passes for `app` and `tests`; the image-generation E2E Runtime fixture is checked separately.
 
 For startup script work, run:
 
@@ -71,6 +71,13 @@ The Playwright smoke suite runs through:
 
 ```powershell
 npm.cmd run test:e2e
+```
+
+The project image-generation integration uses dedicated F:-local ports, a real PromptCard Storage SQLite process, the real Runtime image router/service, and a dependency-injected fake provider/result fetcher:
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.cache\ms-playwright"
+npx.cmd playwright test --config playwright.image-generation.config.ts
 ```
 
 In restricted sandbox environments, Chromium launch may require elevated execution permissions.
@@ -134,13 +141,13 @@ In restricted sandbox environments, Chromium launch may require elevated executi
 
 - Create a Volcengine Ark connection and confirm the credential field clears after submit and never appears in the DOM or API response.
 - Assign `doubao-seedream-5-0-pro-260628` to `image.primary`.
-- Create a Free Canvas image-generator node and connect prompt, source, and ordered reference images.
+- Open the project-level `图片生成` tab, explicitly inject selected text/image canvas nodes, and confirm no selection or edge change triggers a request.
 - Confirm structured `@` tokens remain bound to the same asset after reordering while compiled image numbers change.
 - Validate 1K/2K and custom-size limits; confirm unsupported 4K/native mask/stream controls are absent.
 - Save point/bbox region intent, generate through a fake provider in automated tests, and confirm a local asset, `generatedResult` capture, and succeeded run are created.
 - Retry a failed run and confirm the retry has a different run ID and both records remain visible.
 - Reload/restart and confirm history/output access; permanently delete the project and confirm history and its output asset remain queryable.
-- Place the generated Media item back on canvas as a normal image and as a later reference.
+- Confirm every successful run is placed once as a normal image node, then use its manual continuation menu to prefill reference generation, smart edit, or region edit without invoking the provider until Generate is clicked again.
 
 ## Quality Gates
 
@@ -157,6 +164,6 @@ In restricted sandbox environments, Chromium launch may require elevated executi
 
 ## Roadmap / Not Yet Implemented
 
-- Image-generation Playwright tests validate frontend workflows with routed service doubles. The Python cross-service integration test owns the real Runtime FastAPI -> PromptCardStorageClient -> Storage FastAPI/SQLite contract; neither layer is a live Ark smoke test.
+- The automated image-generation integration uses a dependency-injected provider and deterministic local image result. Real Windows Credential Locker + live Ark coverage remains a release-time manual smoke test.
 - Agent live-model tests depend on a local DeepSeek key and should not run in generic CI without secret configuration.
 - Durable Agent proposal audit tests are not applicable until such storage exists.

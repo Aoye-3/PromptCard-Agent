@@ -49,6 +49,35 @@ Model management separates provider definitions, model capabilities, named conne
 
 Returns provider definitions and model catalog entries. The current image entry is `doubao-seedream-5-0-pro-260628` with capability metadata for modes, reference count, regions, resolutions, ratios, custom-size limits, output count, and streaming.
 
+The catalog is the frontend source of truth for image controls. UI code must consume `modes`, `resolutions`, `aspectRatios`, `customSize`, `outputFormats`, `watermark`, `maxReferenceImages`, `regionInputs`, `outputCount`, and `streaming` instead of branching on a Seedream model ID.
+
+### `GET /agent-api/promptcard/runtime/image-generation-status`
+
+Re-runs the read-only image-runtime diagnostics and returns no installation command, local path, credential, or provider response body:
+
+```json
+{
+  "serverEnabled": true,
+  "checkedAt": 1752572345678,
+  "credentialStore": { "available": true },
+  "providers": [
+    {
+      "providerId": "volcengine-ark",
+      "status": "ready",
+      "sdk": {
+        "packageName": "volcengine-python-sdk",
+        "installedVersion": "5.0.36",
+        "requiredVersion": "5.0.36",
+        "compatible": true,
+        "error": null
+      }
+    }
+  ]
+}
+```
+
+Provider status is `ready`, `missing`, `incompatible`, or `check_failed`. Calling the same GET endpoint again is the supported re-detection operation; the Runtime does not expose dependency installation or command execution.
+
 ### `GET /agent-api/promptcard/runtime/model-connections`
 
 Returns `{ "connections": [...] }`. A connection response contains:
@@ -96,11 +125,27 @@ Replaces the mutable connection fields using the same request shape. Omitting `c
 
 ### `DELETE /agent-api/promptcard/runtime/model-connections/{id}`
 
-Deletes unassigned connection metadata and its keyring credential. Assigned connections return `409 connection_is_assigned` until their slot is changed.
+Deletes unused connection metadata and its keyring credential. Before offering deletion, clients must query the dependency endpoint below. Unknown canvas dependency counts fail closed: the UI must not treat an unavailable count as zero.
 
 ### `POST /agent-api/promptcard/runtime/model-connections/{id}/test`
 
 Tests the stored credential from Agent Runtime and records `lastTest`. The response is `{ "success": true|false, "message": "..." }`; raw provider or credential errors are not returned.
+
+Changing provider, API base, credential, or enabled state clears the persisted successful test. A recorded test has no time-to-live; it remains valid until one of those material fields changes or a later test replaces it.
+
+### `GET /agent-api/promptcard/runtime/model-connections/{id}/dependencies`
+
+Returns assignments and the number of persisted canvas-node references known to the Runtime:
+
+```json
+{
+  "assignments": ["image.primary"],
+  "canvasNodeCount": null,
+  "canvasNodeCountAvailable": false
+}
+```
+
+The current Gateway does not yet own a reliable Storage query for cross-project canvas references, so it reports `null/false` rather than a misleading zero. Connection deletion remains blocked in the model-management UI until that count is available and zero.
 
 ### `GET /agent-api/promptcard/runtime/model-assignments`
 
@@ -117,7 +162,29 @@ Assigns a compatible enabled connection and model:
 }
 ```
 
-Provider and modality must match the selected slot.
+An assignment is accepted only when the connection is enabled, has a credential, matches the model provider and slot modality, has a latest successful connection test, and, for Ark image models, the required SDK is compatible.
+
+### `DELETE /agent-api/promptcard/runtime/model-assignments/{slot}`
+
+Clears the selected default slot and returns `204`. It does not delete the connection, credential, canvas nodes, history, or assets.
+
+### Model-management error envelope
+
+Model-management failures use a sanitized FastAPI `detail` object:
+
+```json
+{
+  "detail": {
+    "code": "connection_not_tested",
+    "message": "The model connection must be tested before assignment.",
+    "action": "test_connection",
+    "retryable": false,
+    "field": "connectionId"
+  }
+}
+```
+
+The browser client normalizes this to `{code, message, action, retryable, field?}` and maps it to safe Chinese copy. Neither layer exposes exception stacks, filesystem paths, shell commands, credentials, or raw provider bodies.
 
 ### Deprecated model-config compatibility routes
 
@@ -132,7 +199,7 @@ The frontend sends normalized intent and local asset IDs. The Runtime creates th
 ```json
 {
   "projectId": "project-1",
-  "nodeId": "image-generator-1",
+  "conversationId": "image-conversation-1",
   "connectionId": "uuid",
   "modelId": "doubao-seedream-5-0-pro-260628",
   "mode": "region-edit",
@@ -155,6 +222,8 @@ The frontend sends normalized intent and local asset IDs. The Runtime creates th
   "watermark": false
 }
 ```
+
+`conversationId` identifies a project-level Image Generation Agent conversation and does not require `nodeId`. Legacy node-bound callers may send `nodeId` instead; at least one identity is required. When a conversation already exists, Runtime verifies that it belongs to `projectId` before provider access and maps a mismatch to a sanitized not-found response. Runtime compiles only this request's prompt, inputs, regions, and settings; it never reads or appends earlier conversation runs.
 
 For `aspectRatio: "custom"`, positive integer `width` and `height` are required and must satisfy the selected model capability limits.
 

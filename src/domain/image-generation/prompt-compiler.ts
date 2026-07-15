@@ -155,7 +155,12 @@ const connectedImageReferences = (
   .sort(compareImageInputEdges)
   .flatMap((edge, order) => {
     const sourceNode = project.nodes.find(node => node.id === edge.source)
-    if (sourceNode?.kind !== 'image') {
+    const assetId = sourceNode?.kind === 'image'
+      ? sourceNode.assetId || null
+      : sourceNode?.kind === 'image-generator'
+        ? sourceNode.primaryAssetId || null
+        : null
+    if (sourceNode?.kind !== 'image' && sourceNode?.kind !== 'image-generator') {
       const referenceId = edge.referenceId || `reference-${edge.id}`
       validationErrors.push({ code: 'unresolved_reference', referenceId, edgeId: edge.id })
       return []
@@ -166,7 +171,7 @@ const connectedImageReferences = (
       referenceId: edge.referenceId || `reference-${edge.id}`,
       label: edge.label || sourceNode.title,
       role: edge.targetHandle,
-      assetId: sourceNode.assetId || null,
+      assetId,
       order
     }]
   })
@@ -191,7 +196,9 @@ const connectedPromptSnapshot = (
   }
 }
 
-const hasExplicitPromptContent = (document: PromptDocument): boolean => document.segments.length > 0
+const hasExplicitPromptContent = (document: PromptDocument): boolean => document.segments.some(segment => (
+  segment.type === 'reference' || segment.text.trim().length > 0
+))
 
 const clonePromptDocument = (document: PromptDocument): PromptDocument => ({
   version: 1,

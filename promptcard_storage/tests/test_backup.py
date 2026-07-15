@@ -19,7 +19,7 @@ class ImageRunBackupTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_backup_contains_schema_v3_run_and_its_output_asset(self) -> None:
+    def test_backup_contains_schema_v4_run_and_its_output_asset(self) -> None:
         content = b"\x89PNG\r\n\x1a\ngenerated"
         asset = self.store.save_asset("generated.png", "image/png", content)
         run = self.store.create_image_generation_run({
@@ -42,7 +42,7 @@ class ImageRunBackupTest(unittest.TestCase):
 
         manifest = self.store.backup(destination)
 
-        self.assertEqual(manifest["schemaVersion"], 3)
+        self.assertEqual(manifest["schemaVersion"], 4)
         self.assertEqual((destination / "assets" / asset["id"]).read_bytes(), content)
         connection = sqlite3.connect(destination / "promptcard.sqlite3")
         try:
@@ -54,7 +54,7 @@ class ImageRunBackupTest(unittest.TestCase):
             connection.close()
         self.assertEqual(row[0], "succeeded")
         self.assertIn(asset["id"], row[1])
-        self.assertEqual(version, 3)
+        self.assertEqual(version, 4)
 
 
 if __name__ == "__main__":

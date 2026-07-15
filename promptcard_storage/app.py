@@ -109,11 +109,13 @@ def create_app(storage: SqliteStore) -> FastAPI:
     def list_image_generation_runs(
         projectId: str | None = None,
         nodeId: str | None = None,
+        conversationId: str | None = None,
         cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         return _handle(lambda: storage.list_image_generation_runs(
-            project_id=projectId, node_id=nodeId, cursor=cursor, limit=limit
+            project_id=projectId, node_id=nodeId, conversation_id=conversationId,
+            cursor=cursor, limit=limit
         ))
 
     @application.patch("/api/image-generation-runs/{run_id}/state")
@@ -123,6 +125,41 @@ def create_app(storage: SqliteStore) -> FastAPI:
     @application.get("/api/image-generation-runs/{run_id}")
     def get_image_generation_run(run_id: str) -> dict[str, Any]:
         return _handle(lambda: storage.get_image_generation_run(run_id))
+
+    @application.get("/api/image-generation-conversations")
+    def list_image_generation_conversations(
+        projectId: str,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.list_image_generation_conversations(
+            project_id=projectId, cursor=cursor, limit=limit
+        ))
+
+    @application.get("/api/image-generation-conversations/{conversation_id}/runs")
+    def list_image_generation_conversation_runs(
+        conversation_id: str,
+        projectId: str,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.list_image_generation_conversation_runs(
+            conversation_id, project_id=projectId, cursor=cursor, limit=limit
+        ))
+
+    @application.get("/api/image-generation-conversations/{conversation_id}")
+    def get_image_generation_conversation(conversation_id: str, projectId: str) -> dict[str, Any]:
+        return _handle(lambda: storage.get_image_generation_conversation(conversation_id, projectId))
+
+    @application.get("/api/image-generation-placements")
+    def list_image_generation_placements(projectId: str, state: str | None = None) -> dict[str, Any]:
+        return _handle(lambda: storage.list_image_generation_placements(
+            project_id=projectId, state=state
+        ))
+
+    @application.patch("/api/image-generation-placements/{run_id}")
+    def update_image_generation_placement(run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.update_image_generation_placement(run_id, patch))
 
     @application.get("/api/recent-captures")
     def list_recent_captures() -> dict[str, Any]:

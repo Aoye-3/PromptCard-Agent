@@ -11,6 +11,7 @@ export type ImageGeneratorConnectionValidationErrorCode =
   | 'source_image_input_limit'
   | 'reference_image_input_limit'
   | 'image_input_limit'
+  | 'image_generator_output_unavailable'
   | 'image_input_requires_image_source'
 
 export interface ImageGeneratorConnectionValidationError {
@@ -35,7 +36,16 @@ export const validateImageGeneratorConnection = (
 
   if (
     (candidate.targetHandle === 'source-image' || candidate.targetHandle === 'reference-image')
+    && sourceNode.kind === 'image-generator'
+    && !sourceNode.primaryAssetId
+  ) {
+    return [{ code: 'image_generator_output_unavailable' }]
+  }
+
+  if (
+    (candidate.targetHandle === 'source-image' || candidate.targetHandle === 'reference-image')
     && sourceNode.kind !== 'image'
+    && sourceNode.kind !== 'image-generator'
   ) {
     return [{ code: 'image_input_requires_image_source' }]
   }

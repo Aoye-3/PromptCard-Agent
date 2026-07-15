@@ -111,6 +111,44 @@ def test_keyring_read_back_mismatch_keeps_legacy_file_unchanged(tmp_path):
     assert [event[0] for event in credentials.events] == ["get", "set", "get", "set"]
 
 
+def test_migration_replacing_existing_credential_invalidates_last_test(tmp_path):
+    legacy_path = tmp_path / "promptcard-model-config.json"
+    legacy_path.write_text(
+        json.dumps({"apiKey": "sk-new", "modelName": "deepseek-chat"}),
+        encoding="utf-8",
+    )
+    credentials = RecordingCredentialStore()
+    store = ModelConnectionStore(
+        tmp_path / "promptcard-model-connections.json",
+        credentials,
+    )
+    connection_id = _legacy_connection_id(legacy_path)
+    connection = store.prepare_connection(
+        connection_id,
+        ConnectionRequest(
+            providerId="deepseek",
+            displayName="Existing",
+            apiBase="https://api.deepseek.com",
+            enabled=True,
+        ),
+    )
+    connection["lastTest"] = {
+        "ok": True,
+        "checkedAt": 123,
+        "message": "Connection ok.",
+    }
+    state = store.read_state()
+    state["connections"].append(connection)
+    store.replace_state(state)
+    credentials.values[connection_id] = "sk-old"
+
+    assert migrate_legacy_model_config(legacy_path, store) is True
+
+    [migrated] = store.read_state()["connections"]
+    assert "lastTest" not in migrated
+    assert credentials.values[connection_id] == "sk-new"
+
+
 def test_state_write_failure_restores_original_state_legacy_and_keyring(tmp_path, monkeypatch):
     legacy_path = tmp_path / "promptcard-model-config.json"
     legacy_bytes = b'{"apiKey":"sk-new","modelName":"deepseek-chat"}\r\n'

@@ -193,4 +193,31 @@ describe('image generator canvas connections', () => {
       })).toEqual([{ code: 'image_input_requires_image_source' }])
     }
   )
+
+  test('accepts a completed generator output as an image input', () => {
+    const upstream = {
+      ...generatorNode,
+      id: 'generator-upstream',
+      primaryAssetId: 'asset-generated',
+      meta: { status: 'succeeded' }
+    }
+    const project = projectWith([upstream as never, generatorNode as never])
+
+    expect(validateImageGeneratorConnection(project, {
+      source: upstream.id,
+      target: generatorNode.id,
+      targetHandle: 'reference-image'
+    })).toEqual([])
+  })
+
+  test('rejects a generator output before it has a local result asset', () => {
+    const upstream = { ...generatorNode, id: 'generator-upstream', primaryAssetId: undefined }
+    const project = projectWith([upstream as never, generatorNode as never])
+
+    expect(validateImageGeneratorConnection(project, {
+      source: upstream.id,
+      target: generatorNode.id,
+      targetHandle: 'source-image'
+    })).toEqual([{ code: 'image_generator_output_unavailable' }])
+  })
 })

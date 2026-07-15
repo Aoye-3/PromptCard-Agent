@@ -8,7 +8,7 @@ PromptCard-Manager helps users build reusable prompt cards, manage Prompt Librar
 - Prompt Library preset management using the `IPreset` compatibility contract.
 - Storyboard and page-based three-stage structured prompt workflows, including bound storyboard/video prompt pairs.
 - Optional Agent dashboard and collaboration panel backed by a DeerFlow-derived runtime.
-- Provider-neutral Free Canvas image generation with Seedream 5.0 Pro, OS-keyring credentials, local generated assets, and permanent schema v3 history.
+- Provider-neutral project Image Generation Agent with Seedream 5.0 Pro, OS-keyring credentials, local generated assets, permanent schema v4 conversations/runs, and idempotent canvas placement.
 - Development-only file persistence for projects and Prompt Library presets.
 
 ## Repository Boundary

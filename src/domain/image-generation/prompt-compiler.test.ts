@@ -115,7 +115,7 @@ describe('compileImageGeneratorPrompt', () => {
     expect(snapshot.promptDocument.segments).toEqual([{ type: 'text', text: 'Original prompt' }])
   })
 
-  it('treats an explicitly persisted empty text segment as a local override', () => {
+  it('uses the upstream prompt when the persisted local text is empty', () => {
     const upstream = textNode('prompt-1', 'Connected prompt')
     const project = projectWith([
       generatorNode({ version: 1, segments: [{ type: 'text', text: '' }] }),
@@ -130,9 +130,9 @@ describe('compileImageGeneratorPrompt', () => {
 
     const result = compileImageGeneratorPrompt(project, 'generator-1')
 
-    expect(result.source).toBe('local')
-    expect(result.prompt).toBe('')
-    expect(result.validationErrors).toContainEqual({ code: 'missing_prompt' })
+    expect(result.source).toBe('connected')
+    expect(result.prompt).toBe('Connected prompt')
+    expect(result.validationErrors).not.toContainEqual({ code: 'missing_prompt' })
   })
 
   it('keeps token identity and asset binding stable while figure numbers follow reordered inputOrder', () => {
@@ -252,6 +252,35 @@ describe('compileImageGeneratorPrompt', () => {
         order: 1
       }
     ])
+  })
+
+  it('accepts a completed image generator output as a downstream image input', () => {
+    const upstream = {
+      ...generatorNode({ version: 1, segments: [{ type: 'text', text: 'Upstream' }] }),
+      id: 'upstream-generator',
+      title: 'Upstream result',
+      primaryAssetId: 'asset-upstream'
+    }
+    const project = projectWith([
+      generatorNode({ version: 1, segments: [{ type: 'text', text: 'Continue' }] }),
+      upstream
+    ], [{
+      id: 'edge-upstream',
+      source: upstream.id,
+      target: 'generator-1',
+      sourceHandle: 'image-output',
+      targetHandle: 'reference-image',
+      inputOrder: 0,
+      referenceId: 'ref-upstream',
+      createdAt: 1
+    }])
+
+    expect(compileImageGeneratorPrompt(project, 'generator-1').inputAssets).toEqual([{
+      referenceId: 'ref-upstream',
+      role: 'reference-image',
+      assetId: 'asset-upstream',
+      order: 0
+    }])
   })
 
   it('compiles a connected quick-message canvas source through the same prompt path', () => {

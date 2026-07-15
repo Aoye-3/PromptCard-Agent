@@ -137,7 +137,7 @@ class ImageRunSchemaMigrationTest(unittest.TestCase):
         finally:
             connection.close()
 
-        self.assertEqual(versions, [2, 3])
+        self.assertEqual(versions, [2, 3, 4])
         self.assertEqual(table, ("image_generation_runs",))
         self.assertIn("image_generation_runs_project_order", indexes)
         self.assertIn("image_generation_runs_node_order", indexes)

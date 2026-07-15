@@ -15,6 +15,8 @@ from .assets import AssetStore, AssetValidationError
 from .backup import BackupManager
 from .image_runs import (
     decode_cursor,
+    encode_cursor,
+    image_conversation_title,
     image_run_page,
     normalize_new_image_run,
     normalize_page_limit,
@@ -24,7 +26,7 @@ from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DATABASE_NAME = "promptcard.sqlite3"
 JSON_SOURCES = (
     "projects.json",
@@ -102,6 +104,8 @@ class SqliteStore:
                 "backup": True,
                 "recentCaptures": True,
                 "imageGenerationRuns": True,
+                "imageGenerationConversations": True,
+                "imageGenerationPlacements": True,
             },
         }
 
@@ -487,17 +491,42 @@ class SqliteStore:
     def create_image_generation_run(self, item: dict[str, Any]) -> dict[str, Any]:
         created = normalize_new_image_run(item, now_ms())
         with self._transaction() as connection:
+            conversation_id = created.get("conversationId")
+            if conversation_id is not None:
+                conversation = connection.execute(
+                    "SELECT project_id FROM image_generation_conversations WHERE id=?",
+                    (conversation_id,),
+                ).fetchone()
+                if conversation is None:
+                    connection.execute(
+                        "INSERT INTO image_generation_conversations(id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                        (
+                            conversation_id,
+                            created["projectId"],
+                            image_conversation_title(created["requestSnapshot"], created["createdAt"]),
+                            created["createdAt"],
+                            created["createdAt"],
+                        ),
+                    )
+                elif conversation[0] != created["projectId"]:
+                    raise MissingItem()
             try:
                 connection.execute(
-                    "INSERT INTO image_generation_runs(id, project_id, node_id, connection_id, provider_id, model_id, state, created_at, started_at, finished_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO image_generation_runs(id, project_id, node_id, conversation_id, connection_id, provider_id, model_id, state, created_at, started_at, finished_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        created["id"], created["projectId"], created["nodeId"], created["connectionId"],
+                        created["id"], created["projectId"], created.get("nodeId"), conversation_id,
+                        created["connectionId"],
                         created["providerId"], created["modelId"], created["state"], created["createdAt"],
                         None, None, _json(created),
                     ),
                 )
             except sqlite3.IntegrityError as exc:
                 raise DuplicateItem(created["id"]) from exc
+            if conversation_id is not None:
+                connection.execute(
+                    "UPDATE image_generation_conversations SET updated_at=MAX(updated_at, ?) WHERE id=?",
+                    (created["createdAt"], conversation_id),
+                )
         return created
 
     def get_image_generation_run(self, run_id: str) -> dict[str, Any]:
@@ -532,6 +561,31 @@ class SqliteStore:
                 "UPDATE image_generation_runs SET state=?, started_at=?, finished_at=?, payload_json=? WHERE id=?",
                 (updated["state"], updated.get("startedAt"), updated.get("finishedAt"), _json(updated), run_id),
             )
+            conversation_id = updated.get("conversationId")
+            if conversation_id is not None:
+                updated_at = updated.get("finishedAt") or updated.get("startedAt") or now_ms()
+                connection.execute(
+                    "UPDATE image_generation_conversations SET updated_at=MAX(updated_at, ?) WHERE id=?",
+                    (updated_at, conversation_id),
+                )
+                if updated["state"] == "succeeded" and updated["outputAssetIds"]:
+                    placement = {
+                        "runId": updated["id"],
+                        "projectId": updated["projectId"],
+                        "conversationId": conversation_id,
+                        "assetId": updated["outputAssetIds"][0],
+                        "state": "pending",
+                        "createdAt": updated_at,
+                        "updatedAt": updated_at,
+                    }
+                    connection.execute(
+                        "INSERT INTO image_generation_canvas_placements(run_id, project_id, conversation_id, asset_id, state, canvas_node_id, created_at, updated_at, payload_json) VALUES (?, ?, ?, ?, 'pending', NULL, ?, ?, ?)",
+                        (
+                            placement["runId"], placement["projectId"], placement["conversationId"],
+                            placement["assetId"], placement["createdAt"], placement["updatedAt"],
+                            _json(placement),
+                        ),
+                    )
         return updated
 
     def list_image_generation_runs(
@@ -539,6 +593,7 @@ class SqliteStore:
         *,
         project_id: str | None = None,
         node_id: str | None = None,
+        conversation_id: str | None = None,
         cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
@@ -552,6 +607,9 @@ class SqliteStore:
         if node_id is not None:
             clauses.append("node_id=?")
             parameters.append(node_id)
+        if conversation_id is not None:
+            clauses.append("conversation_id=?")
+            parameters.append(conversation_id)
         if cursor_value is not None:
             clauses.append("(created_at < ? OR (created_at = ? AND id < ?))")
             parameters.extend((cursor_value[0], cursor_value[0], cursor_value[1]))
@@ -563,6 +621,161 @@ class SqliteStore:
                 parameters,
             ).fetchall()
         return image_run_page([json.loads(row[0]) for row in rows], normalized_limit)
+
+    def list_image_generation_conversations(
+        self,
+        *,
+        project_id: str,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        if not isinstance(project_id, str) or not project_id:
+            raise ValueError("Image generation conversation projectId is required")
+        normalized_limit = normalize_page_limit(limit)
+        cursor_value = decode_cursor(cursor)
+        parameters: list[Any] = [project_id]
+        cursor_clause = ""
+        if cursor_value is not None:
+            cursor_clause = " AND (updated_at < ? OR (updated_at = ? AND id < ?))"
+            parameters.extend((cursor_value[0], cursor_value[0], cursor_value[1]))
+        parameters.append(normalized_limit + 1)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, project_id, title, created_at, updated_at "
+                "FROM image_generation_conversations WHERE project_id=?" + cursor_clause
+                + " ORDER BY updated_at DESC, id DESC LIMIT ?",
+                parameters,
+            ).fetchall()
+            conversations = [self._image_conversation_summary(connection, row) for row in rows]
+        has_more = len(conversations) > normalized_limit
+        items = conversations[:normalized_limit]
+        next_cursor = None
+        if has_more and items:
+            next_cursor = encode_cursor(items[-1]["updatedAt"], items[-1]["id"])
+        return {"conversations": items, "nextCursor": next_cursor}
+
+    def get_image_generation_conversation(self, conversation_id: str, project_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, project_id, title, created_at, updated_at "
+                "FROM image_generation_conversations WHERE id=? AND project_id=?",
+                (conversation_id, project_id),
+            ).fetchone()
+            if row is None:
+                raise MissingItem()
+            return self._image_conversation_summary(connection, row)
+
+    def list_image_generation_conversation_runs(
+        self,
+        conversation_id: str,
+        *,
+        project_id: str,
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            if connection.execute(
+                "SELECT 1 FROM image_generation_conversations WHERE id=? AND project_id=?",
+                (conversation_id, project_id),
+            ).fetchone() is None:
+                raise MissingItem()
+        return self.list_image_generation_runs(
+            project_id=project_id,
+            conversation_id=conversation_id,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    def list_image_generation_placements(
+        self,
+        *,
+        project_id: str,
+        state: str | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(project_id, str) or not project_id:
+            raise ValueError("Image generation placement projectId is required")
+        if state is not None and state not in {"pending", "placed"}:
+            raise ValueError("Image generation placement state is invalid")
+        parameters: list[Any] = [project_id]
+        state_clause = ""
+        if state is not None:
+            state_clause = " AND state=?"
+            parameters.append(state)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT payload_json FROM image_generation_canvas_placements "
+                "WHERE project_id=?" + state_clause + " ORDER BY created_at, run_id",
+                parameters,
+            ).fetchall()
+        return {"placements": [json.loads(row[0]) for row in rows]}
+
+    def update_image_generation_placement(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(patch, dict) or set(patch) != {"state", "canvasNodeId"}:
+            raise ValueError("Image generation placement patch is invalid")
+        if patch.get("state") != "placed":
+            raise ValueError("Image generation placement can only transition to placed")
+        canvas_node_id = patch.get("canvasNodeId")
+        if not isinstance(canvas_node_id, str) or not canvas_node_id.strip():
+            raise ValueError("Image generation placement canvasNodeId is required")
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT payload_json FROM image_generation_canvas_placements WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise MissingItem()
+            current = json.loads(row[0])
+            if current["state"] != "pending":
+                raise ValueError("Invalid image generation placement transition")
+            updated = {
+                **current,
+                "state": "placed",
+                "canvasNodeId": canvas_node_id,
+                "updatedAt": now_ms(),
+            }
+            connection.execute(
+                "UPDATE image_generation_canvas_placements SET state='placed', canvas_node_id=?, updated_at=?, payload_json=? WHERE run_id=?",
+                (canvas_node_id, updated["updatedAt"], _json(updated), run_id),
+            )
+        return updated
+
+    def _image_conversation_summary(
+        self,
+        connection: sqlite3.Connection,
+        row: sqlite3.Row | tuple[Any, ...],
+    ) -> dict[str, Any]:
+        conversation_id, project_id, title, created_at, updated_at = row
+        latest_row = connection.execute(
+            "SELECT payload_json FROM image_generation_runs WHERE conversation_id=? AND project_id=? "
+            "ORDER BY created_at DESC, id DESC LIMIT 1",
+            (conversation_id, project_id),
+        ).fetchone()
+        preview_row = connection.execute(
+            "SELECT payload_json FROM image_generation_runs WHERE conversation_id=? AND project_id=? AND state='succeeded' "
+            "ORDER BY COALESCE(finished_at, created_at) DESC, id DESC LIMIT 1",
+            (conversation_id, project_id),
+        ).fetchone()
+        turn_count = connection.execute(
+            "SELECT COUNT(*) FROM image_generation_runs WHERE conversation_id=? AND project_id=?",
+            (conversation_id, project_id),
+        ).fetchone()[0]
+        summary: dict[str, Any] = {
+            "id": conversation_id,
+            "projectId": project_id,
+            "title": title,
+            "createdAt": created_at,
+            "updatedAt": updated_at,
+            "turnCount": turn_count,
+        }
+        if latest_row is not None:
+            latest = json.loads(latest_row[0])
+            summary["latestRunId"] = latest["id"]
+            summary["latestState"] = latest["state"]
+        if preview_row is not None:
+            output_ids = json.loads(preview_row[0]).get("outputAssetIds", [])
+            if output_ids:
+                summary["previewAssetId"] = output_ids[0]
+        return summary
 
     def _successful_image_run_payloads(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -668,13 +881,26 @@ class SqliteStore:
             if current_version == 2:
                 connection.execute("BEGIN IMMEDIATE")
                 try:
-                    self._create_image_generation_runs_schema(connection)
+                    self._create_image_generation_runs_v3_schema(connection)
                     connection.execute(
                         "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
                         (3, "add-image-generation-runs", now_ms()),
                     )
                     connection.commit()
                     current_version = 3
+                except Exception:
+                    connection.rollback()
+                    raise
+            if current_version == 3:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._migrate_image_generation_v4(connection)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                        (4, "add-image-generation-conversations", now_ms()),
+                    )
+                    connection.commit()
+                    current_version = 4
                 except Exception:
                     connection.rollback()
                     raise
@@ -706,7 +932,7 @@ class SqliteStore:
             CREATE TABLE browser_imports(migration_id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
         """)
         self._create_recent_captures_schema(connection)
-        self._create_image_generation_runs_schema(connection)
+        self._create_image_generation_v4_schema(connection)
 
     def _insert_project(self, connection: sqlite3.Connection, item: dict[str, Any], status: str, trash: dict[str, Any] | None = None) -> None:
         connection.execute(
@@ -740,7 +966,7 @@ class SqliteStore:
             CREATE INDEX IF NOT EXISTS recent_captures_order ON recent_captures(captured_at DESC, created_at DESC);
         """)
 
-    def _create_image_generation_runs_schema(self, connection: sqlite3.Connection) -> None:
+    def _create_image_generation_runs_v3_schema(self, connection: sqlite3.Connection) -> None:
         connection.execute("""
             CREATE TABLE IF NOT EXISTS image_generation_runs(
                 id TEXT PRIMARY KEY,
@@ -762,6 +988,109 @@ class SqliteStore:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS image_generation_runs_node_order ON image_generation_runs(node_id, created_at DESC, id DESC)"
         )
+
+    def _create_image_generation_v4_schema(self, connection: sqlite3.Connection) -> None:
+        connection.executescript("""
+            CREATE TABLE IF NOT EXISTS image_generation_conversations(
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS image_generation_conversations_project_order
+                ON image_generation_conversations(project_id, updated_at DESC, id DESC);
+            CREATE TABLE IF NOT EXISTS image_generation_runs(
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                node_id TEXT,
+                conversation_id TEXT,
+                connection_id TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                model_id TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('queued','running','succeeded','failed')),
+                created_at INTEGER NOT NULL,
+                started_at INTEGER,
+                finished_at INTEGER,
+                payload_json TEXT NOT NULL,
+                CHECK(node_id IS NOT NULL OR conversation_id IS NOT NULL)
+            );
+            CREATE INDEX IF NOT EXISTS image_generation_runs_project_order
+                ON image_generation_runs(project_id, created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS image_generation_runs_node_order
+                ON image_generation_runs(node_id, created_at DESC, id DESC);
+            CREATE INDEX IF NOT EXISTS image_generation_runs_conversation_order
+                ON image_generation_runs(conversation_id, created_at DESC, id DESC);
+            CREATE TABLE IF NOT EXISTS image_generation_canvas_placements(
+                run_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                asset_id TEXT NOT NULL,
+                state TEXT NOT NULL CHECK(state IN ('pending','placed')),
+                canvas_node_id TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                CHECK((state='pending' AND canvas_node_id IS NULL) OR (state='placed' AND canvas_node_id IS NOT NULL))
+            );
+            CREATE INDEX IF NOT EXISTS image_generation_placements_project_state_order
+                ON image_generation_canvas_placements(project_id, state, created_at, run_id);
+        """)
+
+    def _migrate_image_generation_v4(self, connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            "SELECT id, project_id, node_id, connection_id, provider_id, model_id, state, "
+            "created_at, started_at, finished_at, payload_json FROM image_generation_runs"
+        ).fetchall()
+        connection.execute("DROP INDEX IF EXISTS image_generation_runs_project_order")
+        connection.execute("DROP INDEX IF EXISTS image_generation_runs_node_order")
+        connection.execute("ALTER TABLE image_generation_runs RENAME TO image_generation_runs_v3")
+        self._create_image_generation_v4_schema(connection)
+
+        conversations: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in rows:
+            payload = json.loads(row[10])
+            key = (row[1], row[2])
+            conversation = conversations.get(key)
+            if conversation is None:
+                conversation_id = _legacy_image_conversation_id(row[1], row[2])
+                conversation = {
+                    "id": conversation_id,
+                    "projectId": row[1],
+                    "title": image_conversation_title(payload.get("requestSnapshot", {}), row[7]),
+                    "createdAt": row[7],
+                    "updatedAt": row[9] or row[8] or row[7],
+                }
+                conversations[key] = conversation
+            else:
+                if row[7] < conversation["createdAt"]:
+                    conversation["createdAt"] = row[7]
+                    conversation["title"] = image_conversation_title(payload.get("requestSnapshot", {}), row[7])
+                conversation["updatedAt"] = max(
+                    conversation["updatedAt"], row[9] or row[8] or row[7]
+                )
+
+        for conversation in conversations.values():
+            connection.execute(
+                "INSERT INTO image_generation_conversations(id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    conversation["id"], conversation["projectId"], conversation["title"],
+                    conversation["createdAt"], conversation["updatedAt"],
+                ),
+            )
+
+        for row in rows:
+            payload = json.loads(row[10])
+            conversation_id = conversations[(row[1], row[2])]["id"]
+            payload["conversationId"] = conversation_id
+            connection.execute(
+                "INSERT INTO image_generation_runs(id, project_id, node_id, conversation_id, connection_id, provider_id, model_id, state, created_at, started_at, finished_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row[0], row[1], row[2], conversation_id, row[3], row[4], row[5], row[6],
+                    row[7], row[8], row[9], _json(payload),
+                ),
+            )
+        connection.execute("DROP TABLE image_generation_runs_v3")
 
     def _insert_recent_capture(self, connection: sqlite3.Connection, item: dict[str, Any]) -> None:
         connection.execute(
@@ -871,6 +1200,11 @@ def _ensure_unique_ids(items: list[dict[str, Any]], label: str) -> None:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _legacy_image_conversation_id(project_id: str, node_id: str) -> str:
+    stable = uuid.uuid5(uuid.NAMESPACE_URL, f"promptcard:image-generation:{project_id}:{node_id}")
+    return f"legacy-{stable}"
 
 
 def normalize_project(item: dict[str, Any]) -> dict[str, Any]:

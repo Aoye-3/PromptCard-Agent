@@ -10,6 +10,7 @@ from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -33,7 +34,9 @@ from app.gateway.image_generation.service import (
     GenerationError,
     GenerationOutcome,
     ImageGenerationService,
+    PromptCardStorageClient,
     StorageAsset,
+    StorageGatewayError,
 )
 
 REMOTE_URL = "https://ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com/result.png?token=remote-secret"
@@ -140,6 +143,7 @@ def command(run_id: str = "run-1") -> GenerationCommand:
         run_id=run_id,
         project_id="project-1",
         node_id="node-1",
+        conversation_id=None,
         connection_id="connection-1",
         model_id="doubao-seedream-5-0-pro-260628",
         mode="edit",
@@ -159,6 +163,10 @@ def command(run_id: str = "run-1") -> GenerationCommand:
         output_format="png",
         watermark=False,
     )
+
+
+def conversation_command(run_id: str = "run-conversation") -> GenerationCommand:
+    return replace(command(run_id), node_id=None, conversation_id="conversation-1")
 
 
 def make_service(
@@ -236,6 +244,86 @@ def test_success_persists_state_localizes_result_and_returns_no_remote_url() -> 
     assert result.capture_id == "capture-generated"
     assert REMOTE_URL not in repr(result)
     assert "remote_url" not in result.__dataclass_fields__
+
+
+def test_conversation_generation_persists_conversation_without_fabricating_canvas_node() -> None:
+    service, storage, provider, _fetcher = make_service()
+
+    result = service.generate(conversation_command())
+
+    queued = storage.operations[0][1]
+    assert queued["projectId"] == "project-1"
+    assert queued["conversationId"] == "conversation-1"
+    assert "nodeId" not in queued
+    capture = next(payload for operation, payload in storage.operations if operation == "create_capture")
+    assert capture["linkedProjectId"] == "project-1"
+    assert "linkedCanvasNodeId" not in capture
+    assert len(provider.requests) == 1
+    assert result.state == "succeeded"
+
+
+def test_conversation_generation_uses_only_current_request_snapshot_and_never_reads_prior_runs() -> None:
+    storage = FakeStorage()
+    storage.runs["historical-run"] = {
+        "id": "historical-run",
+        "projectId": "project-1",
+        "conversationId": "conversation-1",
+        "requestSnapshot": {"promptDocument": {"segments": [{"type": "text", "text": "historical secret prompt"}]}},
+        "state": "succeeded",
+    }
+    service, _, provider, _fetcher = make_service(storage=storage)
+    current = replace(
+        conversation_command("run-current"),
+        prompt_document=PromptDocument(segments=(PromptTextSegment(text="current request only"),)),
+        inputs=(),
+        regions=(),
+        mode="generate",
+    )
+
+    service.generate(current)
+
+    queued = storage.operations[0][1]
+    assert queued["requestSnapshot"]["promptDocument"]["segments"] == [{"type": "text", "text": "current request only"}]
+    assert not any(operation == "get_run" and payload == "historical-run" for operation, payload in storage.operations)
+    assert provider.requests[0].prompt_document == current.prompt_document
+    assert "historical secret prompt" not in repr(provider.requests[0])
+
+
+def test_conversation_project_mismatch_is_sanitized_and_never_calls_provider() -> None:
+    class MismatchedConversationStorage(FakeStorage):
+        def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+            raise StorageGatewayError(status_code=404)
+
+    provider = FakeProvider()
+    service, _, _, _ = make_service(storage=MismatchedConversationStorage(), provider=provider)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(conversation_command("run-project-mismatch"))
+
+    error = exc_info.value
+    assert error.code == "image_generation_conversation_not_found"
+    assert error.retryable is False
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert provider.requests == []
+
+
+def test_storage_client_preserves_not_found_status_without_retaining_response_body() -> None:
+    raw_storage_body = "conversation belongs to project-secret api_key=raw-secret"
+
+    def storage_handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"detail": raw_storage_body})
+
+    client = httpx.Client(base_url="http://storage.test", transport=httpx.MockTransport(storage_handler))
+    storage = PromptCardStorageClient(client=client)
+
+    with pytest.raises(StorageGatewayError) as exc_info:
+        storage.create_run({"id": "run-project-mismatch"})
+
+    error = exc_info.value
+    assert error.status_code == 404
+    assert raw_storage_body not in "".join(traceback.format_exception(error))
+    client.close()
 
 
 def test_custom_size_is_preserved_in_history_and_provider_request() -> None:
@@ -749,6 +837,60 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
     assert (received[0].width, received[0].height) == (2048, 1024)
 
 
+def test_router_accepts_project_conversation_without_node_and_preserves_legacy_node_request(monkeypatch) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
+    received: list[GenerationCommand] = []
+
+    class EndpointService:
+        def generate(self, generation_command: GenerationCommand) -> GenerationOutcome:
+            received.append(generation_command)
+            return GenerationOutcome(
+                run_id=generation_command.run_id,
+                state="succeeded",
+                asset_id="asset-local.png",
+                capture_id="capture-local",
+                content_type="image/png",
+                width=1024,
+                height=1024,
+            )
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: EndpointService()
+    client = TestClient(app)
+    base_payload = {
+        "projectId": "project-1",
+        "connectionId": "connection-1",
+        "modelId": "doubao-seedream-5-0-pro-260628",
+        "mode": "generate",
+        "promptDocument": {"segments": [{"type": "text", "text": "snow"}]},
+        "resolution": "1K",
+        "aspectRatio": "smart",
+        "outputFormat": "png",
+    }
+
+    conversation_response = client.post(
+        "/api/promptcard/runtime/image-generations",
+        json={**base_payload, "conversationId": "conversation-1"},
+    )
+    legacy_response = client.post(
+        "/api/promptcard/runtime/image-generations",
+        json={**base_payload, "nodeId": "node-legacy"},
+    )
+    missing_context_response = client.post("/api/promptcard/runtime/image-generations", json=base_payload)
+
+    assert conversation_response.status_code == 200
+    assert received[0].conversation_id == "conversation-1"
+    assert received[0].node_id is None
+    assert legacy_response.status_code == 200
+    assert received[1].conversation_id is None
+    assert received[1].node_id == "node-legacy"
+    assert missing_context_response.status_code == 422
+
+
 def test_router_accepts_snake_case_size_alias_and_forbids_unknown_fields() -> None:
     from app.gateway.deps import get_image_generation_service
     from app.gateway.routers.image_generation import ImageGenerationBody, router
@@ -827,4 +969,48 @@ def test_router_error_has_no_raw_secret_in_chain_traceback_or_response(monkeypat
     app.dependency_overrides[get_image_generation_service] = lambda: FailingService()
     response = TestClient(app).post("/api/promptcard/runtime/image-generations", json=payload)
     assert response.status_code == 422
+    assert raw_secret not in response.text
+
+
+def test_router_returns_sanitized_not_found_for_conversation_project_mismatch(monkeypatch) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
+    raw_secret = "conversation belongs to project-secret Authorization: Bearer raw-secret"
+
+    class FailingService:
+        def generate(self, generation_command: GenerationCommand) -> GenerationOutcome:
+            raise GenerationError(
+                "image_generation_conversation_not_found",
+                raw_secret,
+                False,
+                generation_command.run_id,
+            )
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: FailingService()
+    response = TestClient(app).post(
+        "/api/promptcard/runtime/image-generations",
+        json={
+            "projectId": "project-1",
+            "conversationId": "conversation-1",
+            "connectionId": "connection-1",
+            "modelId": "doubao-seedream-5-0-pro-260628",
+            "mode": "generate",
+            "promptDocument": {"segments": [{"type": "text", "text": "snow"}]},
+            "resolution": "1K",
+            "aspectRatio": "smart",
+            "outputFormat": "png",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == {
+        "code": "image_generation_conversation_not_found",
+        "message": "The image generation conversation is unavailable",
+        "retryable": False,
+        "runId": response.json()["detail"]["runId"],
+    }
     assert raw_secret not in response.text

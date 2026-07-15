@@ -156,7 +156,7 @@ describe('ImageGeneratorInspector', () => {
 
     expect(markup).toContain('ark-primary')
     expect(markup).toContain('doubao-seedream-5-0-pro-260628')
-    expect(markup).toContain('Generation mode')
+    expect(markup).toContain('生成工作流')
     expect(markup).toContain('Resolution')
     expect(markup).toContain('Aspect ratio')
     expect(markup).toContain('Completed')
@@ -209,6 +209,46 @@ describe('ImageGeneratorInspector', () => {
     expect(markup).toContain('Product')
     expect(markup).toContain('data-unresolved="true"')
     expect(markup).toContain('Resolve or remove disconnected image references')
+  })
+
+  it('shows prompt source actions and all four user workflows with explicit missing inputs', () => {
+    const onPromptDocumentChange = vi.fn()
+    const markup = renderToStaticMarkup(
+      <ImageGeneratorInspector
+        node={{ ...generatorNode, promptDocument: { version: 1, segments: [] } }}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        promptSnapshot={{
+          ...promptSnapshot(true),
+          source: 'connected',
+          references: []
+        }}
+        onChange={vi.fn()}
+        onPromptDocumentChange={onPromptDocumentChange}
+      />
+    )
+
+    expect(markup).toContain('当前使用上游提示词')
+    expect(markup).toContain('复制为本地内容')
+    expect(markup).toContain('文生图')
+    expect(markup).toContain('参考图生成')
+    expect(markup).toContain('智能改图')
+    expect(markup).toContain('局部修改')
+  })
+
+  it('lists missing workflow inputs beside the generate action', () => {
+    const markup = renderToStaticMarkup(
+      <ImageGeneratorInspector
+        node={{ ...generatorNode, mode: 'region-edit', regions: [] }}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        promptSnapshot={promptSnapshot(true)}
+        onChange={vi.fn()}
+        onGenerate={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('缺少输入')
+    expect(markup).toContain('主图')
+    expect(markup).toContain('区域')
   })
 
   it('renders resolution and ratio options from the selected model capabilities', () => {
@@ -423,9 +463,7 @@ describe('ImageGeneratorInspector', () => {
       />
     )
 
-    expect(markup).toContain('data-region-editor-dialog')
-    expect(markup).toContain('Select point tool')
-    expect(markup).toContain('Select box tool')
+    expect(markup).toContain('打开区域编辑器')
     expect(markup).not.toContain('Mask')
     expect(markup).not.toContain('Brush')
   })
@@ -433,17 +471,20 @@ describe('ImageGeneratorInspector', () => {
   it('persists region integer geometry and stable bindings without preview data', () => {
     const onChange = vi.fn()
     const node = { ...generatorNode, mode: 'region-edit' as const }
-    const tree = ImageGeneratorInspector({
-      node,
-      sizeCapabilities: SEEDREAM_5_PRO_SIZE_CAPABILITIES,
-      regionCapabilities: SEEDREAM_5_PRO_REGION_CAPABILITIES,
-      regionSources: [REGION_SOURCE],
-      onChange
-    })
-    const editor = findElement(tree, element => element.type === RegionEditorDialog)
+    const renderer = mountInspector(
+      <ImageGeneratorInspector
+        node={node}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        regionCapabilities={SEEDREAM_5_PRO_REGION_CAPABILITIES}
+        regionSources={[REGION_SOURCE]}
+        onChange={onChange}
+      />
+    )
+    act(() => renderer.root.findByProps({ children: '打开区域编辑器' }).props.onClick())
+    const editor = renderer.root.findByType(RegionEditorDialog)
     const onSave = editor.props.onSave as (regions: BoundImageRegion[]) => void
 
-    onSave([{
+    act(() => onSave([{
       id: 'region-1',
       referenceId: REGION_SOURCE.referenceId,
       type: 'bbox',
@@ -451,7 +492,7 @@ describe('ImageGeneratorInspector', () => {
       y: 200,
       width: 300,
       height: 400
-    }])
+    }]))
 
     expect(onChange).toHaveBeenCalledWith({
       regions: [{ type: 'bbox', x: 100, y: 200, width: 300, height: 400 }],

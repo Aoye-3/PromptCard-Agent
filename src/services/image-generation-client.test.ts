@@ -27,6 +27,42 @@ const request = (): ImageGenerationRequest => ({
 })
 
 describe('image generation client', () => {
+  it('posts a project conversation request without requiring a canvas node', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      runId: 'image-run-conversation',
+      state: 'succeeded',
+      assetId: 'asset-conversation.png',
+      captureId: 'capture-conversation',
+      contentType: 'image/png',
+      width: 1024,
+      height: 1024
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const conversationRequest = {
+      ...request(),
+      nodeId: undefined,
+      conversationId: 'conversation-1',
+      previousTurns: [{ prompt: 'must not be sent' }]
+    } as ImageGenerationRequest
+
+    await requestImageGeneration(conversationRequest, fetcher)
+
+    const body = JSON.parse(String(fetcher.mock.calls[0][1]?.body))
+    expect(body).toMatchObject({ projectId: 'project-1', conversationId: 'conversation-1' })
+    expect(body).not.toHaveProperty('nodeId')
+    expect(body).not.toHaveProperty('previousTurns')
+  })
+
+  it('rejects a request without a conversation or legacy node identity before transport', async () => {
+    const fetcher = vi.fn()
+    const invalidRequest = { ...request(), nodeId: undefined }
+
+    await expect(requestImageGeneration(invalidRequest as ImageGenerationRequest, fetcher)).rejects.toMatchObject({
+      code: 'invalid_input',
+      retryable: false
+    })
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
   it('posts the camelCase runtime contract without inventing a run id and keeps only local result fields', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       runId: 'image-run-backend',
@@ -43,7 +79,7 @@ describe('image generation client', () => {
 
     const result = await requestImageGeneration(unsafeRequest, fetcher)
 
-    expect(fetcher).toHaveBeenCalledWith('/api/promptcard/runtime/image-generations', expect.objectContaining({
+    expect(fetcher).toHaveBeenCalledWith('/agent-api/promptcard/runtime/image-generations', expect.objectContaining({
       method: 'POST',
       body: JSON.stringify(request())
     }))
@@ -74,10 +110,30 @@ describe('image generation client', () => {
     await expect(requestImageGeneration(request(), fetcher)).rejects.toMatchObject({
       name: 'ImageGenerationClientError',
       code: 'rate_limited',
-      message: 'Image provider rate limit reached',
+      message: '图片服务请求过于频繁，请稍后重试。',
+      action: '稍后重试',
       retryable: true,
       runId: 'image-run-failed'
     })
+  })
+
+  it.each([
+    ['credential_missing', '更新凭据'],
+    ['connection_disabled', '前往连接'],
+    ['connection_not_tested', '前往连接'],
+    ['connection_test_failed', '前往连接'],
+    ['runtime_disabled', '查看服务状态'],
+    ['ark_sdk_incompatible', '重新检测'],
+    ['invalid_size', '修改参数'],
+    ['invalid_input', '修改参数'],
+    ['timeout', '稍后重试'],
+    ['storage_write_failed', '检查本地存储']
+  ])('adds safe recovery metadata for %s', async (code, action) => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      detail: { code, message: 'unsafe provider detail', action: 'unsafe action', retryable: false }
+    }), { status: 400, headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(requestImageGeneration(request(), fetcher)).rejects.toMatchObject({ code, action })
   })
 
   it('rejects a successful response that substitutes a remote location for a local asset id', async () => {

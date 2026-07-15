@@ -79,6 +79,8 @@ def migrate_legacy_model_config(
     except (OSError, ModelManagementError):
         raise ModelManagementError("migration_failed") from None
     previous_secret = store.credential_store.get(connection_id)
+    if secret != (previous_secret or ""):
+        connection.pop("lastTest", None)
     try:
         store.credential_store.set(connection_id, secret)
         if store.credential_store.get(connection_id) != secret:

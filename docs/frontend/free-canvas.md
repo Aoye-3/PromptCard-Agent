@@ -63,20 +63,34 @@ dialog show and edit only the name and template body; they do not display or wri
 - Removing any node removes connected Free Canvas edges.
 - Deleting the final node is valid and leaves an empty canvas.
 
-## Image Generation Nodes
+## Project Image Generation Agent And Legacy Nodes
 
-The `image-generator` node persists normalized intent rather than Seedream SDK fields. Its durable fields include mode, `connectionId + modelId` binding, resolution/ratio/format/watermark settings, a structured prompt document, optional point/bounding-box regions, the active run ID, and the current local result asset ID.
+The right rail has three peer tabs: `Agent | 图片生成 | Prompt库`. `图片生成` is a project-level task Agent UI backed directly by the image Runtime; it does not call the text LLM. Every send is one independent image request. Previous turns are displayed from immutable run snapshots and are never appended to the next provider request.
 
-Typed React Flow input handles enforce:
+The browser reaches the local Runtime through `/agent-api/promptcard/runtime/image-generations`. The Runtime itself owns `POST /api/promptcard/runtime/image-generations`; browser code must not send that path through Vite's vendor-facing `/api` proxy.
 
-- `prompt`: at most one text-node connection;
-- `source-image`: at most one image connection for edit/region-edit;
-- `reference-image`: ordered references, with at most ten total source/reference images;
-- output: the node's current local generated asset.
+The bottom toolbar action is `打开图片生成`. It only opens the project Image Generation tab and starts an in-memory blank draft; it never creates an `image-generator` node and is not draggable. A conversation row is created only when the first queued run is persisted.
 
-Invalid edges are rejected before project persistence. Each image edge keeps a stable `referenceId`; reordering inputs changes the compiled `图1`/`图2` order without rebinding structured `@` mentions to a different asset.
+The Image Generation tab contains a model-readiness header, new-conversation and project-history actions, chronological turn cards, and a fixed composer. The composer supports structured prompt/reference tokens, local uploads, explicit injection of the current React Flow selection, capability-driven workflow/model/ratio/resolution/format/watermark controls, and the point/bounding-box region dialog.
 
-The prompt editor stores `{ type: "text" }` and `{ type: "reference" }` segments, never `contentEditable` HTML. Connected prompt text takes precedence over local node text. Quick messages insert ordinary structured text and may be combined with `@` references.
+Canvas nodes are injected only after the user clicks `加入所选节点`. Visible ordered text is appended to the draft and image nodes with local `assetId` values become references. Selection, dragging, connecting, restoring a project, or editing node properties never injects content or invokes the provider. Rejected selections report a concrete reason.
+
+The same asset may occupy source and reference roles, but each role counts toward the ten-image limit. Composer inputs keep stable `referenceId` values and explicit order. Provider-side `图1`/`图2` labels are derived from that order rather than persisted into the prompt.
+
+The prompt editor stores `{ type: "text" }` and `{ type: "reference" }` segments, never `contentEditable` HTML. Visible text nodes enter the draft only through the explicit selection-injection action.
+
+Typing `@` opens a keyboard-accessible reference picker. A mention persists `referenceId`, not a display number. The reference strip shows thumbnail, compiled number, label, and token usage; removing an input also removes its token and bound draft regions.
+
+The user-facing workflow is distinct from the provider mode:
+
+| Workflow | Required intent | Runtime mode |
+| --- | --- | --- |
+| Text to image | Prompt, no required image | `generate` |
+| Reference generation | Prompt plus reference images | `generate` |
+| Smart edit | Prompt plus source image | `edit` |
+| Region edit | Prompt, source image, and point/bbox | `region-edit` |
+
+Old `image-generator` nodes stay at their original position as read-only previews. They preserve old results, model/size summaries, and existing edge anchors, but all handles reject new connections and no Inspector, Generate, history, reconciliation, or automatic execution path remains. Their only active control is a user-clicked `打开图片生成` or `继续创作`, which copies the old snapshot into a new project draft without sending it.
 
 The current Seedream catalog exposes:
 
@@ -85,13 +99,17 @@ The current Seedream catalog exposes:
 - point and bounding-box regions using integer 0-999 coordinates;
 - one output and no streaming, cancellation, 4K, native mask, sequential, or grouped output controls.
 
-Region editing keeps draft undo/redo inside the dialog until Save. Regions bind to a reference ID and are removed or rebound when their source disappears; the canvas does not claim native binary-mask support.
+Region editing uses a large-image dialog with point, bounding-box, select/move, delete, undo/redo, zoom, and fit controls. It traps focus, supports keyboard operation, and returns focus to its trigger on close. Draft coordinates remain normalized integers from 0 to 999 until Save. Regions bind to a reference ID and are removed or rebound when their source disappears; the canvas explicitly describes this as point/box region reference, not native binary-mask upload.
 
-Node UI state is limited to `idle`, `validating`, `running`, `succeeded`, and `failed`. It does not invent percentage progress. Retry and Generate Again create new permanent runs. A successful result becomes the node's current asset and a `generatedResult` Recent Capture; Media can place it back as a normal image or connect it as a later reference.
+Turn UI localizes queued, running, succeeded, and failed states. It does not invent percentage progress or expose an unsupported cancellation action. Retry and Generate Again copy an immutable request snapshot into the composer and create a new run only after another explicit Generate click. A successful result becomes a `generatedResult` Recent Capture and a pending ordinary-image canvas placement.
 
-Generation state is project scoped. Switching projects cannot let an in-flight completion write into the newly active canvas. Returning to the original project reconciles the persisted terminal run, while a running node with no matching in-memory session resets to idle.
+Result actions include Generate Again, Re-edit, Smart Edit, use as reference, idempotent canvas placement, and Media navigation. `生成历史` opens a project-scoped dialog: conversation summaries and thumbnails are on the left, the selected immutable turn stream is on the right. Continuing a historical conversation changes the grouping but leaves the composer blank; history is not context.
 
-The node entry requires `settings.meta.featureFlags.imageGenerationNodeV1 === true`. Real generation additionally requires the Agent Runtime server flag and an assigned `image.primary` connection; see [Image Generation And Model Management](../architecture/image-generation-and-model-management.md).
+Conversation drafts, loads, visible turns, and placement handling are partitioned by `projectId`. Switching projects clears the visible draft and aborts history reads. An old project generation may finish in the background, but it cannot write into the active project. Returning to the source project processes its pending placements. Each ordinary result node stores `generationRunId`, `conversationId`, local `assetId`, and source metadata; placement deduplication checks `generationRunId` before creating a node.
+
+Sending requires `settings.meta.featureFlags.imageGenerationNodeV1 === true`. Development uses an enabled default unless a persisted setting overrides it; production defaults to the gray rollout state. Real generation additionally requires the Agent Runtime server flag and an enabled, credentialed, successfully tested `image.primary` connection with a compatible SDK. Turning off sending keeps conversations, old nodes, results, history, and Media assets readable.
+
+The project-level missing-model action preserves `{projectId, returnTarget}` while navigating to image-model management and returns to the source project after assignment. Legacy-node continuation may additionally carry `nodeId`, but new project conversations never bind or mutate a canvas generator node. See [Image Generation And Model Management](../architecture/image-generation-and-model-management.md).
 
 ## Image Annotations
 
@@ -154,9 +172,10 @@ Builder chatboxes remain workspace scoped and do not grant Prompt Library write 
 
 ## Right Panel Prompt Library Preview
 
-The Free Canvas right panel has an `Agent` / `Prompt库` segmented switcher.
+The Free Canvas right panel has an `Agent` / `图片生成` / `Prompt库` segmented switcher.
 
 - `Agent` keeps the existing `free-canvas-workspace` Agent chat flow.
+- `图片生成` owns project conversations, explicit canvas injection, generation turns, result actions, and the history dialog.
 - `Prompt库` embeds the reusable prompt library preview panel.
 - Prompt library preview supports search, category filters, preset/media preview, and copy actions.
 - The preview category filter includes `快捷消息`, backed by Prompt Library quick-message presets.

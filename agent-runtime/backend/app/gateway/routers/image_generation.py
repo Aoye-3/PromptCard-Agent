@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from starlette.concurrency import run_in_threadpool
 
 from app.gateway.deps import get_image_generation_service
@@ -66,7 +66,8 @@ type RegionBody = Annotated[PointRegionBody | BBoxRegionBody, Field(discriminato
 
 class ImageGenerationBody(RequestModel):
     project_id: str = Field(alias="projectId")
-    node_id: str = Field(alias="nodeId")
+    conversation_id: str | None = Field(default=None, alias="conversationId", min_length=1)
+    node_id: str | None = Field(default=None, alias="nodeId", min_length=1)
     connection_id: str = Field(alias="connectionId")
     model_id: str = Field(alias="modelId")
     mode: str
@@ -79,6 +80,12 @@ class ImageGenerationBody(RequestModel):
     height: Annotated[int, Field(strict=True, gt=0)] | None = None
     output_format: str = Field(alias="outputFormat")
     watermark: bool = False
+
+    @model_validator(mode="after")
+    def require_generation_context(self) -> ImageGenerationBody:
+        if self.conversation_id is None and self.node_id is None:
+            raise ValueError("conversationId or nodeId is required")
+        return self
 
 
 class ImageGenerationResponse(BaseModel):
@@ -143,6 +150,7 @@ def _command(body: ImageGenerationBody) -> GenerationCommand:
         run_id=f"image-run-{uuid4().hex}",
         project_id=body.project_id,
         node_id=body.node_id,
+        conversation_id=body.conversation_id,
         connection_id=body.connection_id,
         model_id=body.model_id,
         mode=body.mode,
@@ -174,6 +182,8 @@ def _response(result: GenerationOutcome) -> ImageGenerationResponse:
 
 
 def _status_code(error: GenerationError) -> int:
+    if error.code == "image_generation_conversation_not_found":
+        return 404
     if error.code in {"generation_busy", "generation_capacity_reached", "rate_limited"}:
         return 429
     if error.retryable:
@@ -194,6 +204,7 @@ def _safe_error_message(code: str) -> str:
         "invalid_image_data": "Remote image could not be decoded",
         "storage_write_failed": "Generated image could not be stored",
         "terminal_persistence_failed": "Image generation terminal state could not be saved",
+        "image_generation_conversation_not_found": "The image generation conversation is unavailable",
         "credential_store_unavailable": "Model credential storage is unavailable",
         "credential_missing": "The selected model connection has no credential",
         "generation_busy": "This model connection already has two running generations",

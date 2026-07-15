@@ -105,6 +105,11 @@ function App() {
   const [selectedProjectTrashIds, setSelectedProjectTrashIds] = useState<string[]>([])
   const [showProjectTrash, setShowProjectTrash] = useState(false)
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null)
+  const [imageModelReturnContext, setImageModelReturnContext] = useState<{
+    projectId: string
+    nodeId?: string
+    returnTarget: 'free-canvas'
+  } | null>(null)
   const [isHydrated, setIsHydrated] = useState(false)
   const [appSaveStatus, setAppSaveStatus] = useState<SaveStatus>('loading')
   const [projectSaveStates, setProjectSaveStates] = useState<Record<string, { status: SaveStatus; lastSavedAt: number | null }>>({})
@@ -884,6 +889,58 @@ function App() {
     }
   }
 
+  const handlePersistFreeCanvas = async (freeCanvas: IFreeCanvasProject) => {
+    if (!activeProjectId) return false
+    const project = activeProjectRef.current
+    if (!project || project.id !== activeProjectId || project.type !== 'free-canvas') return false
+    const savedAt = Date.now()
+    setProjectSaveStatus(activeProjectId, 'saving')
+    const result = await persistProjectChanges(project, {
+      freeCanvas,
+      updatedAt: savedAt,
+      lastOpenedAt: savedAt
+    }, getProjectEditSeq(activeProjectId), savedAt, 'Place generated image on canvas failed:')
+    if (result.status !== 'saved') return false
+    setProjectSaveStatus(activeProjectId, 'saved', savedAt)
+    return true
+  }
+
+  const handleConfigureImageModel = (context: { projectId: string; nodeId?: string; returnTarget: 'free-canvas' }) => {
+    setImageModelReturnContext(context)
+    setActiveTab('agents')
+  }
+
+  const handleImageAssignmentSaved = (assignment: { slot: string; connectionId: string; modelId: string }) => {
+    if (assignment.slot !== 'image.primary' || !imageModelReturnContext) return
+    const context = imageModelReturnContext
+    const sourceProject = projects.find(project => project.id === context.projectId)
+    const sourceNodeFound = !context.nodeId || sourceProject?.type === 'free-canvas' && Boolean(
+      sourceProject.freeCanvas?.nodes.some(node => node.id === context.nodeId && node.kind === 'image-generator')
+    )
+    setProjects(currentProjects => currentProjects.map(project => {
+      if (project.id !== context.projectId || project.type !== 'free-canvas' || !project.freeCanvas) return project
+      if (!sourceNodeFound || !context.nodeId) return project
+      return {
+        ...project,
+        updatedAt: Date.now(),
+        freeCanvas: {
+          ...project.freeCanvas,
+          selectedNodeId: context.nodeId,
+          nodes: project.freeCanvas.nodes.map(node => node.id === context.nodeId && node.kind === 'image-generator'
+            ? { ...node, binding: { connectionId: assignment.connectionId, modelId: assignment.modelId } }
+            : node)
+        }
+      }
+    }))
+    setImageModelReturnContext(null)
+    setActiveProjectId(context.projectId)
+    setActiveTab('projects')
+    setProjectMode('builder')
+    window.setTimeout(() => {
+      if (context.nodeId && !sourceNodeFound) alert('来源图片生成节点已被删除，已返回原项目。')
+    }, 0)
+  }
+
   placeCaptureOnCanvasRef.current = handlePlaceCaptureOnCanvas
 
   const handleUpdateUserSettings = async (settings: Partial<IUserSettings>) => {
@@ -1227,7 +1284,10 @@ function App() {
   ) : activeTab === 'library' ? (
     <PromptLibrary embedded />
   ) : activeTab === 'agents' ? (
-    <AgentDashboard />
+    <AgentDashboard
+      initialSection={imageModelReturnContext ? 'image-models' : 'text-models'}
+      onAssignmentSaved={handleImageAssignmentSaved}
+    />
   ) : activeTab === 'updates' ? (
     <UpdateScreen />
   ) : activeTab === 'me' ? (
@@ -1259,7 +1319,10 @@ function App() {
       onRenameProject={() => handleRenameProject(activeProject)}
       onSave={handleSave}
       onChange={handleUpdateFreeCanvas}
+      onPersistCanvas={handlePersistFreeCanvas}
       imageGenerationNodeV1={imageGenerationNodeV1Enabled(userSettings)}
+      onConfigureImageModel={handleConfigureImageModel}
+      onOpenMedia={() => setActiveTab('media')}
     />
   ) : projectMode === 'builder' && activeProject?.type === 'three-stage' && activeProject.threeStage ? (
     <ThreeStageBuilderScreen

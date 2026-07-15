@@ -36,7 +36,7 @@ start-desktop.bat
 
 `start-desktop.vbs` is the quiet double-click entry point. It hides PowerShell and only shows a message box if the launcher exits with a non-zero code. `start-desktop.bat` runs the same launcher with visible progress output and is preferred when diagnosing startup.
 
-The desktop launcher prepares or reads `logs/dev-runtime.json`, starts storage and Agent Runtime in a background services-only mode, starts or reuses Vite, waits only for the frontend URL to return HTTP 200, and then opens the Tauri shell. Storage readiness is handled by the React startup screen so the native window can appear before the local data service is fully ready.
+The desktop launcher prepares or reads `logs/dev-runtime.json`, starts Storage and Agent Runtime in background services-only mode, starts or reuses Vite, validates the frontend entry module, and then opens the Tauri shell. The service gate accepts PromptCard Storage only when `/health` reports `serviceVersion: "2.0.0"`, `schemaVersion: 4`, and SQLite capability; a schema mismatch is a launcher failure rather than a condition delegated to the React startup screen. Keep this contract synchronized with every Storage schema upgrade.
 
 The launcher sets `PROMPTCARD_DESKTOP_DEV=1` before it starts Vite directly. Vite uses that flag to suppress its normal browser auto-open behavior; double-clicking `start-desktop.vbs` should open the Tauri shell, not a browser tab.
 

@@ -1,10 +1,10 @@
 # Storage Service API
 
-The local storage service is the durable source of truth for projects, Prompt Library presets, asset metadata/bytes, Recent Capture metadata, and image-generation runs. The frontend reaches it through the Vite proxy prefix `/storage-api/*`; the service itself exposes `/api/*` on port `8002`.
+The local storage service is the durable source of truth for projects, Prompt Library presets, asset metadata/bytes, Recent Capture metadata, image-generation conversations/runs, and canvas placements. The frontend reaches it through the Vite proxy prefix `/storage-api/*`; the service itself exposes `/api/*` on port `8002`.
 
 ## Health
 
-`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, and `recentCaptures`. Image-generation history requires schema version `3`.
+`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, and `recentCaptures`. Project image-generation conversations require schema version `4`.
 
 - `GET /health`
 
@@ -37,7 +37,7 @@ Succeeded image-generation runs also participate in the reference scan through `
 
 - `POST /api/image-generation-runs`
 - `PATCH /api/image-generation-runs/{id}/state`
-- `GET /api/image-generation-runs?projectId=&nodeId=&cursor=&limit=`
+- `GET /api/image-generation-runs?projectId=&nodeId=&conversationId=&cursor=&limit=`
 - `GET /api/image-generation-runs/{id}`
 
 There is intentionally no `DELETE` endpoint.
@@ -49,7 +49,19 @@ queued -> running -> succeeded
                   -> failed
 ```
 
-Creation requires project, node, connection, provider, model, normalized request snapshot, and an empty `outputAssetIds` list. State patches may only contain fields allowed for their target state. Terminal records are immutable, and duplicate IDs return `409`.
+Creation requires project, connection, provider, model, normalized request snapshot, an empty `outputAssetIds` list, and at least one of `conversationId` or legacy `nodeId`. The first conversation run atomically creates its conversation row with the queued run. State patches may only contain fields allowed for their target state. Terminal records are immutable, and duplicate IDs return `409`.
+
+## Image Generation Conversations And Placements
+
+- `GET /api/image-generation-conversations?projectId=&cursor=&limit=`
+- `GET /api/image-generation-conversations/{conversationId}?projectId=`
+- `GET /api/image-generation-conversations/{conversationId}/runs?projectId=&cursor=&limit=`
+- `GET /api/image-generation-placements?projectId=&state=pending`
+- `PATCH /api/image-generation-placements/{runId}`
+
+Conversation list/detail/run reads require the matching `projectId`. A mismatch returns `404` and does not disclose whether another project owns the conversation. Conversation summaries include the title, timestamps, latest run/state, preview asset, and turn count. The title is derived from the first non-empty prompt (32 visible characters) or a dated `图片创作` fallback.
+
+A successful conversation run creates one permanent placement. Placement supports only `pending -> placed`; the patch body is `{ "state": "placed", "canvasNodeId": "..." }`. There is no placement or conversation `DELETE` endpoint. Legacy node-only runs do not create placements.
 
 A succeeded patch must reference assets already registered in the same Storage service. Those output IDs become strong historical references. Project/node removal and permanent project Trash deletion do not cascade into generation runs, output assets, or generated-result captures.
 

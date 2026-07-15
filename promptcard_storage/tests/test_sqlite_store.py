@@ -171,7 +171,7 @@ class SqliteStoreTest(unittest.TestCase):
         store = JsonCollectionStore(self.data_dir)
         health = store.health()
 
-        self.assertEqual(health["schemaVersion"], 3)
+        self.assertEqual(health["schemaVersion"], 4)
         self.assertEqual(health["serviceVersion"], "2.0.0")
         self.assertTrue(health["capabilities"]["sqlite"])
         self.assertTrue(health["capabilities"]["presetBatch"])
@@ -193,7 +193,7 @@ class SqliteStoreTest(unittest.TestCase):
 
         manifest = store.backup(destination)
 
-        self.assertEqual(manifest["schemaVersion"], 3)
+        self.assertEqual(manifest["schemaVersion"], 4)
         self.assertTrue((destination / "promptcard.sqlite3").is_file())
         self.assertTrue((destination / "manifest.json").is_file())
         self.assertEqual(len(list((destination / "assets").iterdir())), 1)

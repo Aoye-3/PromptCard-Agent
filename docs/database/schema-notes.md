@@ -104,12 +104,14 @@ UI code converts durable records to `RecentCaptureItemViewModel` through the med
 
 Free Canvas edges persist `targetHandle`, input order, and stable `referenceId`. Those fields are part of project normalization and must survive save/reload; provider-specific prompt labels are compiled at invocation time.
 
-`ImageGenerationRun` is not embedded in the project. PromptCard Storage schema v3 persists it independently with:
+`ImageGenerationRun` is not embedded in the project. PromptCard Storage schema v4 persists it independently with:
 
-- project/node/connection/provider/model identity;
+- project plus conversation or legacy node identity, connection/provider/model identity;
 - immutable `requestSnapshot` containing structured prompt, ordered input assets, regions, and settings;
 - `queued`, `running`, `succeeded`, or `failed` state and lifecycle timestamps;
 - local `outputAssetIds` for success, or a normalized error for failure;
+
+`ImageGenerationConversation` stores project-scoped title/timestamps and derives latest-run, preview-asset, and turn-count summaries from runs. `ImageGenerationCanvasPlacement` stores one successful conversation run as `pending` or `placed` with its ordinary image node ID. Neither record has a normal delete transition.
 - optional provider request ID and numeric usage fields.
 
 Terminal runs are immutable and have no DELETE endpoint. Run snapshots reject sensitive field names and never contain credentials, provider temporary URLs, or local filesystem paths.

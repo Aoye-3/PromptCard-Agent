@@ -158,6 +158,9 @@ NewVison/Prompt Guide/
 !src-tauri/tauri.conf.json
 !src-tauri/capabilities/**/*.json
 !public/**/*.json
+!tests/fixtures/image-generation-status.json
+tests/.runtime/
+.cache/
 public/prompt-library-presets.json
 *.xml
 *.yaml

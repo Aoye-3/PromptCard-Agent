@@ -45,7 +45,10 @@ class GenerationError(RuntimeError):
 
 
 class StorageGatewayError(RuntimeError):
-    pass
+    def __init__(self, *, status_code: int | None = None) -> None:
+        # Keep upstream response bodies and exception text out of exception chains.
+        super().__init__("PromptCard Storage request failed")
+        self.status_code = status_code
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +85,8 @@ class GenerationAssetInput:
 class GenerationCommand:
     run_id: str
     project_id: str
-    node_id: str
+    node_id: str | None
+    conversation_id: str | None
     connection_id: str
     model_id: str
     mode: str
@@ -169,6 +173,21 @@ class ImageGenerationService:
         create_failure: GenerationError | None = None
         try:
             self._storage.create_run(_queued_run(command))
+        except StorageGatewayError as error:
+            if command.conversation_id is not None and error.status_code == 404:
+                create_failure = GenerationError(
+                    "image_generation_conversation_not_found",
+                    "The image generation conversation is unavailable",
+                    False,
+                    command.run_id,
+                )
+            else:
+                create_failure = GenerationError(
+                    "storage_write_failed",
+                    "Image generation run could not be created",
+                    True,
+                    command.run_id,
+                )
         except Exception:
             create_failure = GenerationError(
                 "storage_write_failed",
@@ -549,6 +568,8 @@ class PromptCardStorageClient:
             if not isinstance(payload, dict):
                 raise ValueError
             return payload
+        except httpx.HTTPStatusError as error:
+            raise StorageGatewayError(status_code=error.response.status_code) from None
         except (httpx.HTTPError, ValueError):
             raise StorageGatewayError() from None
 
@@ -572,7 +593,8 @@ def _queued_run(command: GenerationCommand) -> dict[str, Any]:
     return {
         "id": command.run_id,
         "projectId": command.project_id,
-        "nodeId": command.node_id,
+        **({"conversationId": command.conversation_id} if command.conversation_id is not None else {}),
+        **({"nodeId": command.node_id} if command.node_id is not None else {}),
         "connectionId": command.connection_id,
         "providerId": _provider_id_for_model(command.model_id),
         "modelId": command.model_id,
@@ -644,7 +666,7 @@ def _capture_payload(command: GenerationCommand, image: FetchedImage, asset_id: 
         "height": image.height,
         "capturedAt": now,
         "linkedProjectId": command.project_id,
-        "linkedCanvasNodeId": command.node_id,
+        **({"linkedCanvasNodeId": command.node_id} if command.node_id is not None else {}),
         "origin": {"type": "image-generation", "runId": command.run_id, "modelId": command.model_id},
     }
 

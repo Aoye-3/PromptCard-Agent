@@ -41,6 +41,8 @@ MODELS: tuple[dict[str, Any], ...] = (
                 "minAspectRatio": 1 / 16,
                 "maxAspectRatio": 16,
             },
+            "outputFormats": ["png", "jpeg"],
+            "watermark": True,
             "outputCount": 1,
             "streaming": False,
         },

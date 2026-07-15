@@ -58,6 +58,9 @@ export interface RegionEditorDialogViewProps extends Omit<RegionEditorDialogProp
   onImagePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void
   onImagePointerUp: (event: ReactPointerEvent<HTMLDivElement>) => void
   onImageLoad?: () => void
+  zoom?: number
+  onZoomChange?: (zoom: number) => void
+  dialogRef?: RefObject<HTMLElement>
 }
 
 export const RegionEditorDialog = ({
@@ -80,8 +83,10 @@ export const RegionEditorDialog = ({
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(initialRegions[0]?.id || null)
   const [history, dispatch] = useReducer(reduceRegionHistory, initialRegions, createRegionHistory)
   const [displayMetrics, setDisplayMetrics] = useState<ImageDisplayMetrics | null>(null)
+  const [zoom, setZoom] = useState(1)
   const viewportRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
   const dragStartRef = useRef<DisplayPoint | null>(null)
   const initialRegionsKey = JSON.stringify(initialRegions)
   const initialRegionsSnapshot = useMemo<BoundImageRegion[]>(
@@ -124,6 +129,10 @@ export const RegionEditorDialog = ({
     observer.observe(viewport)
     return () => observer.disconnect()
   }, [measureImage])
+
+  useEffect(() => {
+    dialogRef.current?.focus?.()
+  }, [scopeKey])
 
   useEffect(() => {
     dispatch({ type: 'reset', regions: initialRegionsSnapshot })
@@ -216,6 +225,9 @@ export const RegionEditorDialog = ({
       onImagePointerDown={handlePointerDown}
       onImagePointerUp={handlePointerUp}
       onImageLoad={measureImage}
+      zoom={zoom}
+      onZoomChange={setZoom}
+      dialogRef={dialogRef}
       onSave={onSave}
       onClose={onClose}
     />
@@ -247,6 +259,9 @@ export const RegionEditorDialogView = ({
   onImagePointerDown,
   onImagePointerUp,
   onImageLoad,
+  zoom = 1,
+  onZoomChange,
+  dialogRef,
   onSave,
   onClose
 }: RegionEditorDialogViewProps) => {
@@ -258,11 +273,23 @@ export const RegionEditorDialogView = ({
   const canSave = validationErrors.length === 0
 
   return (
-    <section data-region-editor-dialog className="space-y-3 rounded-[8px] border border-gray-200 bg-white p-4">
+    <section
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="region-editor-title"
+      tabIndex={-1}
+      data-region-editor-dialog
+      className="space-y-3 rounded-[8px] border border-gray-200 bg-white p-4 outline-none"
+      onKeyDown={event => {
+        if (event.key === 'Escape') onClose?.()
+      }}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-black text-gray-950">Region editor</h3>
+          <h3 id="region-editor-title" className="text-sm font-black text-gray-950">Region editor</h3>
           <p className="text-[11px] font-semibold text-gray-500">Coordinates are stored on a 0–999 grid.</p>
+          <p className="text-[11px] font-semibold text-gray-500">点/框区域指代，不是原生蒙版上传</p>
         </div>
         {onClose && <button type="button" aria-label="Close region editor" className="text-xs font-bold text-gray-600" onClick={onClose}>Close</button>}
       </div>
@@ -314,6 +341,13 @@ export const RegionEditorDialogView = ({
         </div>
       )}
 
+      <div className="flex gap-2" aria-label="Image zoom controls">
+        <button type="button" aria-label="Zoom out" className={toolClass(false)} onClick={() => onZoomChange?.(Math.max(0.5, zoom - 0.25))}>−</button>
+        <button type="button" aria-label="Fit image" className={toolClass(false)} onClick={() => onZoomChange?.(1)}>适应画面</button>
+        <button type="button" aria-label="Zoom in" className={toolClass(false)} onClick={() => onZoomChange?.(Math.min(3, zoom + 0.25))}>＋</button>
+        <span className="self-center text-xs font-bold text-gray-600">{Math.round(zoom * 100)}%</span>
+      </div>
+
       {hasUnresolved && (
         <div role="alert" className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">
           Region image disconnected. Remove the region or reconnect and rebind it before generation.
@@ -337,6 +371,7 @@ export const RegionEditorDialogView = ({
             src={activeSource.imageUrl}
             alt={activeSource.label}
             className="pointer-events-none h-full w-full object-contain"
+            style={{ transform: `scale(${zoom})` }}
             onLoad={onImageLoad}
           />
         ) : (

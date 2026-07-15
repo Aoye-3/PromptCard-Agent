@@ -60,6 +60,9 @@ if (!$Runtime) {
     -StorageHealthUrlOverride $StorageHealthUrl
 }
 Set-PromptCardDevRuntimeEnvironment $Runtime
+if (!$env:PROMPTCARD_IMAGE_GENERATION_NODE_V1) {
+  $env:PROMPTCARD_IMAGE_GENERATION_NODE_V1 = "1"
+}
 
 $StorageHealthUrl = $Runtime.storageHealthUrl
 $AgentHealthUrl = $Runtime.agentHealthUrl
@@ -80,7 +83,7 @@ function Test-StorageService {
     $response = Invoke-WebRequest -UseBasicParsing $StorageHealthUrl -TimeoutSec 2
     if ($response.StatusCode -ne 200) { return $false }
     $payload = $response.Content | ConvertFrom-Json
-    if ($payload.serviceVersion -ne "2.0.0" -or $payload.schemaVersion -ne 3 -or !$payload.capabilities.sqlite) {
+    if ($payload.serviceVersion -ne "2.0.0" -or $payload.schemaVersion -ne 4 -or !$payload.capabilities.sqlite) {
       Write-Host "PromptCard storage service is running an incompatible storage version."
       return $false
     }

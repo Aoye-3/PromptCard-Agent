@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PromptDocument } from '@/models/PromptHistory.model'
 import {
   ReferencePromptEditor,
+  insertPromptReferenceAtTextCursor,
   insertPromptReference,
   replacePromptTextSegment
 } from './ReferencePromptEditor'
@@ -89,5 +90,42 @@ describe('ReferencePromptEditor', () => {
         { type: 'reference', referenceId: 'ref-product', label: 'Product' }
       ]
     })
+  })
+
+  it('inserts an @ choice at the text cursor and preserves stable reference identity', () => {
+    const document: PromptDocument = {
+      version: 1,
+      segments: [{ type: 'text', text: 'Put @ here' }]
+    }
+
+    expect(insertPromptReferenceAtTextCursor(document, 0, 5, references[0])).toEqual({
+      version: 1,
+      segments: [
+        { type: 'text', text: 'Put ' },
+        { type: 'reference', referenceId: 'ref-product', label: 'Product' },
+        { type: 'text', text: ' here' }
+      ]
+    })
+  })
+
+  it('renders an ordered reference list with usage, capacity, and keyboard alternatives', () => {
+    const markup = renderToStaticMarkup(
+      <ReferencePromptEditor
+        document={{ version: 1, segments: [{ type: 'reference', referenceId: 'ref-style', label: 'Style' }] }}
+        references={references}
+        maxReferences={10}
+        onMoveReference={vi.fn()}
+        onRemoveReference={vi.fn()}
+        onChange={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('参考图 2/10')
+    expect(markup).toContain('图1')
+    expect(markup).toContain('图2')
+    expect(markup).toContain('已在提示词中使用')
+    expect(markup).toContain('aria-label="上移 Product"')
+    expect(markup).toContain('aria-label="下移 Product"')
+    expect(markup).toContain('aria-label="删除 Style"')
   })
 })

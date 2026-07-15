@@ -1,0 +1,20 @@
+{
+  "serverEnabled": true,
+  "checkedAt": 1752572345678,
+  "credentialStore": {
+    "available": true
+  },
+  "providers": [
+    {
+      "providerId": "volcengine-ark",
+      "status": "ready",
+      "sdk": {
+        "packageName": "volcengine-python-sdk",
+        "installedVersion": "5.0.36",
+        "requiredVersion": "5.0.36",
+        "compatible": true,
+        "error": null
+      }
+    }
+  ]
+}

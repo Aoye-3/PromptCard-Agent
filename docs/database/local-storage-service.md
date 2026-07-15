@@ -17,9 +17,10 @@ Every maintained launcher must use this same path and reject a healthy Storage S
 - Schema version `1` uses `projects`, `presets`, `assets`, `schema_migrations`, and `browser_imports`.
 - Schema version `2` adds `recent_captures`. Existing version `1` databases migrate in place at startup by creating the table and recording the migration.
 - Schema version `3` adds append-only `image_generation_runs` plus project/node pagination indexes. Existing version `2` databases migrate in place without rewriting projects, presets, captures, or assets.
+- Schema version `4` adds project image-generation conversations, nullable conversation/node run ownership, project/conversation indexes, and durable canvas placements. Existing version `3` runs are deterministically grouped without creating migration placements.
 - Projects and presets retain their existing JSON payload. Indexed columns own revision, status, ordering, usage, and timestamps.
 - Recent Capture rows retain their full JSON payload while indexed columns own `asset_id`, `kind`, `status`, capture time, timestamps, and revision.
-- Image-generation rows retain the immutable normalized request snapshot and terminal result/error payload while indexed columns own project, node, connection, provider, model, state, and lifecycle timestamps.
+- Image-generation rows retain the immutable normalized request snapshot and terminal result/error payload while indexed columns own project, optional conversation/node, connection, provider, model, state, and lifecycle timestamps. Conversation and placement rows are permanent and have no ordinary delete path.
 - Active and Trash records share one table. Delete and restore are single transactions.
 - Connections enable WAL, foreign keys, a busy timeout, and full synchronous durability. Writes begin with `BEGIN IMMEDIATE`.
 - Duplicate creates and stale revisions return conflicts instead of overwriting data.

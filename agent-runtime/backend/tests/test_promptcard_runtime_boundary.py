@@ -3,9 +3,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.gateway.promptcard_runtime import build_runtime_prompt, parse_agent_workspace_proposals
 from app.gateway.routers import promptcard_runtime
-from app.gateway.promptcard_runtime import parse_agent_workspace_proposals
-from app.gateway.promptcard_runtime import build_runtime_prompt
 
 
 def test_parse_agent_workspace_proposals_filters_unknown_card_ids():

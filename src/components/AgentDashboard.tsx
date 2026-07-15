@@ -2,36 +2,41 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import {
   Bot,
   Database,
+  Image,
   Loader2,
   Search,
   Send,
   ShieldCheck,
   Sparkles,
+  Type,
   Wrench
 } from 'lucide-react'
 import { useAgentStore } from '@/stores/agent.store'
 import { usePresetStore } from '@/stores/preset.store'
 import type { AgentWorkspaceProposal, PromptLibraryWriteProposal } from '@/models/Agent.model'
 import { ModelManagementPanel } from '@/components/settings/ModelManagementPanel'
+import type { ModelAssignment } from '@/domain/models/model-management'
 
-type AgentPanelSection = 'models' | 'default-model' | 'tools' | 'skills' | 'diagnostics'
+type AgentPanelSection = 'text-models' | 'image-models' | 'tools' | 'skills' | 'diagnostics'
 const DIAGNOSTICS_SESSION_KEY = 'diagnostics:agent-panel'
 
 const sections: Array<{ id: AgentPanelSection; label: string; icon: ReactNode }> = [
-  { id: 'models', label: '模型服务', icon: <Database className="h-4 w-4" /> },
-  { id: 'default-model', label: '默认模型', icon: <Sparkles className="h-4 w-4" /> },
+  { id: 'text-models', label: '文字模型', icon: <Type className="h-4 w-4" /> },
+  { id: 'image-models', label: '图片生成模型', icon: <Image className="h-4 w-4" /> },
   { id: 'tools', label: '工具 / ToolUse', icon: <Wrench className="h-4 w-4" /> },
   { id: 'skills', label: '技能', icon: <Search className="h-4 w-4" /> },
   { id: 'diagnostics', label: 'Agent 会话诊断', icon: <Bot className="h-4 w-4" /> }
 ]
 
-export function AgentDashboard() {
+export function AgentDashboard({ initialSection = 'text-models', onAssignmentSaved }: {
+  initialSection?: Extract<AgentPanelSection, 'text-models' | 'image-models'>
+  onAssignmentSaved?: (assignment: ModelAssignment) => void
+} = {}) {
   const {
     runtimeStatus,
     authStatus,
     runtimeError,
     user,
-    models,
     skills,
     tools,
     builtinTools,
@@ -48,7 +53,7 @@ export function AgentDashboard() {
   const proposals = diagnosticsSession.proposals
   const activeThreadId = diagnosticsSession.threadId
   const { presets, initialized, init } = usePresetStore()
-  const [activeSection, setActiveSection] = useState<AgentPanelSection>('models')
+  const [activeSection, setActiveSection] = useState<AgentPanelSection>(initialSection)
   const [draft, setDraft] = useState('请用一句话说明当前 PromptCard Agent runtime 的连接状态。')
 
   useEffect(() => {
@@ -56,12 +61,14 @@ export function AgentDashboard() {
     checkRuntime()
   }, [checkRuntime, init, initialized])
 
+  useEffect(() => {
+    setActiveSection(initialSection)
+  }, [initialSection])
+
   const promptLibraryProposalCount = useMemo(
     () => proposals.filter(isPromptLibraryProposal).length,
     [proposals]
   )
-  const activeModel = models.find(model => model.name === modelConfig?.modelName) || models[0]
-
   const handleSend = async (content = draft) => {
     if (!content.trim() || running) return
     await sendMessage(content.trim(), presets, {
@@ -88,13 +95,15 @@ export function AgentDashboard() {
             <button
               key={section.id}
               type="button"
+              aria-current={activeSection === section.id ? 'page' : undefined}
+              aria-pressed={activeSection === section.id}
               className={`flex w-full items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-black transition ${
                 activeSection === section.id ? 'bg-gray-950 text-white' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-950'
               }`}
               onClick={() => setActiveSection(section.id)}
             >
               <span className="inline-flex items-center gap-3">{section.icon}{section.label}</span>
-              {section.id === 'models' && <StatusDot ok={modelConfig?.apiKeyConfigured} />}
+              {section.id === 'text-models' && <StatusDot ok={modelConfig?.apiKeyConfigured} />}
             </button>
           ))}
         </div>
@@ -114,14 +123,11 @@ export function AgentDashboard() {
           </div>
         )}
 
-        {activeSection === 'models' && <ModelManagementPanel />}
-
-        {activeSection === 'default-model' && (
-          <InfoPanel title="默认模型" icon={<Sparkles className="h-5 w-5" />}>
-            <SummaryRow label="当前默认模型" value={modelConfig?.modelName || activeModel?.name || '未加载'} />
-            <SummaryRow label="Runtime 模型数量" value={`${models.length}`} />
-            <SummaryRow label="候选模型" value={(modelConfig?.availableModels || models.map(model => model.name)).join(' / ') || '未加载'} />
-          </InfoPanel>
+        {(activeSection === 'text-models' || activeSection === 'image-models') && (
+          <ModelManagementPanel
+            modality={activeSection === 'text-models' ? 'chat' : 'image'}
+            onAssignmentSaved={onAssignmentSaved}
+          />
         )}
 
         {activeSection === 'tools' && (

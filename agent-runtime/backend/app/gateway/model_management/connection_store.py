@@ -6,7 +6,7 @@ import tempfile
 import time
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
@@ -32,6 +32,15 @@ class ModelManagementError(ValueError):
         super().__init__(code)
 
 
+class ConnectionDependencyProvider(Protocol):
+    def canvas_node_count(self, connection_id: str) -> int | None: ...
+
+
+class UnavailableConnectionDependencyProvider:
+    def canvas_node_count(self, connection_id: str) -> None:
+        return None
+
+
 def default_connection_store_path() -> Path:
     home = Path(os.getenv("DEER_FLOW_HOME") or ".deer-flow")
     return home / "promptcard-model-connections.json"
@@ -42,9 +51,15 @@ def get_connection_store() -> ModelConnectionStore:
 
 
 class ModelConnectionStore:
-    def __init__(self, path: Path, credential_store: CredentialStore) -> None:
+    def __init__(
+        self,
+        path: Path,
+        credential_store: CredentialStore,
+        dependency_provider: ConnectionDependencyProvider | None = None,
+    ) -> None:
         self.path = path
         self.credential_store = credential_store
+        self.dependency_provider = dependency_provider or UnavailableConnectionDependencyProvider()
 
     def read_state(self) -> dict[str, Any]:
         if not self.path.exists():
@@ -146,9 +161,20 @@ class ModelConnectionStore:
             request.provider_id != existing["providerId"] or not request.enabled
         ):
             raise ModelManagementError("connection_is_assigned")
-        connection = self.prepare_connection(connection_id, request, existing=existing)
         previous_secret = self.credential_store.get(connection_id)
         credential_changed = request.credential is not None
+        material_change = (
+            request.provider_id != existing["providerId"]
+            or request.api_base != existing["apiBase"]
+            or request.enabled != existing.get("enabled", True)
+            or (
+                request.credential is not None
+                and request.credential != (previous_secret or "")
+            )
+        )
+        connection = self.prepare_connection(connection_id, request, existing=existing)
+        if material_change:
+            connection.pop("lastTest", None)
         if credential_changed:
             self._replace_credential(connection_id, request.credential)
         state["connections"][index] = connection
@@ -186,7 +212,37 @@ class ModelConnectionStore:
         assignments = self.read_state()["assignments"]
         return [deepcopy(assignments[slot]) for slot in sorted(assignments)]
 
-    def set_assignment(self, slot: str, request: AssignmentRequest) -> dict[str, Any]:
+    def delete_assignment(self, slot: str) -> None:
+        if slot not in SLOT_MODALITY:
+            raise ModelManagementError("invalid_model_slot")
+        state = self.read_state()
+        if slot not in state["assignments"]:
+            raise ModelManagementError("assignment_not_found")
+        del state["assignments"][slot]
+        self.replace_state(state)
+
+    def connection_dependencies(self, connection_id: str) -> dict[str, Any]:
+        self.get_connection_config(connection_id)
+        assignments = self.read_state()["assignments"]
+        slots = sorted(
+            slot
+            for slot, assignment in assignments.items()
+            if assignment.get("connectionId") == connection_id
+        )
+        canvas_node_count = self.dependency_provider.canvas_node_count(connection_id)
+        return {
+            "assignments": slots,
+            "canvasNodeCount": canvas_node_count,
+            "canvasNodeCountAvailable": canvas_node_count is not None,
+        }
+
+    def set_assignment(
+        self,
+        slot: str,
+        request: AssignmentRequest,
+        *,
+        require_ready: bool = False,
+    ) -> dict[str, Any]:
         assignment = {
             "slot": slot,
             "connectionId": request.connection_id,
@@ -194,6 +250,8 @@ class ModelConnectionStore:
         }
         state = self.read_state()
         _validate_assignment(state, assignment)
+        if require_ready:
+            self._validate_assignment_readiness(state, assignment)
         state["assignments"][slot] = assignment
         self.replace_state(state)
         return deepcopy(assignment)
@@ -235,6 +293,11 @@ class ModelConnectionStore:
         _validate_assignment(state, next_assignment)
         previous_secret = self.credential_store.get(connection_id)
         credential_changed = request.credential is not None
+        if (
+            credential_changed
+            and request.credential != (previous_secret or "")
+        ):
+            connection.pop("lastTest", None)
         try:
             if credential_changed:
                 self._replace_credential(connection_id, request.credential)
@@ -277,6 +340,24 @@ class ModelConnectionStore:
     def assignment(self, slot: str) -> dict[str, Any] | None:
         assignment = self.read_state()["assignments"].get(slot)
         return deepcopy(assignment) if assignment is not None else None
+
+    def _validate_assignment_readiness(
+        self,
+        state: dict[str, Any],
+        assignment: dict[str, Any],
+    ) -> None:
+        connection = next(
+            item
+            for item in state["connections"]
+            if item["id"] == assignment["connectionId"]
+        )
+        if not self.credential_store.get(str(connection["id"])):
+            raise ModelManagementError("credential_missing")
+        last_test = connection.get("lastTest")
+        if not isinstance(last_test, dict):
+            raise ModelManagementError("connection_not_tested")
+        if last_test.get("ok") is not True:
+            raise ModelManagementError("connection_test_failed")
 
     def prepare_connection(
         self,

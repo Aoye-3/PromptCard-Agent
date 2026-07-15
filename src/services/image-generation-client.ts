@@ -1,4 +1,5 @@
 import type { ImageGenerationMode } from '@/domain/image-generation/image-generation'
+import { getRuntimeErrorPresentation } from '@/domain/models/model-management'
 import type { PromptDocument } from '@/models/PromptHistory.model'
 
 export type ImageGenerationInput = {
@@ -13,7 +14,8 @@ export type ImageGenerationRegion =
 
 export interface ImageGenerationRequest {
   projectId: string
-  nodeId: string
+  conversationId?: string
+  nodeId?: string
   connectionId: string
   modelId: string
   mode: ImageGenerationMode
@@ -40,13 +42,16 @@ export interface ImageGenerationResult {
 
 export class ImageGenerationClientError extends Error {
   code: string
+  action: string
   retryable: boolean
   runId?: string
 
   constructor(code: string, retryable: boolean, runId?: string) {
-    super(SAFE_ERROR_MESSAGES[code] || 'Image generation failed')
+    const presentation = getRuntimeErrorPresentation(code)
+    super(presentation.message)
     this.name = 'ImageGenerationClientError'
     this.code = code
+    this.action = presentation.action
     this.retryable = retryable
     this.runId = runId
   }
@@ -59,10 +64,13 @@ export const requestImageGeneration = async (
   input: ImageGenerationRequest,
   fetcher: Fetcher = fetch
 ): Promise<ImageGenerationResult> => {
+  if (!hasGenerationIdentity(input)) {
+    throw new ImageGenerationClientError('invalid_input', false)
+  }
   const request = cloneRequest(input)
   let response: Response
   try {
-    response = await fetcher('/api/promptcard/runtime/image-generations', {
+    response = await fetcher('/agent-api/promptcard/runtime/image-generations', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(request)
@@ -74,10 +82,11 @@ export const requestImageGeneration = async (
   const payload = await response.json().catch(() => null) as Record<string, unknown> | null
   if (!response.ok) {
     const detail = isRecord(payload?.detail) ? payload.detail : {}
+    const code = safeErrorIdentifier(detail.code, 'generation_failed')
     throw new ImageGenerationClientError(
-      typeof detail.code === 'string' ? detail.code : 'generation_failed',
+      code,
       detail.retryable === true,
-      typeof detail.runId === 'string' ? detail.runId : undefined
+      isLocalIdentifier(detail.runId) ? detail.runId : undefined
     )
   }
   return parseResult(payload)
@@ -148,7 +157,8 @@ export const imageGenerationClient = {
 
 const cloneRequest = (input: ImageGenerationRequest): ImageGenerationRequest => ({
   projectId: input.projectId,
-  nodeId: input.nodeId,
+  ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+  ...(input.nodeId ? { nodeId: input.nodeId } : {}),
   connectionId: input.connectionId,
   modelId: input.modelId,
   mode: input.mode,
@@ -214,6 +224,9 @@ const deepFreeze = <T>(value: T): T => {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object')
+const hasGenerationIdentity = (value: ImageGenerationRequest): boolean => (
+  Boolean(value.conversationId?.trim()) || Boolean(value.nodeId?.trim())
+)
 const isPositiveInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) > 0
 const isLocalIdentifier = (value: unknown): value is string => (
   typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)
@@ -221,14 +234,6 @@ const isLocalIdentifier = (value: unknown): value is string => (
 const isLocalContentType = (value: unknown): value is ImageGenerationResult['contentType'] => (
   value === 'image/png' || value === 'image/jpeg' || value === 'image/webp'
 )
-
-const SAFE_ERROR_MESSAGES: Record<string, string> = {
-  service_unavailable: 'Image generation service is unavailable',
-  invalid_runtime_response: 'Image generation returned an invalid response',
-  generation_busy: 'This model connection is busy',
-  rate_limited: 'Image provider rate limit reached',
-  timeout: 'Image generation timed out',
-  credential_missing: 'The selected model connection has no credential',
-  storage_write_failed: 'Generated image could not be stored',
-  generation_failed: 'Image generation failed'
-}
+const safeErrorIdentifier = (value: unknown, fallback: string): string => (
+  typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : fallback
+)

@@ -71,6 +71,9 @@ export interface ImageGenerationRunSnapshot {
   inputAssets: Array<{ referenceId: string; assetId: string; order: number }>
   regions: Array<Record<string, string | number>>
   resolution: string
+  aspectRatio?: string
+  width?: number
+  height?: number
   outputFormat: string
   watermark: boolean
 }
@@ -78,7 +81,8 @@ export interface ImageGenerationRunSnapshot {
 export interface ImageGenerationRun {
   id: string
   projectId: string
-  nodeId: string
+  nodeId?: string
+  conversationId?: string
   connectionId: string
   providerId: string
   modelId: string
@@ -96,6 +100,54 @@ export interface ImageGenerationRun {
 export interface ImageGenerationRunPage {
   runs: ImageGenerationRun[]
   nextCursor: string | null
+}
+
+export interface ImageGenerationRunQuery {
+  projectId?: string
+  nodeId?: string
+  conversationId?: string
+  cursor?: string | null
+  limit?: number
+  signal?: AbortSignal
+}
+
+export interface ImageGenerationConversationSummary {
+  id: string
+  projectId: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  latestRunId?: string
+  latestState?: ImageGenerationRunState
+  previewAssetId?: string
+  turnCount: number
+}
+
+export interface ImageGenerationConversationPage {
+  conversations: ImageGenerationConversationSummary[]
+  nextCursor: string | null
+}
+
+export interface ImageGenerationConversationQuery {
+  projectId: string
+  cursor?: string | null
+  limit?: number
+  signal?: AbortSignal
+}
+
+export interface ImageGenerationConversationRunQuery extends ImageGenerationConversationQuery {
+  conversationId: string
+}
+
+export interface ImageGenerationCanvasPlacement {
+  runId: string
+  projectId: string
+  conversationId: string
+  assetId: string
+  state: 'pending' | 'placed'
+  canvasNodeId?: string
+  createdAt: number
+  updatedAt: number
 }
 
 export class StorageRevisionConflict<T> extends Error {
@@ -263,24 +315,96 @@ export const storageServiceClient = {
     }
   },
   imageGenerationRuns: {
-    async getPage(query: {
-      projectId: string
-      nodeId: string
-      cursor?: string | null
-      limit?: number
-      signal?: AbortSignal
-    }): Promise<ImageGenerationRunPage> {
-      const parameters = new URLSearchParams({ projectId: query.projectId, nodeId: query.nodeId })
+    async getPage(query: ImageGenerationRunQuery = {}): Promise<ImageGenerationRunPage> {
+      const parameters = new URLSearchParams()
+      if (query.projectId) parameters.set('projectId', query.projectId)
+      if (query.nodeId) parameters.set('nodeId', query.nodeId)
+      if (query.conversationId) parameters.set('conversationId', query.conversationId)
       if (query.cursor) parameters.set('cursor', query.cursor)
       if (query.limit !== undefined) parameters.set('limit', String(query.limit))
+      const queryString = parameters.toString()
       const page = await request<{ runs?: unknown[]; nextCursor?: unknown }>(
-        `/storage-api/image-generation-runs?${parameters.toString()}`,
+        `/storage-api/image-generation-runs${queryString ? `?${queryString}` : ''}`,
         { signal: query.signal }
       )
       return {
         runs: Array.isArray(page.runs) ? page.runs.flatMap(normalizeImageGenerationRun) : [],
         nextCursor: typeof page.nextCursor === 'string' ? page.nextCursor : null
       }
+    },
+    async getById(id: string): Promise<ImageGenerationRun | null> {
+      try {
+        const payload = await request<unknown>(
+          `/storage-api/image-generation-runs/${encodeURIComponent(id)}`
+        )
+        return normalizeImageGenerationRun(payload)[0] || null
+      } catch (error) {
+        if (error instanceof StorageHttpError && error.status === 404) return null
+        throw error
+      }
+    }
+  },
+  imageGenerationConversations: {
+    async getPage(query: ImageGenerationConversationQuery): Promise<ImageGenerationConversationPage> {
+      const parameters = new URLSearchParams({ projectId: query.projectId })
+      if (query.cursor) parameters.set('cursor', query.cursor)
+      if (query.limit !== undefined) parameters.set('limit', String(query.limit))
+      const page = await request<{ conversations?: unknown[]; nextCursor?: unknown }>(
+        `/storage-api/image-generation-conversations?${parameters.toString()}`,
+        { signal: query.signal }
+      )
+      return {
+        conversations: Array.isArray(page.conversations)
+          ? page.conversations.flatMap(normalizeImageGenerationConversation)
+          : [],
+        nextCursor: typeof page.nextCursor === 'string' ? page.nextCursor : null
+      }
+    },
+    async getById(id: string, projectId: string): Promise<ImageGenerationConversationSummary | null> {
+      try {
+        const parameters = new URLSearchParams({ projectId })
+        const payload = await request<unknown>(
+          `/storage-api/image-generation-conversations/${encodeURIComponent(id)}?${parameters.toString()}`
+        )
+        return normalizeImageGenerationConversation(payload)[0] || null
+      } catch (error) {
+        if (error instanceof StorageHttpError && error.status === 404) return null
+        throw error
+      }
+    },
+    async getRuns(query: ImageGenerationConversationRunQuery): Promise<ImageGenerationRunPage> {
+      const parameters = new URLSearchParams({ projectId: query.projectId })
+      if (query.cursor) parameters.set('cursor', query.cursor)
+      if (query.limit !== undefined) parameters.set('limit', String(query.limit))
+      const page = await request<{ runs?: unknown[]; nextCursor?: unknown }>(
+        `/storage-api/image-generation-conversations/${encodeURIComponent(query.conversationId)}/runs?${parameters.toString()}`,
+        { signal: query.signal }
+      )
+      return {
+        runs: Array.isArray(page.runs) ? page.runs.flatMap(normalizeImageGenerationRun) : [],
+        nextCursor: typeof page.nextCursor === 'string' ? page.nextCursor : null
+      }
+    }
+  },
+  imageGenerationPlacements: {
+    async getPending(projectId: string, signal?: AbortSignal): Promise<ImageGenerationCanvasPlacement[]> {
+      const parameters = new URLSearchParams({ projectId, state: 'pending' })
+      const payload = await request<{ placements?: unknown[] }>(
+        `/storage-api/image-generation-placements?${parameters.toString()}`,
+        { signal }
+      )
+      return Array.isArray(payload.placements)
+        ? payload.placements.flatMap(normalizeImageGenerationPlacement)
+        : []
+    },
+    async markPlaced(runId: string, canvasNodeId: string): Promise<ImageGenerationCanvasPlacement> {
+      const payload = await request<unknown>(
+        `/storage-api/image-generation-placements/${encodeURIComponent(runId)}`,
+        { method: 'PATCH', body: JSON.stringify({ state: 'placed', canvasNodeId }) }
+      )
+      const placement = normalizeImageGenerationPlacement(payload)[0]
+      if (!placement) throw new StorageHttpError(502, 'invalid_response', 'Storage returned an invalid placement')
+      return placement
     }
   },
   projects: {
@@ -399,7 +523,8 @@ const normalizeImageGenerationRun = (candidate: unknown): ImageGenerationRun[] =
   const state = candidate.state
   if (
     !isRunState(state)
-    || !hasStrings(candidate, ['id', 'projectId', 'nodeId', 'connectionId', 'providerId', 'modelId'])
+    || !hasStrings(candidate, ['id', 'projectId', 'connectionId', 'providerId', 'modelId'])
+    || (typeof candidate.nodeId !== 'string' && typeof candidate.conversationId !== 'string')
     || !isNonNegativeInteger(candidate.createdAt)
   ) return []
   const requestSnapshot = normalizeRunSnapshot(candidate.requestSnapshot)
@@ -407,7 +532,6 @@ const normalizeImageGenerationRun = (candidate: unknown): ImageGenerationRun[] =
   const run: ImageGenerationRun = {
     id: candidate.id as string,
     projectId: candidate.projectId as string,
-    nodeId: candidate.nodeId as string,
     connectionId: candidate.connectionId as string,
     providerId: candidate.providerId as string,
     modelId: candidate.modelId as string,
@@ -418,6 +542,8 @@ const normalizeImageGenerationRun = (candidate: unknown): ImageGenerationRun[] =
       : [],
     createdAt: candidate.createdAt as number
   }
+  if (typeof candidate.nodeId === 'string' && candidate.nodeId) run.nodeId = candidate.nodeId
+  if (typeof candidate.conversationId === 'string' && candidate.conversationId) run.conversationId = candidate.conversationId
   if (isNonNegativeInteger(candidate.startedAt)) run.startedAt = candidate.startedAt
   if (isNonNegativeInteger(candidate.finishedAt)) run.finishedAt = candidate.finishedAt
   if (typeof candidate.providerRequestId === 'string') run.providerRequestId = candidate.providerRequestId
@@ -432,6 +558,49 @@ const normalizeImageGenerationRun = (candidate: unknown): ImageGenerationRun[] =
     run.usage = Object.fromEntries(Object.entries(candidate.usage).filter((entry): entry is [string, number] => typeof entry[1] === 'number'))
   }
   return [run]
+}
+
+const normalizeImageGenerationConversation = (candidate: unknown): ImageGenerationConversationSummary[] => {
+  if (
+    !isRecord(candidate)
+    || !hasStrings(candidate, ['id', 'projectId', 'title'])
+    || !isNonNegativeInteger(candidate.createdAt)
+    || !isNonNegativeInteger(candidate.updatedAt)
+    || !isNonNegativeInteger(candidate.turnCount)
+  ) return []
+  const conversation: ImageGenerationConversationSummary = {
+    id: candidate.id as string,
+    projectId: candidate.projectId as string,
+    title: candidate.title as string,
+    createdAt: candidate.createdAt,
+    updatedAt: candidate.updatedAt,
+    turnCount: candidate.turnCount
+  }
+  if (typeof candidate.latestRunId === 'string') conversation.latestRunId = candidate.latestRunId
+  if (isRunState(candidate.latestState)) conversation.latestState = candidate.latestState
+  if (typeof candidate.previewAssetId === 'string') conversation.previewAssetId = candidate.previewAssetId
+  return [conversation]
+}
+
+const normalizeImageGenerationPlacement = (candidate: unknown): ImageGenerationCanvasPlacement[] => {
+  if (
+    !isRecord(candidate)
+    || !hasStrings(candidate, ['runId', 'projectId', 'conversationId', 'assetId'])
+    || (candidate.state !== 'pending' && candidate.state !== 'placed')
+    || !isNonNegativeInteger(candidate.createdAt)
+    || !isNonNegativeInteger(candidate.updatedAt)
+  ) return []
+  const placement: ImageGenerationCanvasPlacement = {
+    runId: candidate.runId as string,
+    projectId: candidate.projectId as string,
+    conversationId: candidate.conversationId as string,
+    assetId: candidate.assetId as string,
+    state: candidate.state,
+    createdAt: candidate.createdAt,
+    updatedAt: candidate.updatedAt
+  }
+  if (typeof candidate.canvasNodeId === 'string' && candidate.canvasNodeId) placement.canvasNodeId = candidate.canvasNodeId
+  return [placement]
 }
 
 const normalizeRunSnapshot = (candidate: unknown): ImageGenerationRunSnapshot | null => {
@@ -466,6 +635,9 @@ const normalizeRunSnapshot = (candidate: unknown): ImageGenerationRunSnapshot | 
     inputAssets,
     regions,
     resolution: typeof candidate.resolution === 'string' ? candidate.resolution : '',
+    aspectRatio: typeof candidate.aspectRatio === 'string' ? candidate.aspectRatio : '',
+    ...(isPositiveInteger(candidate.width) ? { width: candidate.width } : {}),
+    ...(isPositiveInteger(candidate.height) ? { height: candidate.height } : {}),
     outputFormat: typeof candidate.outputFormat === 'string' ? candidate.outputFormat : '',
     watermark: candidate.watermark === true
   }
@@ -493,6 +665,7 @@ const normalizeRunRegion = (candidate: unknown): Array<Record<string, string | n
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object')
 const hasStrings = (value: Record<string, unknown>, keys: string[]): boolean => keys.every(key => typeof value[key] === 'string')
 const isNonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0
+const isPositiveInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) > 0
 const isRunState = (value: unknown): value is ImageGenerationRunState => (
   value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed'
 )

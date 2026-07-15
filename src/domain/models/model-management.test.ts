@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import {
+  getRuntimeErrorPresentation,
   validateModelAssignment,
   type ImageModelBinding,
   type ModelAssignment,
@@ -8,16 +9,24 @@ import {
   type ModelProvider
 } from './model-management'
 
-const provider: ModelProvider = { id: 'provider-one' }
-const connection: ModelConnection = { id: 'connection-one', providerId: provider.id }
+const provider: ModelProvider = {
+  id: 'provider-one', displayName: 'Provider One', defaultApiBase: 'https://provider.example'
+}
+const connection: ModelConnection = {
+  id: 'connection-one', providerId: provider.id, displayName: 'Connection One',
+  apiBase: 'https://provider.example', enabled: true, credentialConfigured: true,
+  createdAt: 1, updatedAt: 1
+}
 const chatModel: ModelCatalogEntry = {
   id: 'chat-model',
   providerId: provider.id,
+  displayName: 'Chat model',
   modality: 'chat'
 }
 const imageModel: ModelCatalogEntry = {
   id: 'image-model',
   providerId: provider.id,
+  displayName: 'Image model',
   modality: 'image'
 }
 const imageBinding: ImageModelBinding = {
@@ -34,10 +43,10 @@ describe('model management domain', () => {
     }
 
     expect({ provider, connection, chatModel, imageModel, assignment, imageBinding }).toEqual({
-      provider: { id: 'provider-one' },
-      connection: { id: 'connection-one', providerId: 'provider-one' },
-      chatModel: { id: 'chat-model', providerId: 'provider-one', modality: 'chat' },
-      imageModel: { id: 'image-model', providerId: 'provider-one', modality: 'image' },
+      provider,
+      connection,
+      chatModel,
+      imageModel,
       assignment: { slot: 'image.primary', connectionId: 'connection-one', modelId: 'image-model' },
       imageBinding: { connectionId: 'connection-one', modelId: 'image-model' }
     })
@@ -82,5 +91,55 @@ describe('model management domain', () => {
       connectionId: connection.id,
       modelId: 'missing-model'
     }, [chatModel, imageModel])).toEqual([{ code: 'model_not_found' }])
+  })
+
+  test('represents the complete provider-neutral image capability contract', () => {
+    const entry: ModelCatalogEntry = {
+      id: 'seedream',
+      providerId: provider.id,
+      displayName: 'Seedream',
+      modality: 'image',
+      capabilities: {
+        modes: ['generate', 'edit', 'region-edit'],
+        resolutions: ['1K', '2K'],
+        aspectRatios: ['1:1', '16:9'],
+        customSize: {
+          minPixels: 921600,
+          maxPixels: 4624220,
+          minAspectRatio: 0.0625,
+          maxAspectRatio: 16
+        },
+        outputFormats: ['png', 'jpeg'],
+        watermark: true,
+        maxReferenceImages: 10,
+        mentionStrategy: 'ordered-image-labels',
+        regionInputs: ['point', 'bbox'],
+        outputCount: 1,
+        streaming: false
+      }
+    }
+
+    expect(entry.capabilities).toMatchObject({
+      aspectRatios: ['1:1', '16:9'],
+      customSize: {
+        minPixels: 921600,
+        maxPixels: 4624220,
+        minAspectRatio: 0.0625,
+        maxAspectRatio: 16
+      },
+      outputFormats: ['png', 'jpeg'],
+      watermark: true
+    })
+  })
+
+  test('maps runtime error codes to safe Chinese recovery metadata', () => {
+    expect(getRuntimeErrorPresentation('credential_missing')).toEqual({
+      message: '所选模型连接尚未配置凭据。',
+      action: '更新凭据'
+    })
+    expect(getRuntimeErrorPresentation('unknown_provider_failure')).toEqual({
+      message: '图片生成失败，请稍后重试。',
+      action: '稍后重试'
+    })
   })
 })

@@ -147,6 +147,7 @@ const SideNav = ({
         <SideNavItem
           key={item.tab}
           active={activeTab === item.tab}
+          dataTab={item.tab}
           icon={item.icon}
           label={item.label}
           onClick={() => onSelectTab(item.tab)}
@@ -171,17 +172,20 @@ const IconButton = ({ label, onClick, children }: { label: string; onClick?: () 
 
 const SideNavItem = ({
   active = false,
+  dataTab,
   icon,
   label,
   onClick
 }: {
   active?: boolean
+  dataTab?: MainTab
   icon: ReactNode
   label: string
   onClick: () => void
 }) => (
   <button
     type="button"
+    data-app-nav-tab={dataTab}
     className={`flex min-h-[44px] w-full items-center justify-center gap-3 rounded-lg px-3 py-2 text-left text-sm font-semibold transition md:justify-start ${
       active ? 'bg-amber-50 text-gray-950' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'
     }`}

@@ -27,7 +27,13 @@ vi.mock('./components/app/ProjectHome', () => ({
     onOpenProject: (project: IPromptProject) => void
   }) => <button type="button" data-open-project onClick={() => onOpenProject(projects[0])}>Open project</button>
 }))
-vi.mock('./components/canvas/FreeCanvasBuilderScreen', () => ({ default: () => <div data-free-canvas-builder /> }))
+vi.mock('./components/canvas/FreeCanvasBuilderScreen', () => ({
+  default: ({ onBack }: { onBack: () => void }) => (
+    <div data-free-canvas-builder>
+      <button type="button" data-builder-back onClick={onBack}>Back</button>
+    </div>
+  )
+}))
 vi.mock('./components/PromptLibrary', () => ({ default: () => null }))
 vi.mock('./components/ThreeStageBuilder', () => ({ default: () => null }))
 vi.mock('./components/AgentDashboard', () => ({ AgentDashboard: () => null }))
@@ -183,6 +189,7 @@ const mountAppInMedia = async (): Promise<ReactTestRenderer> => {
     renderer.root.findByProps({ 'data-open-project': true }).props.onClick()
     await settle()
   })
+  act(() => renderer.root.findByProps({ 'data-builder-back': true }).props.onClick())
   mocks.projectUpdate.mockClear()
   mocks.captureUpdate.mockClear()
   act(() => renderer.root.findByProps({ 'data-open-media': true }).props.onClick())
@@ -216,6 +223,7 @@ describe('App generated result media placement', () => {
       expect.objectContaining({ kind: 'image', assetId: 'asset-generated' })
     ]))
     expect(mocks.captureUpdate).toHaveBeenCalledTimes(1)
+    expect(renderer.root.findByProps({ 'data-free-canvas-builder': true })).toBeDefined()
   })
 
   it('writes a stable generator reference through the mounted App and real MediaScreen action', async () => {
@@ -236,6 +244,7 @@ describe('App generated result media placement', () => {
     expect(update.freeCanvas.nodes).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'image', assetId: 'asset-generated' })
     ]))
+    expect(renderer.root.findByProps({ 'data-free-canvas-builder': true })).toBeDefined()
   })
 
   it('does not write when the mounted reference action would exceed the ten-reference limit', async () => {

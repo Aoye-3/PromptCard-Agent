@@ -61,7 +61,7 @@ test('generates, retries, persists history, and reuses a local generated result'
   await expect(page.getByLabel('Generation history').locator('[data-generation-run="run-succeeded"]')).toBeVisible()
 
   await page.getByTitle('Back').click()
-  await page.locator('[data-app-side-nav] nav button:has(svg.lucide-image)').click()
+  await page.locator('[data-app-nav-tab="media"]').click()
   await expect(page.getByText('Task15 generated result', { exact: true })).toBeVisible()
   await page.getByText('Task15 generated result', { exact: true }).click()
   await expect(page.locator('[data-place-capture-on-canvas]')).toBeEnabled()
@@ -223,16 +223,16 @@ async function enableImageGenerationFeature(page: Page) {
   await page.goto('/', { waitUntil: 'commit' })
   await page.evaluate(async () => {
     await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open('localforage')
+      const request = indexedDB.open('PromptCard')
       request.onupgradeneeded = () => {
-        if (!request.result.objectStoreNames.contains('keyvaluepairs')) {
-          request.result.createObjectStore('keyvaluepairs')
+        if (!request.result.objectStoreNames.contains('promptcard')) {
+          request.result.createObjectStore('promptcard')
         }
       }
       request.onerror = () => reject(request.error)
       request.onsuccess = () => {
-        const transaction = request.result.transaction('keyvaluepairs', 'readwrite')
-        transaction.objectStore('keyvaluepairs').put({
+        const transaction = request.result.transaction('promptcard', 'readwrite')
+        transaction.objectStore('promptcard').put({
           theme: 'light',
           defaultMode: 'learn',
           autoSave: true,

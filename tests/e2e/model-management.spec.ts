@@ -56,14 +56,14 @@ test('creates a credential-backed image connection and assigns image.primary wit
     await route.fulfill({ json: assignment })
   })
   await page.goto('/', { waitUntil: 'commit' })
-  await page.locator('[data-app-side-nav] nav button:has(svg.lucide-bot)').click()
+  await page.locator('[data-app-nav-tab="agents"]').click()
 
   const panel = page.locator('[data-model-management-panel]')
   await expect(panel).toBeVisible()
   await panel.locator('input').nth(0).fill('Task15 Ark')
   await panel.locator('input').nth(1).fill('https://ark.example.test/api/v3')
   await panel.locator('input[type="password"]').fill(secret)
-  await panel.locator('button:has(svg.lucide-save)').click()
+  await panel.locator('[data-model-connection-save]').click()
 
   await expect(panel.getByText('Task15 Ark', { exact: true }).first()).toBeVisible()
   expect(createBody).toMatchObject({

@@ -797,7 +797,6 @@ function App() {
 
   const handleBackToProjects = () => {
     setProjectMode('home')
-    setActiveProjectId(null)
   }
 
   const handleBackFromTemplateLibrary = () => {
@@ -880,6 +879,8 @@ function App() {
       } catch (error) {
         console.error('Failed to update capture placement status:', error)
       }
+      setActiveTab('projects')
+      setProjectMode('builder')
     }
   }
 

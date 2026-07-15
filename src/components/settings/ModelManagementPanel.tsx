@@ -323,6 +323,7 @@ export function ModelManagementPanelContent({
             )}
             <button
               type="button"
+              data-model-connection-save
               onClick={actions.onSaveConnection}
               disabled={busyAction !== null || !draft.providerId || !draft.displayName.trim() || !draft.apiBase.trim()}
               className="inline-flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-black text-white disabled:opacity-40"

@@ -294,10 +294,14 @@ def test_invalid_size_intent_fails_before_asset_or_credential_access(changes: di
     assert not any(operation == "load_asset" for operation, _payload in storage.operations)
     assert storage.runs["run-invalid-size"]["state"] == "failed"
     snapshot = storage.runs["run-invalid-size"]["requestSnapshot"]
-    if changes.get("width") is not None:
-        assert snapshot["width"] == changes["width"]
-    if changes.get("height") is not None:
-        assert snapshot["height"] == changes["height"]
+    if changes.get("aspect_ratio") == "custom":
+        if changes.get("width") is not None:
+            assert snapshot["width"] == changes["width"]
+        if changes.get("height") is not None:
+            assert snapshot["height"] == changes["height"]
+    else:
+        assert "width" not in snapshot
+        assert "height" not in snapshot
 
 
 def test_resolved_connection_repr_never_contains_credential() -> None:

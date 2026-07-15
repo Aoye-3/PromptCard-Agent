@@ -202,6 +202,63 @@ describe('free canvas image generation feature entry', () => {
     expect(onWrite).not.toHaveBeenCalled()
   })
 
+  it('resets creation for project B while project A assignment is pending without stale A clearing B', async () => {
+    const pendingA = deferred<never[]>()
+    const pendingB = deferred<Array<{ slot: string; connectionId: string; modelId: string }>>()
+    mocks.listAssignments
+      .mockReturnValueOnce(pendingA.promise)
+      .mockReturnValueOnce(pendingB.promise)
+    const onWriteA = vi.fn()
+    const onWriteB = vi.fn()
+    const renderer = mount(
+      <BuilderHost
+        activeProject={project('project-a')}
+        initialCanvas={createFreeCanvasProject(1)}
+        onWrite={onWriteA}
+      />
+    )
+    const createButton = () => renderer.root.findAllByType('button')
+      .find(node => node.props.title === 'Image generator')!
+
+    act(() => createButton().props.onClick())
+    expect(createButton().props.disabled).toBe(true)
+    await act(async () => {
+      renderer.update(
+        <BuilderHost
+          activeProject={project('project-b')}
+          initialCanvas={createFreeCanvasProject(2)}
+          onWrite={onWriteB}
+        />
+      )
+    })
+    expect(createButton().props.disabled).toBe(false)
+
+    act(() => createButton().props.onClick())
+    expect(createButton().props.disabled).toBe(true)
+    await act(async () => {
+      pendingA.resolve([])
+      await pendingA.promise
+    })
+    expect(createButton().props.disabled).toBe(true)
+    expect(onWriteA).not.toHaveBeenCalled()
+
+    await act(async () => {
+      pendingB.resolve([{
+        slot: 'image.primary',
+        connectionId: 'ark-b',
+        modelId: 'doubao-seedream-5-0-pro-260628'
+      }])
+      await pendingB.promise
+    })
+    expect(createButton().props.disabled).toBe(false)
+    expect(onWriteB).toHaveBeenCalledWith(expect.objectContaining({
+      nodes: [expect.objectContaining({
+        kind: 'image-generator',
+        binding: { connectionId: 'ark-b', modelId: 'doubao-seedream-5-0-pro-260628' }
+      })]
+    }))
+  })
+
   it('does not write a completed run when the real builder unmounts', async () => {
     const pending = deferred<{ runId: string; assetId: string; captureId: string }>()
     mocks.requestImageGeneration.mockReturnValue(pending.promise)

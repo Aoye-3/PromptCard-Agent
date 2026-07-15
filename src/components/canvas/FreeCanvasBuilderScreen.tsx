@@ -216,6 +216,8 @@ const FreeCanvasBuilderInner = ({
   useEffect(() => {
     const guard = imageGenerationGuardRef.current!
     guard.activateProject(activeProject.id)
+    imageGeneratorCreationRef.current = new SingleFlightAction()
+    setImageGeneratorCreating(false)
     return () => guard.deactivateProject(activeProject.id)
   }, [activeProject.id])
 

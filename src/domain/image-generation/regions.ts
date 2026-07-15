@@ -86,6 +86,7 @@ export interface RegionHistory {
 }
 
 export type RegionHistoryAction =
+  | { type: 'reset'; regions: readonly BoundImageRegion[] }
   | { type: 'add'; region: BoundImageRegion }
   | { type: 'move'; regionId: string; dx: number; dy: number }
   | { type: 'delete'; regionId: string }
@@ -200,6 +201,7 @@ export const reduceRegionHistory = (
   history: RegionHistory,
   action: RegionHistoryAction
 ): RegionHistory => {
+  if (action.type === 'reset') return createRegionHistory(action.regions)
   if (action.type === 'undo') {
     const previous = history.past[history.past.length - 1]
     if (!previous) return history

@@ -402,6 +402,32 @@ describe('ImageGeneratorInspector', () => {
     expect(markup).toContain('Source image required')
   })
 
+  it('exposes region validation as a blocked production generation snapshot', () => {
+    const markup = renderToStaticMarkup(
+      <ImageGeneratorInspector
+        node={{ ...generatorNode, mode: 'region-edit' }}
+        sizeCapabilities={SEEDREAM_5_PRO_SIZE_CAPABILITIES}
+        promptSnapshot={{
+          source: 'local',
+          promptDocument: { version: 1, segments: [{ type: 'text', text: 'Edit product' }] },
+          prompt: 'Edit product',
+          references: [],
+          inputAssets: [],
+          validationErrors: [{
+            code: 'stale_region_reference',
+            regionId: 'region-stale',
+            referenceId: 'ref-reference'
+          }],
+          canGenerate: false
+        }}
+        onChange={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('data-image-generation-ready="false"')
+    expect(markup).toContain('Resolve region bindings before generating')
+  })
+
   it('does not add an invalid second prompt connection to project state', () => {
     const project = projectWith(
       [generatorNode, textNode('prompt-1'), textNode('prompt-2')],

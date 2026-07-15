@@ -6,6 +6,11 @@ import type {
   PromptSegment
 } from '@/models/PromptHistory.model'
 import { freeCanvasTextSegmentsToPlainText } from '@/domain/free-canvas/free-canvas-project'
+import {
+  readImageRegionBindings,
+  restoreBoundImageRegions,
+  validateBoundImageRegions
+} from '@/domain/image-generation/regions'
 
 export type ImagePromptInputRole = 'source-image' | 'reference-image'
 
@@ -16,11 +21,16 @@ export type PromptCompilerValidationErrorCode =
   | 'unresolved_reference'
   | 'missing_reference_asset'
   | 'duplicate_reference_id'
+  | 'unresolved_region_reference'
+  | 'stale_region_reference'
+  | 'invalid_region_geometry'
+  | 'missing_source_image'
 
 export interface PromptCompilerValidationError {
   code: PromptCompilerValidationErrorCode
   referenceId?: string
   edgeId?: string
+  regionId?: string
 }
 
 export interface ConnectedImagePromptReference {
@@ -82,6 +92,17 @@ export const compileImageGeneratorPrompt = (
       })
     }
   })
+
+  const sourceReferenceId = references.find(reference => reference.role === 'source-image')?.referenceId || null
+  const regionValidation = validateBoundImageRegions(
+    restoreBoundImageRegions(generator.regions, readImageRegionBindings(generator.meta)),
+    sourceReferenceId,
+    references.map(reference => reference.referenceId)
+  )
+  regionValidation.validationErrors.forEach(error => validationErrors.push({ ...error }))
+  if (generator.mode !== 'generate' && !sourceReferenceId) {
+    validationErrors.push({ code: 'missing_source_image' })
+  }
 
   const localDocument = clonePromptDocument(generator.promptDocument)
   const localIsExplicit = hasExplicitPromptContent(localDocument)

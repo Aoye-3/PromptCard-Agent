@@ -90,6 +90,30 @@ describe('free canvas project domain', () => {
     expect(project.nodes[0]).toEqual(generator)
   })
 
+  test('normalizes malformed legacy image regions to safe integer grid geometry', () => {
+    const project = createFreeCanvasProject(100, {
+      nodes: [{
+        id: 'legacy-region-generator',
+        kind: 'image-generator',
+        binding: { connectionId: 'connection-1', modelId: 'image-model-1' },
+        regions: [
+          { type: 'point', x: -4.6, y: 1_000.7 },
+          { type: 'point', x: 'not-a-number', y: 20 },
+          { type: 'bbox', x: 800.2, y: 900.4, width: -600.3, height: -800.3 },
+          { type: 'bbox', x: 10, y: 20, width: 0, height: 30 },
+          null
+        ]
+      } as never]
+    })
+
+    expect(project.nodes[0]).toMatchObject({
+      regions: [
+        { type: 'point', x: 0, y: 999 },
+        { type: 'bbox', x: 200, y: 100, width: 600, height: 800 }
+      ]
+    })
+  })
+
   test('round-trips typed image generator edge metadata', () => {
     const project = createFreeCanvasProject(100, {
       nodes: [

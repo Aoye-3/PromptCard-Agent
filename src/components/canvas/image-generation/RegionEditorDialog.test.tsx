@@ -1,5 +1,6 @@
 import { Children, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { describe, expect, it, vi } from 'vitest'
 import {
   RegionEditorDialog,
@@ -27,6 +28,39 @@ const region: BoundImageRegion = {
   x: 500,
   y: 500
 }
+
+const referenceSource = {
+  referenceId: 'reference-alternate',
+  label: 'Alternate reference',
+  role: 'reference-image' as const,
+  assetId: 'asset-alternate',
+  imageUrl: '/assets/alternate'
+}
+
+const mountEditor = (element: ReactElement): ReactTestRenderer => {
+  vi.stubGlobal('window', { devicePixelRatio: 1 })
+  let renderer!: ReactTestRenderer
+  act(() => {
+    renderer = create(element, {
+      createNodeMock: candidate => candidate.type === 'img'
+        ? { naturalWidth: 1_000, naturalHeight: 1_000 }
+        : {
+            clientWidth: 1_000,
+            clientHeight: 1_000,
+            getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_000, height: 1_000 })
+          }
+    })
+  })
+  return renderer
+}
+
+const pointerEvent = (x: number, y: number) => ({
+  clientX: x,
+  clientY: y,
+  currentTarget: {
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 1_000, height: 1_000 })
+  }
+})
 
 const findElement = (
   node: ReactNode,
@@ -138,5 +172,113 @@ describe('RegionEditorDialog', () => {
 
     expect(markup).toContain('Region image disconnected')
     expect(markup).toContain('data-save-regions="true" disabled=""')
+  })
+
+  it('mounts the editor and closes the pointer, stale-source, rebind, delete, history, and save loop', () => {
+    const onSave = vi.fn()
+    const renderer = mountEditor(
+      <RegionEditorDialog
+        scopeKey="generator-one"
+        mode="region-edit"
+        capabilities={capabilities}
+        sources={[source, referenceSource]}
+        initialRegions={[]}
+        onSave={onSave}
+      />
+    )
+    const root = renderer.root
+    const viewport = root.find(node => typeof node.props.onPointerDown === 'function' && typeof node.props.onPointerUp === 'function')
+
+    act(() => viewport.props.onPointerDown(pointerEvent(250, 750)))
+    act(() => root.findByProps({ 'aria-label': 'Select box tool' }).props.onClick())
+    act(() => viewport.props.onPointerDown(pointerEvent(900, 800)))
+    act(() => viewport.props.onPointerUp(pointerEvent(200, 100)))
+
+    act(() => root.findByProps({ 'aria-label': 'Region image' }).props.onChange({ target: { value: referenceSource.referenceId } }))
+    expect(root.findByProps({ 'data-save-regions': true }).props.disabled).toBe(true)
+
+    act(() => root.findByProps({ children: 'Rebind to current image' }).props.onClick())
+    act(() => root.findByProps({ 'aria-label': 'Select point region' }).props.onClick())
+    act(() => root.findByProps({ 'aria-label': 'Delete region' }).props.onClick())
+    expect(root.findByProps({ 'data-save-regions': true }).props.disabled).toBe(false)
+
+    act(() => root.findByProps({ 'aria-label': 'Undo region change' }).props.onClick())
+    expect(root.findByProps({ 'data-save-regions': true }).props.disabled).toBe(true)
+    act(() => root.findByProps({ 'aria-label': 'Redo region change' }).props.onClick())
+    act(() => root.findByProps({ 'data-save-regions': true }).props.onClick())
+
+    expect(onSave).toHaveBeenCalledWith([{
+      id: expect.stringMatching(/^region-/),
+      referenceId: referenceSource.referenceId,
+      type: 'bbox',
+      x: 200,
+      y: 100,
+      width: 699,
+      height: 699
+    }])
+  })
+
+  it('keeps cleanup controls mounted after source-image disconnect so stale regions can be rebound or deleted', () => {
+    const onSave = vi.fn()
+    const renderer = mountEditor(
+      <RegionEditorDialog
+        scopeKey="generator-disconnected"
+        mode="region-edit"
+        capabilities={capabilities}
+        sources={[referenceSource]}
+        initialRegions={[region]}
+        onSave={onSave}
+      />
+    )
+    const root = renderer.root
+
+    expect(root.findAllByProps({ role: 'alert' }).some(alert => (
+      alert.children.join('').includes('Source image required')
+    ))).toBe(true)
+    act(() => root.findByProps({ children: 'Rebind to current image' }).props.onClick())
+    expect(root.findByProps({ 'data-save-regions': true }).props.disabled).toBe(false)
+    act(() => root.findByProps({ 'aria-label': 'Delete region' }).props.onClick())
+    act(() => root.findByProps({ 'data-save-regions': true }).props.onClick())
+
+    expect(onSave).toHaveBeenCalledWith([])
+  })
+
+  it('resets history and active source when two generators at the same position are swapped', () => {
+    const onSave = vi.fn()
+    const renderer = mountEditor(
+      <RegionEditorDialog
+        scopeKey="generator-one"
+        mode="region-edit"
+        capabilities={capabilities}
+        sources={[source]}
+        initialRegions={[{ ...region, x: 100, y: 100 }]}
+        onSave={onSave}
+      />
+    )
+
+    act(() => renderer.root.findByProps({ 'aria-label': 'Move region right' }).props.onClick())
+    expect(renderer.root.findByProps({ 'aria-label': 'Undo region change' }).props.disabled).toBe(false)
+
+    act(() => renderer.update(
+      <RegionEditorDialog
+        scopeKey="generator-two"
+        mode="region-edit"
+        capabilities={capabilities}
+        sources={[referenceSource]}
+        initialRegions={[{ ...region, id: 'region-two', referenceId: referenceSource.referenceId, x: 100, y: 100 }]}
+        onSave={onSave}
+      />
+    ))
+
+    expect(renderer.root.findByProps({ 'aria-label': 'Region image' }).props.value).toBe(referenceSource.referenceId)
+    expect(renderer.root.findByProps({ 'aria-label': 'Undo region change' }).props.disabled).toBe(true)
+    act(() => renderer.root.findByProps({ 'data-save-regions': true }).props.onClick())
+    expect(onSave).toHaveBeenLastCalledWith([{
+      ...region,
+      id: 'region-two',
+      referenceId: referenceSource.referenceId,
+      x: 100,
+      y: 100
+    }])
   })
 })

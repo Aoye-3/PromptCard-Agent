@@ -275,4 +275,64 @@ describe('compileImageGeneratorPrompt', () => {
 
     expect(compileImageGeneratorPrompt(project, 'generator-1').prompt).toBe('Use low-key cinematic lighting')
   })
+
+  it('blocks the generate-ready snapshot when a persisted region binding is stale', () => {
+    const generator = {
+      ...generatorNode({ version: 1, segments: [{ type: 'text', text: 'Edit product' }] }),
+      mode: 'region-edit' as const,
+      regions: [{ type: 'point' as const, x: 400, y: 500 }],
+      meta: {
+        imageRegionBindings: [{ regionId: 'region-stale', referenceId: 'ref-reference' }]
+      }
+    }
+    const project = projectWith([
+      generator,
+      imageNode('source', 'Source', 'asset-source'),
+      imageNode('reference', 'Reference', 'asset-reference')
+    ], [
+      {
+        id: 'edge-source', source: 'source', target: generator.id,
+        targetHandle: 'source-image', referenceId: 'ref-source', createdAt: 1
+      },
+      {
+        id: 'edge-reference', source: 'reference', target: generator.id,
+        targetHandle: 'reference-image', referenceId: 'ref-reference', createdAt: 2
+      }
+    ])
+
+    const snapshot = compileImageGeneratorPrompt(project, generator.id)
+
+    expect(snapshot.canGenerate).toBe(false)
+    expect(snapshot.validationErrors).toContainEqual({
+      code: 'stale_region_reference',
+      regionId: 'region-stale',
+      referenceId: 'ref-reference'
+    })
+  })
+
+  it('keeps generation blocked after source disconnect even when stale regions are rebound to a reference', () => {
+    const generator = {
+      ...generatorNode({ version: 1, segments: [{ type: 'text', text: 'Edit product' }] }),
+      mode: 'region-edit' as const,
+      regions: [{ type: 'point' as const, x: 400, y: 500 }],
+      meta: {
+        imageRegionBindings: [{ regionId: 'region-rebound', referenceId: 'ref-reference' }]
+      }
+    }
+    const project = projectWith([
+      generator,
+      imageNode('reference', 'Reference', 'asset-reference')
+    ], [{
+      id: 'edge-reference', source: 'reference', target: generator.id,
+      targetHandle: 'reference-image', referenceId: 'ref-reference', createdAt: 1
+    }])
+
+    const snapshot = compileImageGeneratorPrompt(project, generator.id)
+
+    expect(snapshot.canGenerate).toBe(false)
+    expect(snapshot.validationErrors).toContainEqual({ code: 'missing_source_image' })
+    expect(snapshot.validationErrors).not.toContainEqual(expect.objectContaining({
+      code: 'unresolved_region_reference'
+    }))
+  })
 })

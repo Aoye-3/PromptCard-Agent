@@ -135,6 +135,22 @@ describe('bound image regions', () => {
     expect(history.present).toEqual([])
   })
 
+  it('resets present regions and clears undo/redo history when the editor scope changes', () => {
+    let history = createRegionHistory([pointRegion])
+    history = reduceRegionHistory(history, { type: 'move', regionId: pointRegion.id, dx: 10, dy: 20 })
+    history = reduceRegionHistory(history, {
+      type: 'reset',
+      regions: [{ ...pointRegion, id: 'region-other-generator', x: 700, y: 100 }]
+    })
+
+    expect(history).toEqual({
+      past: [],
+      present: [{ ...pointRegion, id: 'region-other-generator', x: 700, y: 100 }],
+      future: []
+    })
+    expect(reduceRegionHistory(history, { type: 'undo' })).toBe(history)
+  })
+
   it('serializes only integer geometry plus stable reference bindings', () => {
     const box: BoundImageRegion = {
       id: 'region-box',

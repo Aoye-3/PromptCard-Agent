@@ -650,21 +650,41 @@ const normalizeImageRegions = (regions: ImageRegion[] | undefined): ImageRegion[
   if (!Array.isArray(regions)) return []
   const normalized: ImageRegion[] = []
   regions.forEach(region => {
+    if (!region || typeof region !== 'object') return
     if (region.type === 'point') {
-      normalized.push({ type: 'point', x: Number(region.x), y: Number(region.y) })
+      const x = finiteNumber(region.x)
+      const y = finiteNumber(region.y)
+      if (x === null || y === null) return
+      normalized.push({ type: 'point', x: gridInteger(x), y: gridInteger(y) })
     }
     if (region.type === 'bbox') {
+      const x = finiteNumber(region.x)
+      const y = finiteNumber(region.y)
+      const width = finiteNumber(region.width)
+      const height = finiteNumber(region.height)
+      if (x === null || y === null || width === null || height === null) return
+      const left = gridInteger(Math.min(x, x + width))
+      const right = gridInteger(Math.max(x, x + width))
+      const top = gridInteger(Math.min(y, y + height))
+      const bottom = gridInteger(Math.max(y, y + height))
+      if (right <= left || bottom <= top) return
       normalized.push({
         type: 'bbox',
-        x: Number(region.x),
-        y: Number(region.y),
-        width: Number(region.width),
-        height: Number(region.height)
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top
       })
     }
   })
   return normalized
 }
+
+const finiteNumber = (value: unknown): number | null => (
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+)
+
+const gridInteger = (value: number): number => Math.min(Math.max(Math.round(value), 0), 999)
 
 const normalizeTextSegment = (segment: Partial<IFreeCanvasTextSegment>): IFreeCanvasTextSegment => {
   const source = segment.source === 'preset' ? 'preset' : 'user'

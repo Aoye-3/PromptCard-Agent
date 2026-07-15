@@ -59,6 +59,11 @@ export const ImageGeneratorInspector = ({
     node.regions,
     readImageRegionBindings(node.meta)
   )
+  const hasRegionGenerationError = promptSnapshot?.validationErrors.some(error => (
+    error.code === 'unresolved_region_reference'
+    || error.code === 'stale_region_reference'
+    || error.code === 'invalid_region_geometry'
+  )) || false
 
   const updateSettings = (updates: Partial<IFreeCanvasImageGeneratorNode['settings']>) => {
     onChange({ settings: { ...node.settings, ...updates } })
@@ -77,7 +82,11 @@ export const ImageGeneratorInspector = ({
   }
 
   return (
-    <section data-image-generator-inspector className="space-y-4 p-4">
+    <section
+      data-image-generator-inspector
+      data-image-generation-ready={promptSnapshot ? promptSnapshot.canGenerate : undefined}
+      className="space-y-4 p-4"
+    >
       <div className="grid grid-cols-[1fr_auto] items-start gap-3">
         <div className="min-w-0">
           <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">Image generation</p>
@@ -112,6 +121,12 @@ export const ImageGeneratorInspector = ({
           alt={`${node.title} result`}
           className="h-28 w-full rounded-[6px] border border-gray-200 object-cover"
         />
+      )}
+
+      {hasRegionGenerationError && (
+        <div role="alert" className="rounded-[6px] border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-900">
+          Resolve region bindings before generating. Rebind or remove disconnected regions in the editor.
+        </div>
       )}
 
       {!activeSizeCapabilities && (
@@ -245,6 +260,7 @@ export const ImageGeneratorInspector = ({
         <details className="rounded-[6px] border border-gray-200">
           <summary className="cursor-pointer px-3 py-2 text-xs font-black text-gray-800">Edit image regions</summary>
           <RegionEditorDialog
+            scopeKey={node.id}
             mode={node.mode}
             capabilities={regionCapabilities}
             sources={regionSources}

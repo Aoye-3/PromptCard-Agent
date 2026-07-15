@@ -27,6 +27,7 @@ import {
 type RegionTool = 'point' | 'bbox'
 
 export interface RegionEditorDialogProps {
+  scopeKey?: string
   mode: 'edit' | 'region-edit'
   capabilities: ImageRegionCapabilities
   sources: readonly ImageRegionSource[]
@@ -60,6 +61,7 @@ export interface RegionEditorDialogViewProps extends Omit<RegionEditorDialogProp
 }
 
 export const RegionEditorDialog = ({
+  scopeKey,
   mode,
   capabilities,
   sources,
@@ -68,8 +70,9 @@ export const RegionEditorDialog = ({
   onClose
 }: RegionEditorDialogProps) => {
   const sourceImage = sources.find(source => source.role === 'source-image') || null
+  const preferredSourceReferenceId = sourceImage?.referenceId || sources[0]?.referenceId || null
   const [activeSourceReferenceId, setActiveSourceReferenceId] = useState<string | null>(
-    sourceImage?.referenceId || null
+    preferredSourceReferenceId
   )
   const [activeTool, setActiveTool] = useState<RegionTool | null>(
     mode === 'region-edit' ? capabilities.regionInputs[0] || null : null
@@ -80,6 +83,17 @@ export const RegionEditorDialog = ({
   const viewportRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const dragStartRef = useRef<DisplayPoint | null>(null)
+  const initialRegionsKey = JSON.stringify(initialRegions)
+  const initialRegionsSnapshot = useMemo<BoundImageRegion[]>(
+    () => JSON.parse(initialRegionsKey) as BoundImageRegion[],
+    [initialRegionsKey]
+  )
+  const sourcesKey = JSON.stringify(sources.map(source => ({
+    referenceId: source.referenceId,
+    role: source.role,
+    assetId: source.assetId
+  })))
+  const regionInputsKey = capabilities.regionInputs.join('|')
 
   const activeSource = sources.find(source => source.referenceId === activeSourceReferenceId) || null
   const validation = useMemo(() => validateBoundImageRegions(
@@ -110,6 +124,23 @@ export const RegionEditorDialog = ({
     observer.observe(viewport)
     return () => observer.disconnect()
   }, [measureImage])
+
+  useEffect(() => {
+    dispatch({ type: 'reset', regions: initialRegionsSnapshot })
+    setActiveSourceReferenceId(preferredSourceReferenceId)
+    setActiveTool(mode === 'region-edit' ? capabilities.regionInputs[0] || null : null)
+    setSelectedRegionId(initialRegionsSnapshot[0]?.id || null)
+    setDisplayMetrics(null)
+    dragStartRef.current = null
+  }, [
+    capabilities.regionInputs,
+    initialRegionsSnapshot,
+    mode,
+    preferredSourceReferenceId,
+    regionInputsKey,
+    scopeKey,
+    sourcesKey
+  ])
 
   const pointerPosition = (event: ReactPointerEvent<HTMLDivElement>): DisplayPoint => {
     const rect = event.currentTarget.getBoundingClientRect()
@@ -224,18 +255,7 @@ export const RegionEditorDialogView = ({
   const selectedRegion = regions.find(region => region.id === selectedRegionId) || null
   const hasUnresolved = validationErrors.some(error => error.code === 'unresolved_region_reference')
   const hasStale = validationErrors.some(error => error.code === 'stale_region_reference')
-  const canSave = Boolean(sourceImage && validationErrors.length === 0)
-
-  if (!sourceImage) {
-    return (
-      <section data-region-editor-dialog className="space-y-3 rounded-[8px] border border-gray-200 bg-white p-4">
-        <div role="alert" className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-950">
-          Source image required. Connect an image to the source-image input before using {mode === 'edit' ? 'edit' : 'region edit'} mode.
-        </div>
-        {onClose && <button type="button" className="rounded-[6px] px-3 py-2 text-xs font-bold" onClick={onClose}>Close</button>}
-      </section>
-    )
-  }
+  const canSave = validationErrors.length === 0
 
   return (
     <section data-region-editor-dialog className="space-y-3 rounded-[8px] border border-gray-200 bg-white p-4">
@@ -253,13 +273,21 @@ export const RegionEditorDialogView = ({
           aria-label="Region image"
           className="w-full rounded-[6px] border border-gray-200 bg-white px-2 py-2 text-xs"
           value={activeSourceReferenceId || ''}
+          disabled={sources.length === 0}
           onChange={event => onSelectSource(event.target.value)}
         >
+          {sources.length === 0 && <option value="">No connected images</option>}
           {sources.map(source => (
             <option key={source.referenceId} value={source.referenceId}>{source.label}</option>
           ))}
         </select>
       </label>
+
+      {!sourceImage && (
+        <div role="alert" className="rounded-[6px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-950">
+          Source image required. Connect an image to the source-image input before using {mode === 'edit' ? 'edit' : 'region edit'} mode. Existing regions can still be rebound or removed.
+        </div>
+      )}
 
       {mode === 'region-edit' && (
         <div className="flex flex-wrap gap-2" aria-label="Region tools">
@@ -303,13 +331,19 @@ export const RegionEditorDialogView = ({
         onPointerDown={onImagePointerDown}
         onPointerUp={onImagePointerUp}
       >
-        <img
-          ref={imageRef}
-          src={activeSource?.imageUrl}
-          alt={activeSource?.label || 'Region source'}
-          className="pointer-events-none h-full w-full object-contain"
-          onLoad={onImageLoad}
-        />
+        {activeSource ? (
+          <img
+            ref={imageRef}
+            src={activeSource.imageUrl}
+            alt={activeSource.label}
+            className="pointer-events-none h-full w-full object-contain"
+            onLoad={onImageLoad}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center px-4 text-center text-xs font-bold text-white/70">
+            Connect an image to rebind regions, or remove stale regions below.
+          </div>
+        )}
         {displayMetrics && regions.map(region => (
           <RegionOverlay
             key={region.id}

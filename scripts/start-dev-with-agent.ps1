@@ -1,6 +1,7 @@
 param(
   [string]$StorageHealthUrl = "",
   [string]$AgentHealthUrl = "",
+  [string]$TextAgentHealthUrl = "",
   [string]$FrontendUrl = "",
   [int]$HealthTimeoutSeconds = 30,
   [string]$FrontendCommand = "npm.cmd run dev",
@@ -12,6 +13,7 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $AgentScript = Join-Path $RepoRoot "scripts\start-agent-runtime.ps1"
+$TextAgentScript = Join-Path $RepoRoot "scripts\start-text-agent-runtime.ps1"
 $StorageScript = Join-Path $RepoRoot "scripts\start-storage-service.ps1"
 $LogsDir = if ($env:PROMPTCARD_LOGS_DIR) { $env:PROMPTCARD_LOGS_DIR } else { Join-Path $RepoRoot "logs" }
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
@@ -19,6 +21,8 @@ $StorageServiceOutLog = Join-Path $LogsDir "storage-service.out.log"
 $StorageServiceErrLog = Join-Path $LogsDir "storage-service.err.log"
 $AgentRuntimeOutLog = Join-Path $LogsDir "agent-runtime.out.log"
 $AgentRuntimeErrLog = Join-Path $LogsDir "agent-runtime.err.log"
+$TextAgentRuntimeOutLog = Join-Path $LogsDir "text-agent-runtime.out.log"
+$TextAgentRuntimeErrLog = Join-Path $LogsDir "text-agent-runtime.err.log"
 . (Join-Path $PSScriptRoot "dev-port-runtime.ps1")
 
 if (!$RuntimeManifestPath) {
@@ -57,15 +61,28 @@ if (!$Runtime) {
     -ManifestPath $RuntimeManifestPath `
     -FrontendUrlOverride $FrontendUrl `
     -AgentHealthUrlOverride $AgentHealthUrl `
+    -TextAgentHealthUrlOverride $TextAgentHealthUrl `
     -StorageHealthUrlOverride $StorageHealthUrl
 }
 Set-PromptCardDevRuntimeEnvironment $Runtime
+if (!$env:PROMPTCARD_INTERNAL_TOKEN) {
+  $tokenBytes = New-Object byte[] 32
+  $tokenGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $tokenGenerator.GetBytes($tokenBytes)
+  }
+  finally {
+    $tokenGenerator.Dispose()
+  }
+  $env:PROMPTCARD_INTERNAL_TOKEN = [Convert]::ToBase64String($tokenBytes)
+}
 if (!$env:PROMPTCARD_IMAGE_GENERATION_NODE_V1) {
   $env:PROMPTCARD_IMAGE_GENERATION_NODE_V1 = "1"
 }
 
 $StorageHealthUrl = $Runtime.storageHealthUrl
 $AgentHealthUrl = $Runtime.agentHealthUrl
+$TextAgentHealthUrl = $Runtime.textAgentHealthUrl
 $FrontendUrl = $Runtime.frontendUrl
 
 function Test-HttpOk($Url) {
@@ -83,7 +100,7 @@ function Test-StorageService {
     $response = Invoke-WebRequest -UseBasicParsing $StorageHealthUrl -TimeoutSec 2
     if ($response.StatusCode -ne 200) { return $false }
     $payload = $response.Content | ConvertFrom-Json
-    if ($payload.serviceVersion -ne "2.0.0" -or $payload.schemaVersion -ne 4 -or !$payload.capabilities.sqlite) {
+    if ($payload.serviceVersion -ne "2.0.0" -or $payload.schemaVersion -ne 5 -or !$payload.capabilities.sqlite) {
       Write-Host "PromptCard storage service is running an incompatible storage version."
       return $false
     }
@@ -106,17 +123,29 @@ function Test-AgentRuntime {
   try {
     $response = Invoke-WebRequest -UseBasicParsing $AgentHealthUrl -TimeoutSec 2
     if ($response.StatusCode -ne 200) { return $false }
-    if (!$env:DEER_FLOW_HOME) { return $true }
+    if (!$env:PROMPTCARD_RUNTIME_STATE_DIR) { return $true }
 
     $payload = $response.Content | ConvertFrom-Json
-    if (!$payload.deerFlowHome) { return $false }
-    $expected = [System.IO.Path]::GetFullPath($env:DEER_FLOW_HOME).TrimEnd('\')
-    $actual = [System.IO.Path]::GetFullPath([string]$payload.deerFlowHome).TrimEnd('\')
+    if (!$payload.runtimeStateDir) { return $false }
+    $expected = [System.IO.Path]::GetFullPath($env:PROMPTCARD_RUNTIME_STATE_DIR).TrimEnd('\')
+    $actual = [System.IO.Path]::GetFullPath([string]$payload.runtimeStateDir).TrimEnd('\')
     if ($expected -ne $actual) {
       Write-Host "Agent Runtime is healthy but uses $actual; expected $expected"
       return $false
     }
     return $true
+  }
+  catch {
+    return $false
+  }
+}
+
+function Test-TextAgentRuntime {
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing $TextAgentHealthUrl -TimeoutSec 2
+    if ($response.StatusCode -ne 200) { return $false }
+    $payload = $response.Content | ConvertFrom-Json
+    return $payload.service -eq "promptcard-pi-text-agent" -and $payload.orchestrator -eq "pi"
   }
   catch {
     return $false
@@ -230,6 +259,19 @@ else {
 }
 
 $AgentReady = Test-AgentRuntime
+$TextAgentReady = Test-TextAgentRuntime
+if (-not $TextAgentReady) {
+  Stop-StalePromptCardServiceProcesses -CommandLinePatterns @("text-agent-runtime/src/server.ts", "start-text-agent-runtime.ps1")
+  Start-HiddenLoggedCommand `
+    -Command "powershell -NoProfile -ExecutionPolicy Bypass -File `"$TextAgentScript`"" `
+    -StdoutPath $TextAgentRuntimeOutLog `
+    -StderrPath $TextAgentRuntimeErrLog
+  Wait-UntilHealthy "pi text Agent at $TextAgentHealthUrl" ${function:Test-TextAgentRuntime}
+}
+else {
+  Write-Host "pi text Agent is already healthy at $TextAgentHealthUrl"
+}
+
 if (-not $AgentReady) {
   Stop-StalePromptCardServiceProcesses -CommandLinePatterns @("app.gateway.app", "start-agent-runtime.ps1")
   Start-HiddenLoggedCommand `

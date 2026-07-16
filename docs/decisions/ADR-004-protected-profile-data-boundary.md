@@ -2,7 +2,7 @@
 
 ## Status
 
-Partially superseded by [ADR-007](./ADR-007-repository-data-root-for-editable-development.md). The desktop Profile remains the boundary for runtime logs and configuration, but it no longer owns Storage Service data during editable development.
+Partially superseded by [ADR-007](./ADR-007-repository-data-root-for-editable-development.md) and [ADR-012](./ADR-012-pi-text-agent-and-ark-runtime.md). The desktop Profile remains the boundary for runtime logs and configuration, but it no longer owns Storage Service data during editable development, and the DeerFlow state layout below is historical.
 
 ## Date
 
@@ -22,6 +22,8 @@ The Update module needs a stable boundary before it can safely check, preview, a
 ## Decision
 
 Use a protected desktop profile as the runtime owner for local user data and runtime configuration.
+
+The following layout and environment variables record the decision as originally accepted. Current editable-development storage ownership is defined by ADR-007, and current Agent Runtime state uses `PROMPTCARD_RUNTIME_STATE_DIR` rather than `.deer-flow` or `DEER_FLOW_HOME`.
 
 The default profile for the editable desktop shell is repository-local and ignored:
 

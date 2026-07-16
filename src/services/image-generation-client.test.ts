@@ -23,7 +23,8 @@ const request = (): ImageGenerationRequest => ({
   resolution: '2K',
   aspectRatio: '16:9',
   outputFormat: 'png',
-  watermark: false
+  watermark: false,
+  promptOptimization: 'standard'
 })
 
 describe('image generation client', () => {
@@ -81,6 +82,7 @@ describe('image generation client', () => {
 
     expect(fetcher).toHaveBeenCalledWith('/agent-api/promptcard/runtime/image-generations', expect.objectContaining({
       method: 'POST',
+      credentials: 'include',
       body: JSON.stringify(request())
     }))
     expect(result).toEqual({
@@ -94,6 +96,45 @@ describe('image generation client', () => {
     })
     expect(JSON.stringify(result)).not.toContain('provider.example')
     expect(JSON.stringify(result)).not.toContain('raw-secret')
+  })
+
+  it('sends the CSRF token required by the runtime gateway', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      runId: 'image-run-backend',
+      state: 'succeeded',
+      assetId: 'asset-local.png',
+      captureId: 'capture-local',
+      contentType: 'image/png',
+      width: 2048,
+      height: 2048
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    const originalDocument = globalThis.document
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: { cookie: 'csrf_token=image-csrf-token' }
+    })
+
+    try {
+      await requestImageGeneration(request(), fetcher)
+      const headers = fetcher.mock.calls[0][1]?.headers as Headers
+      expect(headers.get('X-CSRF-Token')).toBe('image-csrf-token')
+    } finally {
+      Object.defineProperty(globalThis, 'document', {
+        configurable: true,
+        value: originalDocument
+      })
+    }
+  })
+
+  it('maps middleware string errors to a safe CSRF error code', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      detail: 'CSRF validation failed'
+    }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(requestImageGeneration(request(), fetcher)).rejects.toMatchObject({
+      code: 'csrf_validation_failed',
+      retryable: false
+    })
   })
 
   it('maps runtime failures without retaining provider messages or remote locations', async () => {

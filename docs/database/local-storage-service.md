@@ -18,13 +18,14 @@ Every maintained launcher must use this same path and reject a healthy Storage S
 - Schema version `2` adds `recent_captures`. Existing version `1` databases migrate in place at startup by creating the table and recording the migration.
 - Schema version `3` adds append-only `image_generation_runs` plus project/node pagination indexes. Existing version `2` databases migrate in place without rewriting projects, presets, captures, or assets.
 - Schema version `4` adds project image-generation conversations, nullable conversation/node run ownership, project/conversation indexes, and durable canvas placements. Existing version `3` runs are deterministically grouped without creating migration placements.
+- Schema version `5` adds permanent `image_asset_derivations` for previews, provider inputs, and rasterized visual annotations. Existing originals, derivatives, runs, conversations, and placements remain forward-only.
 - Projects and presets retain their existing JSON payload. Indexed columns own revision, status, ordering, usage, and timestamps.
 - Recent Capture rows retain their full JSON payload while indexed columns own `asset_id`, `kind`, `status`, capture time, timestamps, and revision.
-- Image-generation rows retain the immutable normalized request snapshot and terminal result/error payload while indexed columns own project, optional conversation/node, connection, provider, model, state, and lifecycle timestamps. Conversation and placement rows are permanent and have no ordinary delete path.
+- Image-generation rows retain the immutable normalized request snapshot and terminal result/error payload while indexed columns own project, optional conversation/node, connection, provider, model, state, and lifecycle timestamps. Conversation, placement, and derivation rows are permanent and have no ordinary delete path.
 - Active and Trash records share one table. Delete and restore are single transactions.
 - Connections enable WAL, foreign keys, a busy timeout, and full synchronous durability. Writes begin with `BEGIN IMMEDIATE`.
 - Duplicate creates and stale revisions return conflicts instead of overwriting data.
-- Asset diagnostics include references from active/Trash projects, active/Trash Prompt presets, Recent Capture records, and succeeded generation-run `outputAssetIds` before reporting unreferenced files.
+- Asset diagnostics include references from active/Trash projects, active/Trash Prompt presets, Recent Capture records, succeeded generation-run `outputAssetIds`, and both sides of every derivation before reporting unreferenced files.
 
 Image-generation history is not a child collection of a project. Deleting a node, trashing a project, or permanently deleting project Trash leaves matching runs queryable and their generated output assets strongly referenced. There is no ordinary run deletion API or automatic retention cleanup.
 
@@ -54,6 +55,7 @@ Backups use the SQLite backup API and include the database, assets, and a manife
 npm.cmd run storage:test
 .\agent-runtime\backend\.venv\Scripts\python.exe -m unittest promptcard_storage.tests.test_app
 .\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests/test_image_runs.py -q
+.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests/test_image_assets_v5.py -q
 Push-Location agent-runtime\backend
 .\.venv\Scripts\python.exe -m pytest tests\test_image_generation_storage_integration.py -q
 Pop-Location

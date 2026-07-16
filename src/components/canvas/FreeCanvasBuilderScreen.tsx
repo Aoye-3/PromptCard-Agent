@@ -34,6 +34,7 @@ import {
   ImageGeneratorNode
 } from '@/components/canvas/nodes/ImageGeneratorNode'
 import { ImageGenerationConversationPanel } from '@/components/canvas/image-generation/ImageGenerationConversationPanel'
+import { AnnotationEditorDialog } from '@/components/canvas/image-generation/AnnotationEditorDialog'
 import { RegionEditorDialog } from '@/components/canvas/image-generation/RegionEditorDialog'
 import type { ImageGenerationConversationSummary as ImageGenerationConversationView, ImageGenerationTurn, ImageGenerationTurnAction } from '@/components/canvas/image-generation/types'
 import { canvasImageAssetUrl, getClipboardImageFiles, isFileDrag, isSupportedImageFile, uploadFreeCanvasImageFiles } from '@/components/canvas/canvas-image-assets'
@@ -66,11 +67,22 @@ import {
   buildConversationGenerationRequest,
   createEmptyConversationDraft,
   injectCanvasNodesIntoDraft,
+  promptDocumentPlainText,
   projectRunToTurn,
   type ImageGenerationComposerDraft,
   type ProjectImageGenerationInput,
   type ProjectImageGenerationWorkflow
 } from '@/domain/image-generation/project-conversation'
+import {
+  moveComposerImageInput,
+  unresolvedPromptReferenceIds,
+  switchComposerImageInputRole,
+  validateComposerCustomSize
+} from '@/domain/image-generation/composer-draft'
+import {
+  rasterizeAnnotationDocument,
+  type ImageAnnotationDocument
+} from '@/domain/image-generation/annotations'
 import { compileImageGeneratorPrompt } from '@/domain/image-generation/prompt-compiler'
 import type { ModelAssignment, ModelCatalogEntry, ModelConnection } from '@/domain/models/model-management'
 import { modelManagementClient } from '@/services/model-management-client'
@@ -196,10 +208,18 @@ const FreeCanvasBuilderInner = ({
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
   const [activeImageConversationId, setActiveImageConversationId] = useState<string | null>(null)
   const [imageConversations, setImageConversations] = useState<ImageGenerationConversationSummary[]>([])
+  const [imageConversationNextCursor, setImageConversationNextCursor] = useState<string | null>(null)
   const [imageConversationRuns, setImageConversationRuns] = useState<Record<string, ImageGenerationRun[]>>({})
+  const [imageRunNextCursors, setImageRunNextCursors] = useState<Record<string, string | null>>({})
   const [imageComposerDraft, setImageComposerDraft] = useState<ImageGenerationComposerDraft>(() => createEmptyConversationDraft())
   const [imageGenerationBusy, setImageGenerationBusy] = useState(false)
   const [imageRegionEditorOpen, setImageRegionEditorOpen] = useState(false)
+  const [imageAnnotationTarget, setImageAnnotationTarget] = useState<{
+    referenceId: string
+    width: number
+    height: number
+  } | null>(null)
+  const [imageAnnotationDocuments, setImageAnnotationDocuments] = useState<Record<string, ImageAnnotationDocument>>({})
   const [optimisticImageTurn, setOptimisticImageTurn] = useState<ImageGenerationTurn | null>(null)
   const selectedNode = freeCanvas.nodes.find(node => node.id === freeCanvas.selectedNodeId) || null
   const selectedImageNode = selectedNode?.kind === 'image' ? selectedNode : null
@@ -256,20 +276,45 @@ const FreeCanvasBuilderInner = ({
     return () => { active = false }
   }, [])
 
-  const loadImageConversations = useCallback(async (projectId: string, signal?: AbortSignal) => {
-    const page = await storageServiceClient.imageGenerationConversations.getPage({ projectId, limit: 50, signal })
-    const runEntries = await Promise.all(page.conversations.map(async conversation => {
-      const runs = await storageServiceClient.imageGenerationConversations.getRuns({
-        projectId,
-        conversationId: conversation.id,
-        limit: 100,
-        signal
-      })
-      return [conversation.id, runs.runs] as const
-    }))
+  const loadImageConversations = useCallback(async (
+    projectId: string,
+    signal?: AbortSignal,
+    cursor?: string | null
+  ) => {
+    const page = await storageServiceClient.imageGenerationConversations.getPage({
+      projectId,
+      cursor,
+      limit: 20,
+      signal
+    })
     if (signal?.aborted || activeProjectIdRef.current !== projectId) return
-    setImageConversations(page.conversations)
-    setImageConversationRuns(Object.fromEntries(runEntries))
+    setImageConversations(current => cursor
+      ? mergeById(current, page.conversations)
+      : page.conversations)
+    setImageConversationNextCursor(page.nextCursor)
+  }, [])
+
+  const loadImageConversationRuns = useCallback(async (
+    projectId: string,
+    conversationId: string,
+    signal?: AbortSignal,
+    cursor?: string | null
+  ) => {
+    const page = await storageServiceClient.imageGenerationConversations.getRuns({
+      projectId,
+      conversationId,
+      cursor,
+      limit: 25,
+      signal
+    })
+    if (signal?.aborted || activeProjectIdRef.current !== projectId) return
+    setImageConversationRuns(current => ({
+      ...current,
+      [conversationId]: cursor
+        ? mergeById(current[conversationId] || [], page.runs)
+        : page.runs
+    }))
+    setImageRunNextCursors(current => ({ ...current, [conversationId]: page.nextCursor }))
   }, [])
 
   useEffect(() => {
@@ -283,16 +328,23 @@ const FreeCanvasBuilderInner = ({
     const controller = new AbortController()
     setActiveImageConversationId(null)
     setImageConversations([])
+    setImageConversationNextCursor(null)
     setImageConversationRuns({})
+    setImageRunNextCursors({})
     setSelectedNodeIds([])
     setOptimisticImageTurn(null)
     setImageGenerationBusy(false)
     setImageRegionEditorOpen(false)
+    setImageAnnotationTarget(null)
+    setImageAnnotationDocuments({})
     setImageComposerDraft(current => createEmptyConversationDraft({
       connectionId: imageAssignment?.connectionId || current.connectionId,
       modelId: imageAssignment?.modelId || current.modelId,
       resolution: current.resolution,
       aspectRatio: current.aspectRatio,
+      width: current.width,
+      height: current.height,
+      promptOptimization: current.promptOptimization,
       outputFormat: current.outputFormat,
       watermark: current.watermark
     }))
@@ -463,17 +515,24 @@ const FreeCanvasBuilderInner = ({
     freeCanvasRef.current = next
     onChangeRef.current(next)
   }, [])
-  const defaultImageConnection = imageAssignment
-    ? imageConnections.find(connection => connection.id === imageAssignment.connectionId) || null
-    : null
-  const defaultImageModel = imageAssignment
-    ? imageCatalogModels.find(model => model.id === imageAssignment.modelId) || null
-    : null
+  const readyImageBindings = imageConnections.flatMap(connection => {
+    if (!connection.enabled || !connection.credentialConfigured || !connection.lastTest?.ok) return []
+    return imageCatalogModels
+      .filter(model => model.providerId === connection.providerId)
+      .map(model => ({ connection, model }))
+  })
+  const selectedImageConnection = imageConnections.find(
+    connection => connection.id === imageComposerDraft.connectionId
+  ) || null
+  const selectedImageModel = imageCatalogModels.find(
+    model => model.id === imageComposerDraft.modelId
+      && model.providerId === selectedImageConnection?.providerId
+  ) || null
   const imageModelUsable = Boolean(
-    defaultImageConnection?.enabled
-    && defaultImageConnection.credentialConfigured
-    && defaultImageConnection.lastTest?.ok
-    && defaultImageModel
+    selectedImageConnection?.enabled
+    && selectedImageConnection.credentialConfigured
+    && selectedImageConnection.lastTest?.ok
+    && selectedImageModel
     && imageRuntimeReady
   )
   const imageConversationViews = useMemo<ImageGenerationConversationView[]>(() => imageConversations.map(conversation => ({
@@ -499,11 +558,16 @@ const FreeCanvasBuilderInner = ({
     setActiveImageConversationId(null)
     setOptimisticImageTurn(null)
     setImageRegionEditorOpen(false)
+    setImageAnnotationTarget(null)
+    setImageAnnotationDocuments({})
     setImageComposerDraft(current => createEmptyConversationDraft({
       connectionId: imageAssignment?.connectionId || current.connectionId,
       modelId: imageAssignment?.modelId || current.modelId,
       resolution: current.resolution,
       aspectRatio: current.aspectRatio,
+      width: current.width,
+      height: current.height,
+      promptOptimization: current.promptOptimization,
       outputFormat: current.outputFormat,
       watermark: current.watermark
     }))
@@ -523,10 +587,16 @@ const FreeCanvasBuilderInner = ({
       modelId: imageAssignment?.modelId || current.modelId,
       resolution: current.resolution,
       aspectRatio: current.aspectRatio,
+      width: current.width,
+      height: current.height,
+      promptOptimization: current.promptOptimization,
       outputFormat: current.outputFormat,
       watermark: current.watermark
     }))
-  }, [imageAssignment?.connectionId, imageAssignment?.modelId])
+    if (!imageConversationRuns[conversationId]) {
+      void loadImageConversationRuns(activeProject.id, conversationId).catch(() => undefined)
+    }
+  }, [activeProject.id, imageAssignment?.connectionId, imageAssignment?.modelId, imageConversationRuns, loadImageConversationRuns])
 
   const continueImageCreation = useCallback((nodeId: string, workflow: ProjectImageGenerationWorkflow) => {
     const node = freeCanvasRef.current.nodes.find(candidate => candidate.id === nodeId)
@@ -538,7 +608,13 @@ const FreeCanvasBuilderInner = ({
     setImageComposerDraft(current => ({
       ...current,
       workflow,
-      inputs: [{ referenceId: `source-${node.id}`, assetId: node.assetId!, order: 0, role: workflow === 'reference-generate' ? 'reference' : 'source', label: node.title }]
+      inputs: [{
+        referenceId: `source-${node.id}`,
+        assetId: node.assetId!,
+        order: 0,
+        role: workflow === 'reference-generate' ? 'reference-image' : 'source-image',
+        label: node.title
+      }]
     }))
     setRightPanelMode('image-generation')
     setRightPanelCollapsed(false)
@@ -552,14 +628,22 @@ const FreeCanvasBuilderInner = ({
     resetImageConversation()
     setImageComposerDraft(draft => ({
       ...draft,
-      prompt: snapshot.promptDocument.segments.filter(segment => segment.type === 'text').map(segment => segment.type === 'text' ? segment.text : '').join(''),
-      mentions: snapshot.promptDocument.segments.flatMap(segment => segment.type === 'reference'
-        ? [{ referenceId: segment.referenceId, label: segment.label }]
-        : []),
+      promptDocument: {
+        version: 1,
+        segments: snapshot.promptDocument.segments.map(segment => segment.type === 'text'
+          ? { type: 'text', text: segment.text }
+          : { type: 'reference', referenceId: segment.referenceId, label: segment.label })
+      },
       workflow: node.primaryAssetId ? 'smart-edit' : snapshot.inputAssets.length > 0 ? 'reference-generate' : 'text-to-image',
       inputs: node.primaryAssetId
-        ? [{ referenceId: `legacy-result-${node.id}`, assetId: node.primaryAssetId, order: 0, role: 'source', label: node.title }]
-        : snapshot.inputAssets.map((input, index) => ({ ...input, order: index, role: 'reference' as const }))
+        ? [{
+            referenceId: `legacy-result-${node.id}`,
+            assetId: node.primaryAssetId,
+            order: 0,
+            role: 'source-image',
+            label: node.title
+          }]
+        : snapshot.inputAssets.map((input, index) => ({ ...input, order: index }))
     }))
     setRightPanelMode('image-generation')
     setRightPanelCollapsed(false)
@@ -579,19 +663,20 @@ const FreeCanvasBuilderInner = ({
   }, [imageComposerDraft, selectedNodeIds])
 
   const uploadImageComposerReference = useCallback(async (file: File) => {
-    if (!isSupportedImageFile(file)) {
-      setUploadError('仅支持 PNG、JPEG 或 WebP 图片。')
+    if (file.size > 30 * 1024 * 1024) {
+      setUploadError('参考图不能超过 30 MB。')
       return
     }
     try {
-      const asset = await storageServiceClient.assets.upload(file)
+      const imported = await storageServiceClient.imageAssets.import(file)
       setImageComposerDraft(current => {
         if (current.inputs.length >= 10) return current
         const input: ProjectImageGenerationInput = {
-          referenceId: `upload-${asset.id}`,
-          assetId: asset.id,
+          referenceId: `upload-${imported.originalAsset.id}`,
+          assetId: imported.providerInputAsset.id,
+          sourceAssetId: imported.originalAsset.id,
           order: current.inputs.length,
-          role: 'reference',
+          role: 'reference-image',
           label: file.name
         }
         return {
@@ -677,21 +762,71 @@ const FreeCanvasBuilderInner = ({
     void processPendingImagePlacements(activeProject.id).catch(() => undefined)
   }, [activeProject.id, processPendingImagePlacements])
 
+  const prepareAnnotatedComposerDraft = useCallback(async (
+    draft: ImageGenerationComposerDraft
+  ): Promise<ImageGenerationComposerDraft> => {
+    const inputs: ProjectImageGenerationInput[] = []
+    for (const input of draft.inputs) {
+      const document = imageAnnotationDocuments[input.referenceId]
+      if (!document || document.annotations.length === 0) {
+        inputs.push({ ...input })
+        continue
+      }
+      const image = await loadImageElement(canvasImageAssetUrl(input.assetId))
+      const flattened = await rasterizeAnnotationDocument(image, document)
+      const imported = await storageServiceClient.imageAssets.import(new File(
+        [flattened],
+        `annotation-${input.referenceId}.png`,
+        { type: 'image/png' }
+      ))
+      const sourceAssetId = input.sourceAssetId || input.assetId
+      await storageServiceClient.imageAssets.createDerivation({
+        sourceAssetId,
+        derivedAssetId: imported.providerInputAsset.id,
+        kind: 'annotation-flattened',
+        transform: { format: 'png', referenceId: input.referenceId },
+        annotationDocument: document as unknown as Record<string, unknown>
+      })
+      inputs.push({
+        ...input,
+        sourceAssetId,
+        assetId: imported.providerInputAsset.id
+      })
+    }
+    return {
+      ...draft,
+      promptDocument: {
+        version: 1,
+        segments: draft.promptDocument.segments.map(segment => segment.type === 'text'
+          ? { type: 'text', text: segment.text }
+          : { type: 'reference', referenceId: segment.referenceId, label: segment.label })
+      },
+      inputs,
+      regions: draft.regions.map(region => ({ ...region }))
+    }
+  }, [imageAnnotationDocuments])
+
   const submitImageConversationTurn = useCallback(async () => {
     if (imageGenerationBusy || !imageGenerationNodeV1 || !imageModelUsable) return
     const conversationId = activeImageConversationId || createLocalId('image-conversation')
-    const snapshot = { ...imageComposerDraft, inputs: imageComposerDraft.inputs.map(input => ({ ...input })), regions: imageComposerDraft.regions.map(region => ({ ...region })) }
+    let snapshot: ImageGenerationComposerDraft
+    try {
+      snapshot = await prepareAnnotatedComposerDraft(imageComposerDraft)
+    } catch {
+      setUploadError('视觉标记栅格化或派生资产保存失败，请检查本地存储。')
+      return
+    }
     const optimisticId = `pending-${conversationId}-${Date.now()}`
     setActiveImageConversationId(conversationId)
     setImageGenerationBusy(true)
     setOptimisticImageTurn({
       id: optimisticId,
       createdAt: Date.now(),
-      prompt: snapshot.prompt,
+      prompt: promptDocumentPlainText(snapshot.promptDocument),
       state: 'running',
       settings: {
         workflow: snapshot.workflow,
-        modelLabel: defaultImageModel?.displayName || snapshot.modelId,
+        modelLabel: selectedImageModel?.displayName || snapshot.modelId,
         resolution: snapshot.resolution,
         aspectRatio: snapshot.aspectRatio,
         outputFormat: snapshot.outputFormat,
@@ -703,13 +838,18 @@ const FreeCanvasBuilderInner = ({
       modelId: snapshot.modelId,
       resolution: snapshot.resolution,
       aspectRatio: snapshot.aspectRatio,
+      width: snapshot.width,
+      height: snapshot.height,
+      promptOptimization: snapshot.promptOptimization,
       outputFormat: snapshot.outputFormat,
       watermark: snapshot.watermark
     }))
+    setImageAnnotationDocuments({})
     try {
       await requestImageGeneration(buildConversationGenerationRequest(activeProject.id, conversationId, snapshot))
       if (activeProjectIdRef.current === activeProject.id) {
         await loadImageConversations(activeProject.id)
+        await loadImageConversationRuns(activeProject.id, conversationId)
         setOptimisticImageTurn(null)
         await processPendingImagePlacements(activeProject.id)
       }
@@ -721,12 +861,15 @@ const FreeCanvasBuilderInner = ({
           state: 'failed',
           error: { message: clientError?.message || '图片生成失败，请稍后重试。', action: clientError?.action }
         } : current)
-        await loadImageConversations(activeProject.id).catch(() => undefined)
+        await Promise.all([
+          loadImageConversations(activeProject.id),
+          loadImageConversationRuns(activeProject.id, conversationId)
+        ]).catch(() => undefined)
       }
     } finally {
       if (activeProjectIdRef.current === activeProject.id) setImageGenerationBusy(false)
     }
-  }, [activeImageConversationId, activeProject.id, defaultImageModel?.displayName, imageComposerDraft, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversations, processPendingImagePlacements])
+  }, [activeImageConversationId, activeProject.id, imageComposerDraft, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversationRuns, loadImageConversations, prepareAnnotatedComposerDraft, processPendingImagePlacements, selectedImageModel?.displayName])
 
   const imageComposerMissingRequirements = useMemo(() => {
     const missing: string[] = []
@@ -734,23 +877,33 @@ const FreeCanvasBuilderInner = ({
     if (previewMode) missing.push('预览模式不能发起图片生成。')
     if (!imageRuntimeReady) missing.push('图片生成 Runtime 或 Ark SDK 尚未就绪。')
     if (!imageAssignment) missing.push('尚未配置默认图片模型。')
-    if (imageAssignment && !defaultImageConnection?.enabled) missing.push('默认图片连接已停用。')
-    if (imageAssignment && !defaultImageConnection?.credentialConfigured) missing.push('默认图片连接尚未配置凭据。')
-    if (imageAssignment && !defaultImageConnection?.lastTest?.ok) missing.push('默认图片连接尚未测试成功。')
-    if (!imageComposerDraft.prompt.trim()) missing.push('请输入本轮图片描述。')
+    if (imageComposerDraft.connectionId && !selectedImageConnection?.enabled) missing.push('所选图片连接已停用。')
+    if (selectedImageConnection && !selectedImageConnection.credentialConfigured) missing.push('所选图片连接尚未配置凭据。')
+    if (selectedImageConnection && !selectedImageConnection.lastTest?.ok) missing.push('所选图片连接尚未测试成功。')
+    if (!promptDocumentPlainText(imageComposerDraft.promptDocument).trim()) missing.push('请输入本轮图片描述。')
+    if (unresolvedPromptReferenceIds(imageComposerDraft.promptDocument, imageComposerDraft.inputs).length > 0) {
+      missing.push('提示词包含已经失效的参考图引用。')
+    }
     if (imageComposerDraft.inputs.length > 10) missing.push('图片输入不能超过 10 张。')
+    if (imageComposerDraft.aspectRatio === 'custom') {
+      validateComposerCustomSize(imageComposerDraft.width, imageComposerDraft.height).forEach(error => {
+        if (error === 'custom_size_required') missing.push('自定义尺寸需要填写有效的宽度和高度。')
+        if (error === 'custom_size_pixel_budget') missing.push('自定义尺寸总像素必须在 921600–4624220 之间。')
+        if (error === 'custom_size_aspect_ratio') missing.push('自定义尺寸比例必须在 1:16–16:1 之间。')
+      })
+    }
     if (imageComposerDraft.workflow === 'reference-generate' && imageComposerDraft.inputs.length === 0) {
       missing.push('参考图生成至少需要一张参考图。')
     }
     if ((imageComposerDraft.workflow === 'smart-edit' || imageComposerDraft.workflow === 'region-edit')
-      && !imageComposerDraft.inputs.some(input => input.role === 'source')) {
+      && !imageComposerDraft.inputs.some(input => input.role === 'source-image')) {
       missing.push('该工作流需要一张主图。')
     }
     if (imageComposerDraft.workflow === 'region-edit' && imageComposerDraft.regions.length === 0) {
       missing.push('局部修改需要先添加点选或框选区域。')
     }
     return missing
-  }, [defaultImageConnection, imageAssignment, imageComposerDraft, imageGenerationNodeV1, imageRuntimeReady, previewMode])
+  }, [imageAssignment, imageComposerDraft, imageGenerationNodeV1, imageRuntimeReady, previewMode, selectedImageConnection])
 
   const selectedComposerNodes = selectedNodeIds.length > 0
     ? selectedNodeIds
@@ -758,6 +911,27 @@ const FreeCanvasBuilderInner = ({
   const selectedComposerDescriptor = selectedComposerNodes.length > 0
     ? { id: '__current-selection__', label: `加入所选节点（${selectedComposerNodes.length}）` }
     : undefined
+  const openImageAnnotationEditor = useCallback(async () => {
+    const input = imageComposerDraft.inputs.find(candidate => candidate.role === 'source-image')
+      || imageComposerDraft.inputs[0]
+    if (!input) {
+      setUploadError('请先添加一张需要视觉标记的图片。')
+      return
+    }
+    try {
+      const image = await loadImageElement(canvasImageAssetUrl(input.assetId))
+      setImageAnnotationTarget({
+        referenceId: input.referenceId,
+        width: image.naturalWidth,
+        height: image.naturalHeight
+      })
+    } catch {
+      setUploadError('无法读取标记图片，请检查本地资产。')
+    }
+  }, [imageComposerDraft.inputs])
+  const imageAnnotationInput = imageAnnotationTarget
+    ? imageComposerDraft.inputs.find(input => input.referenceId === imageAnnotationTarget.referenceId) || null
+    : null
   const activeConversationLabel = activeImageConversationId
     ? imageConversations.find(item => item.id === activeImageConversationId)?.title || '当前会话'
     : '新对话'
@@ -783,21 +957,32 @@ const FreeCanvasBuilderInner = ({
         : snapshot.inputAssets.length > 0 ? 'reference-generate' : 'text-to-image'
     setImageComposerDraft(current => ({
       ...current,
-      prompt: snapshot.promptDocument.segments.filter(segment => segment.type === 'text').map(segment => segment.type === 'text' ? segment.text : '').join(''),
-      mentions: snapshot.promptDocument.segments.flatMap(segment => segment.type === 'reference'
-        ? [{ referenceId: segment.referenceId, label: segment.label }]
-        : []),
+      promptDocument: {
+        version: 1 as const,
+        segments: snapshot.promptDocument.segments.map(segment => segment.type === 'text'
+          ? { type: 'text' as const, text: segment.text }
+          : {
+              type: 'reference' as const,
+              referenceId: segment.referenceId,
+              label: segment.label
+            })
+      },
       workflow,
       connectionId: run.connectionId,
       modelId: run.modelId,
       resolution: snapshot.resolution,
       aspectRatio: snapshot.aspectRatio || current.aspectRatio,
+      width: snapshot.width,
+      height: snapshot.height,
+      promptOptimization: snapshot.promptOptimization,
       outputFormat: snapshot.outputFormat === 'jpeg' ? 'jpeg' : 'png',
       watermark: snapshot.watermark,
       inputs: snapshot.inputAssets.map((input, index) => ({
         ...input,
         order: index,
-        role: (workflow === 'smart-edit' || workflow === 'region-edit') && index === 0 ? 'source' : 'reference'
+        role: (workflow === 'smart-edit' || workflow === 'region-edit') && index === 0
+          ? 'source-image'
+          : input.role
       })),
       regions: restoredRegions
     }))
@@ -806,6 +991,10 @@ const FreeCanvasBuilderInner = ({
   }, [imageConversationRuns])
 
   const handleImageTurnAction = useCallback((turn: ImageGenerationTurn, action: ImageGenerationTurnAction) => {
+    if (action === 'view' && turn.result) {
+      window.open(turn.result.imageUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
     if (action === 'media') {
       onOpenMedia?.()
       return
@@ -817,6 +1006,7 @@ const FreeCanvasBuilderInner = ({
         emitGenerationCanvas({ ...current, selectedNodeId: existing.id })
         return
       }
+      const sourceRun = Object.values(imageConversationRuns).flat().find(run => run.id === turn.id)
       const image = createFreeCanvasImageNodeFromMedia({
         id: `generation-${turn.id}`,
         kind: 'imageAsset',
@@ -832,33 +1022,39 @@ const FreeCanvasBuilderInner = ({
         crop: null,
         text: '',
         color: '#111827',
-        meta: { generatedResult: true, generationRunId: turn.id, source: 'image-generation-conversation' }
+        meta: {
+          generatedResult: true,
+          generationRunId: turn.id,
+          ...(sourceRun?.conversationId ? { conversationId: sourceRun.conversationId } : {}),
+          source: 'image-generation-conversation'
+        }
       })
       emitGenerationCanvas({ ...current, nodes: [...current.nodes, image], selectedNodeId: image.id })
       return
     }
     restoreImageTurnToComposer(turn)
-    if ((action === 'edit' || action === 'reference') && turn.result) {
+    if ((action === 'edit' || action === 'region-edit' || action === 'reference') && turn.result) {
       setImageComposerDraft(current => ({
         ...current,
-        workflow: action === 'edit' ? 'smart-edit' : 'reference-generate',
+        workflow: action === 'edit'
+          ? 'smart-edit'
+          : action === 'region-edit' ? 'region-edit' : 'reference-generate',
         inputs: [{
           referenceId: `result-${turn.id}`,
           assetId: turn.result!.assetId,
           order: 0,
-          role: action === 'edit' ? 'source' : 'reference',
+          role: action === 'reference' ? 'reference-image' : 'source-image',
           label: '上次生成结果'
-        }],
-        mentions: []
+        }]
       }))
     }
-  }, [emitGenerationCanvas, onOpenMedia, reactFlow, restoreImageTurnToComposer])
+  }, [emitGenerationCanvas, imageConversationRuns, onOpenMedia, reactFlow, restoreImageTurnToComposer])
 
   const nodes = useMemo<FreeCanvasFlowNode[]>(() => freeCanvas.nodes.map(node => ({
     id: node.id,
     type: node.kind === 'image-generator' ? 'imageGeneratorNode' : 'freeCanvasNode',
     position: node.position,
-    selected: selectedNodeIds.includes(node.id) || node.id === freeCanvas.selectedNodeId,
+    selected: node.id === freeCanvas.selectedNodeId,
     style: node.kind === 'image' ? { width: node.width, height: node.height } : undefined,
     data: {
       canvasNode: node,
@@ -885,7 +1081,7 @@ const FreeCanvasBuilderInner = ({
         referenceCount: freeCanvas.edges.filter(edge => edge.target === node.id && edge.targetHandle === 'reference-image').length
       } : undefined
     }
-  })), [activeProject.id, continueImageCreation, continueLegacyImageCreation, copyTextNode, editingNodeId, freeCanvas.edges, freeCanvas.nodes, freeCanvas.selectedNodeId, onConfigureImageModel, replaceTextRange, resizeImageNode, selectedNodeIds, updateTextStyle])
+  })), [activeProject.id, continueImageCreation, continueLegacyImageCreation, copyTextNode, editingNodeId, freeCanvas.edges, freeCanvas.nodes, freeCanvas.selectedNodeId, onConfigureImageModel, replaceTextRange, resizeImageNode, updateTextStyle])
 
   const [flowNodes, setFlowNodes] = useState<FreeCanvasFlowNode[]>(nodes)
   useEffect(() => setFlowNodes(nodes), [nodes])
@@ -1017,8 +1213,27 @@ const FreeCanvasBuilderInner = ({
   }
 
   const handleApplyAgentProposal = (proposal: AgentWorkspaceProposal) => {
-    if (proposal.kind !== 'free_canvas_text_update') return
-    onChange(updateFreeCanvasTextNodeUserText(freeCanvas, proposal.nodeId, proposal.userText, proposal.mode))
+    if (proposal.kind === 'free_canvas_text_update') {
+      onChange(updateFreeCanvasTextNodeUserText(freeCanvas, proposal.nodeId, proposal.userText, proposal.mode))
+      return
+    }
+    if (proposal.kind === 'free_canvas_text_create') {
+      const node = createFreeCanvasTextNode(
+        proposal.userText,
+        nextNodePosition(reactFlow, freeCanvas.nodes.length)
+      )
+      onChange({
+        ...freeCanvas,
+        nodes: [
+          ...freeCanvas.nodes,
+          {
+            ...node,
+            title: proposal.title?.trim() || node.title
+          }
+        ],
+        selectedNodeId: node.id
+      })
+    }
   }
 
   const createQuickPreset = async (draft: QuickMessageDraft) => {
@@ -1240,32 +1455,91 @@ const FreeCanvasBuilderInner = ({
                 conversations={imageConversationViews}
                 onNewConversation={resetImageConversation}
                 onContinueConversation={continueImageConversation}
+                onOpenHistoryConversation={conversationId => {
+                  if (!imageConversationRuns[conversationId]) {
+                    void loadImageConversationRuns(activeProject.id, conversationId).catch(() => undefined)
+                  }
+                }}
+                onLoadMoreConversations={imageConversationNextCursor
+                  ? () => { void loadImageConversations(activeProject.id, undefined, imageConversationNextCursor) }
+                  : undefined}
+                onLoadMoreConversationRuns={conversationId => {
+                  const cursor = imageRunNextCursors[conversationId]
+                  if (cursor) {
+                    void loadImageConversationRuns(activeProject.id, conversationId, undefined, cursor)
+                  }
+                }}
+                hasMoreConversations={Boolean(imageConversationNextCursor)}
+                hasMoreConversationRuns={conversationId => Boolean(imageRunNextCursors[conversationId])}
                 onTurnAction={handleImageTurnAction}
                 composer={{
-                  prompt: imageComposerDraft.prompt,
-                  onPromptChange: prompt => setImageComposerDraft(current => ({ ...current, prompt })),
+                  prompt: promptDocumentPlainText(imageComposerDraft.promptDocument),
+                  onPromptChange: prompt => setImageComposerDraft(current => ({
+                    ...current,
+                    promptDocument: { version: 1, segments: [{ type: 'text', text: prompt }] }
+                  })),
+                  promptDocument: imageComposerDraft.promptDocument,
+                  onPromptDocumentChange: promptDocument => setImageComposerDraft(current => ({
+                    ...current,
+                    promptDocument
+                  })),
+                  unresolvedReferenceIds: unresolvedPromptReferenceIds(
+                    imageComposerDraft.promptDocument,
+                    imageComposerDraft.inputs
+                  ),
                   references: imageComposerDraft.inputs.map(input => ({
                     referenceId: input.referenceId,
+                    assetId: input.assetId,
+                    sourceAssetId: input.sourceAssetId,
                     label: input.label || input.referenceId,
                     imageUrl: canvasImageAssetUrl(input.assetId),
-                    mentioned: imageComposerDraft.mentions.some(mention => mention.referenceId === input.referenceId)
+                    mentioned: imageComposerDraft.promptDocument.segments.some(segment => (
+                      segment.type === 'reference' && segment.referenceId === input.referenceId
+                    )),
+                    role: input.role,
+                    order: input.order
                   })),
                   onMentionReference: referenceId => setImageComposerDraft(current => {
                     const input = current.inputs.find(candidate => candidate.referenceId === referenceId)
                     if (!input) return current
-                    const mentioned = current.mentions.some(mention => mention.referenceId === referenceId)
+                    const mentioned = current.promptDocument.segments.some(segment => (
+                      segment.type === 'reference' && segment.referenceId === referenceId
+                    ))
                     return {
                       ...current,
-                      mentions: mentioned
-                        ? current.mentions.filter(mention => mention.referenceId !== referenceId)
-                        : [...current.mentions, { referenceId, label: input.label || referenceId }]
+                      promptDocument: {
+                        version: 1,
+                        segments: mentioned
+                          ? current.promptDocument.segments.filter(segment => (
+                              segment.type !== 'reference' || segment.referenceId !== referenceId
+                            ))
+                          : [
+                              ...current.promptDocument.segments,
+                              { type: 'reference', referenceId, label: input.label || referenceId }
+                            ]
+                      }
                     }
                   }),
                   onRemoveReference: referenceId => setImageComposerDraft(current => ({
                     ...current,
                     inputs: current.inputs.filter(input => input.referenceId !== referenceId).map((input, order) => ({ ...input, order })),
-                    mentions: current.mentions.filter(mention => mention.referenceId !== referenceId),
                     regions: current.regions.filter(region => region.referenceId !== referenceId)
+                  })),
+                  onMoveReference: (referenceId, direction) => setImageComposerDraft(current => ({
+                    ...current,
+                    inputs: moveComposerImageInput(current.inputs.map(input => ({
+                      ...input,
+                      label: input.label || input.referenceId,
+                      imageUrl: canvasImageAssetUrl(input.assetId)
+                    })), referenceId, direction).map(({ imageUrl: _imageUrl, ...input }) => input)
+                  })),
+                  onReferenceRoleChange: (referenceId, role) => setImageComposerDraft(current => ({
+                    ...current,
+                    inputs: switchComposerImageInputRole(current.inputs.map(input => ({
+                      ...input,
+                      label: input.label || input.referenceId,
+                      imageUrl: canvasImageAssetUrl(input.assetId)
+                    })), referenceId, role).map(({ imageUrl: _imageUrl, ...input }) => input)
                   })),
                   workflows: [
                     { value: 'text-to-image', label: '文生图' },
@@ -1275,25 +1549,52 @@ const FreeCanvasBuilderInner = ({
                   ],
                   workflow: imageComposerDraft.workflow,
                   onWorkflowChange: workflow => setImageComposerDraft(current => ({ ...current, workflow })),
-                  models: imageModelUsable && defaultImageModel ? [{ value: defaultImageModel.id, label: defaultImageModel.displayName }] : [],
-                  modelId: imageComposerDraft.modelId,
-                  onModelChange: modelId => setImageComposerDraft(current => ({ ...current, modelId })),
-                  resolutions: defaultImageModel?.capabilities?.resolutions || ['1K', '2K'],
+                  models: readyImageBindings.map(({ connection, model }) => ({
+                    value: `${connection.id}::${model.id}`,
+                    label: `${model.displayName} · ${connection.displayName}`
+                  })),
+                  modelId: imageComposerDraft.connectionId && imageComposerDraft.modelId
+                    ? `${imageComposerDraft.connectionId}::${imageComposerDraft.modelId}`
+                    : '',
+                  onModelChange: value => {
+                    const separator = value.indexOf('::')
+                    if (separator < 1) return
+                    setImageComposerDraft(current => ({
+                      ...current,
+                      connectionId: value.slice(0, separator),
+                      modelId: value.slice(separator + 2)
+                    }))
+                  },
+                  resolutions: selectedImageModel?.capabilities?.resolutions || ['1K', '2K'],
                   resolution: imageComposerDraft.resolution,
                   onResolutionChange: resolution => setImageComposerDraft(current => ({ ...current, resolution })),
-                  aspectRatios: defaultImageModel?.capabilities?.aspectRatios || ['1:1', '16:9', '9:16'],
+                  aspectRatios: selectedImageModel?.capabilities?.aspectRatios || ['1:1', '16:9', '9:16'],
                   aspectRatio: imageComposerDraft.aspectRatio,
                   onAspectRatioChange: aspectRatio => setImageComposerDraft(current => ({ ...current, aspectRatio })),
-                  outputFormats: (defaultImageModel?.capabilities?.outputFormats || ['png', 'jpeg']).filter(format => format === 'png' || format === 'jpeg'),
+                  customWidth: imageComposerDraft.width,
+                  customHeight: imageComposerDraft.height,
+                  onCustomSizeChange: (width, height) => setImageComposerDraft(current => ({
+                    ...current,
+                    width,
+                    height
+                  })),
+                  promptOptimizationModes: selectedImageModel?.capabilities?.promptOptimization?.modes || ['standard', 'fast'],
+                  promptOptimization: imageComposerDraft.promptOptimization,
+                  onPromptOptimizationChange: promptOptimization => setImageComposerDraft(current => ({
+                    ...current,
+                    promptOptimization
+                  })),
+                  outputFormats: (selectedImageModel?.capabilities?.outputFormats || ['png', 'jpeg']).filter(format => format === 'png' || format === 'jpeg'),
                   outputFormat: imageComposerDraft.outputFormat,
                   onOutputFormatChange: outputFormat => setImageComposerDraft(current => ({ ...current, outputFormat: outputFormat === 'jpeg' ? 'jpeg' : 'png' })),
-                  supportsWatermark: defaultImageModel?.capabilities?.watermark !== false,
+                  supportsWatermark: selectedImageModel?.capabilities?.watermark !== false,
                   watermark: imageComposerDraft.watermark,
                   onWatermarkChange: watermark => setImageComposerDraft(current => ({ ...current, watermark })),
                   selectedNode: selectedComposerDescriptor,
                   onInjectSelectedNode: injectSelectedCanvasNodes,
                   onUpload: file => { void uploadImageComposerReference(file) },
                   onEditRegions: () => setImageRegionEditorOpen(true),
+                  onEditAnnotations: () => { void openImageAnnotationEditor() },
                   onSubmit: () => { void submitImageConversationTurn() },
                   disabled: imageGenerationBusy,
                   missingRequirements: imageComposerMissingRequirements
@@ -1307,12 +1608,12 @@ const FreeCanvasBuilderInner = ({
                       mode="region-edit"
                       capabilities={{
                         modelId: imageComposerDraft.modelId,
-                        regionInputs: (defaultImageModel?.capabilities?.regionInputs || ['point', 'bbox']).filter((input): input is 'point' | 'bbox' => input === 'point' || input === 'bbox')
+                        regionInputs: (selectedImageModel?.capabilities?.regionInputs || ['point', 'bbox']).filter((input): input is 'point' | 'bbox' => input === 'point' || input === 'bbox')
                       }}
                       sources={imageComposerDraft.inputs.map(input => ({
                         referenceId: input.referenceId,
                         label: input.label || input.referenceId,
-                        role: input.role === 'source' ? 'source-image' : 'reference-image',
+                        role: input.role,
                         assetId: input.assetId,
                         imageUrl: canvasImageAssetUrl(input.assetId)
                       }))}
@@ -1329,6 +1630,39 @@ const FreeCanvasBuilderInner = ({
                         setImageRegionEditorOpen(false)
                       }}
                       onClose={() => setImageRegionEditorOpen(false)}
+                    />
+                  </div>
+                </div>
+              )}
+              {imageAnnotationTarget && imageAnnotationInput && (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6"
+                  onMouseDown={event => event.target === event.currentTarget && setImageAnnotationTarget(null)}
+                >
+                  <div className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-xl bg-white shadow-2xl">
+                    <AnnotationEditorDialog
+                      source={{
+                        assetId: imageAnnotationInput.sourceAssetId || imageAnnotationInput.assetId,
+                        imageUrl: canvasImageAssetUrl(imageAnnotationInput.assetId),
+                        label: imageAnnotationInput.label || imageAnnotationInput.referenceId,
+                        width: imageAnnotationTarget.width,
+                        height: imageAnnotationTarget.height
+                      }}
+                      initialDocument={imageAnnotationDocuments[imageAnnotationInput.referenceId] || {
+                        version: 1,
+                        sourceAssetId: imageAnnotationInput.sourceAssetId || imageAnnotationInput.assetId,
+                        width: imageAnnotationTarget.width,
+                        height: imageAnnotationTarget.height,
+                        annotations: []
+                      }}
+                      onSave={document => {
+                        setImageAnnotationDocuments(current => ({
+                          ...current,
+                          [imageAnnotationInput.referenceId]: document
+                        }))
+                        setImageAnnotationTarget(null)
+                      }}
+                      onClose={() => setImageAnnotationTarget(null)}
                     />
                   </div>
                 </div>
@@ -3369,6 +3703,19 @@ const nodeTypes = {
 
 const createLocalId = (prefix: string): string => globalThis.crypto?.randomUUID?.()
   || `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+const loadImageElement = (src: string): Promise<HTMLImageElement> => new Promise((resolve, reject) => {
+  const image = new Image()
+  image.onload = () => resolve(image)
+  image.onerror = () => reject(new Error('Image asset could not be loaded'))
+  image.src = src
+})
+
+const mergeById = <T extends { id: string }>(current: readonly T[], incoming: readonly T[]): T[] => {
+  const merged = new Map(current.map(item => [item.id, item]))
+  incoming.forEach(item => merged.set(item.id, item))
+  return Array.from(merged.values())
+}
 
 const nextNodePosition = (reactFlow: ReturnType<typeof useReactFlow<FreeCanvasFlowNode>>, count: number) => (
   reactFlow.screenToFlowPosition({ x: window.innerWidth / 2 + count * 20, y: window.innerHeight / 2 + count * 16 })

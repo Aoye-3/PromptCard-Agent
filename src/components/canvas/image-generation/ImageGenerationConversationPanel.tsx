@@ -16,6 +16,11 @@ export const ImageGenerationConversationPanel = ({
   conversations,
   onNewConversation,
   onContinueConversation,
+  onOpenHistoryConversation,
+  onLoadMoreConversations,
+  onLoadMoreConversationRuns,
+  hasMoreConversations,
+  hasMoreConversationRuns,
   onTurnAction
 }: ImageGenerationConversationPanelProps) => {
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -24,6 +29,13 @@ export const ImageGenerationConversationPanel = ({
   const continueConversation = (conversationId: string) => {
     onContinueConversation(conversationId)
     setHistoryOpen(false)
+  }
+  const handleTurnAction: NonNullable<ImageGenerationConversationPanelProps['onTurnAction']> = (turn, action) => {
+    if (action === 'history') {
+      setHistoryOpen(true)
+      return
+    }
+    onTurnAction?.(turn, action)
   }
 
   return (
@@ -50,7 +62,7 @@ export const ImageGenerationConversationPanel = ({
 
       <div aria-live="polite" className="min-h-0 flex-1 overflow-y-auto px-4">
         {chronologicalTurns.map(turn => (
-          <ImageGenerationTurnCard key={turn.id} turn={turn} onAction={onTurnAction} />
+          <ImageGenerationTurnCard key={turn.id} turn={turn} onAction={handleTurnAction} />
         ))}
         {chronologicalTurns.length === 0 && (
           <div className="flex min-h-56 flex-col items-center justify-center text-center">
@@ -67,6 +79,11 @@ export const ImageGenerationConversationPanel = ({
         conversations={conversations}
         onClose={() => setHistoryOpen(false)}
         onContinue={continueConversation}
+        onSelectConversation={onOpenHistoryConversation}
+        onLoadMoreConversations={onLoadMoreConversations}
+        onLoadMoreRuns={onLoadMoreConversationRuns}
+        hasMoreConversations={hasMoreConversations}
+        hasMoreRuns={hasMoreConversationRuns}
       />
     </section>
   )

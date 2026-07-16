@@ -1,20 +1,16 @@
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
+$BackendRoot = Join-Path $RepoRoot "agent-runtime\backend"
 
 function Test-WorkspacePath([string]$Path) {
   $WorkspacePrefix = [System.IO.Path]::GetFullPath([string]$RepoRoot).TrimEnd('\') + '\'
   return [System.IO.Path]::GetFullPath($Path).StartsWith($WorkspacePrefix, [System.StringComparison]::OrdinalIgnoreCase)
 }
 
-$RuntimeRoot = Join-Path $RepoRoot "agent-runtime"
-$BackendRoot = Join-Path $RuntimeRoot "backend"
-$env:DEER_FLOW_PROJECT_ROOT = $RuntimeRoot
-if (!$env:DEER_FLOW_HOME -or !(Test-WorkspacePath $env:DEER_FLOW_HOME)) {
-  $env:DEER_FLOW_HOME = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot ".deer-flow"))
+if (!$env:PROMPTCARD_RUNTIME_STATE_DIR -or !(Test-WorkspacePath $env:PROMPTCARD_RUNTIME_STATE_DIR)) {
+  $env:PROMPTCARD_RUNTIME_STATE_DIR = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "logs\agent-runtime-state"))
 }
-$env:DEER_FLOW_CONFIG_PATH = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot "config.yaml"))
-$env:DEER_FLOW_EXTENSIONS_CONFIG_PATH = [System.IO.Path]::GetFullPath((Join-Path $RuntimeRoot "extensions_config.json"))
 if (!$env:PROMPTCARD_LIBRARY_FILE -or !(Test-WorkspacePath $env:PROMPTCARD_LIBRARY_FILE)) {
   $env:PROMPTCARD_LIBRARY_FILE = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot "data\prompt-library-presets.json"))
 }
@@ -23,36 +19,11 @@ $env:UV_CACHE_DIR = [System.IO.Path]::GetFullPath((Join-Path $RepoRoot ".uv-cach
 $env:UV_PYTHON_INSTALL_DIR = [System.IO.Path]::GetFullPath((Join-Path $BackendRoot ".python"))
 $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
 $env:UV_LINK_MODE = "copy"
-if (!$env:GATEWAY_HOST) {
-  $env:GATEWAY_HOST = "127.0.0.1"
-}
-if (!$env:GATEWAY_PORT) {
-  $env:GATEWAY_PORT = "8001"
-}
-if (!$env:GATEWAY_CORS_ORIGINS) {
-  $frontendOrigin = if ($env:PROMPTCARD_FRONTEND_URL) {
-    $frontendUri = [System.Uri]$env:PROMPTCARD_FRONTEND_URL
-    "$($frontendUri.Scheme)://$($frontendUri.Host):$($frontendUri.Port)"
-  } else {
-    "http://127.0.0.1:3000"
-  }
-  $env:GATEWAY_CORS_ORIGINS = "$frontendOrigin,http://localhost:$(([System.Uri]$frontendOrigin).Port)"
-}
-if (!$env:AUTH_JWT_SECRET) {
-  $env:AUTH_JWT_SECRET = "promptcard-local-agent-runtime-dev-secret"
-}
-if (!$env:PROMPTCARD_AGENT_ADMIN_EMAIL) {
-  $env:PROMPTCARD_AGENT_ADMIN_EMAIL = "admin@promptcard.dev"
-}
-if (!$env:PROMPTCARD_AGENT_ADMIN_PASSWORD) {
-  $env:PROMPTCARD_AGENT_ADMIN_PASSWORD = "PromptCardAgentRuntime!2026"
-}
+$env:PYTHONPATH = $BackendRoot
+if (!$env:GATEWAY_HOST) { $env:GATEWAY_HOST = "127.0.0.1" }
+if (!$env:GATEWAY_PORT) { $env:GATEWAY_PORT = "8001" }
 
-$HarnessPath = Join-Path $BackendRoot "packages\harness"
-$env:PYTHONPATH = "$BackendRoot;$HarnessPath"
-
-New-Item -ItemType Directory -Force -Path $env:DEER_FLOW_HOME | Out-Null
-New-Item -ItemType Directory -Force -Path (Split-Path $RuntimeEnvironment -Parent) | Out-Null
+New-Item -ItemType Directory -Force -Path $env:PROMPTCARD_RUNTIME_STATE_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:UV_CACHE_DIR | Out-Null
 New-Item -ItemType Directory -Force -Path $env:UV_PYTHON_INSTALL_DIR | Out-Null
 
@@ -74,20 +45,16 @@ if (!$WorkspacePython) {
   uv python install 3.12.12
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   $WorkspacePython = Get-WorkspacePython
-  if (!$WorkspacePython) { throw "uv did not provision Python inside $env:UV_PYTHON_INSTALL_DIR" }
 }
-
 $RuntimePython = Join-Path $RuntimeEnvironment "Scripts\python.exe"
-if ($WorkspacePython -ne $RuntimePython) {
+if ($WorkspacePython -ne $RuntimePython -or !(Test-Path -LiteralPath $RuntimePython)) {
   uv sync --project $BackendRoot --python $WorkspacePython
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 Push-Location $BackendRoot
 try {
-  $RuntimeUvicorn = Join-Path $RuntimeEnvironment "Scripts\uvicorn.exe"
-  if (!(Test-Path -LiteralPath $RuntimeUvicorn)) { throw "uv sync did not create the workspace-local runtime." }
-  & $RuntimeUvicorn app.gateway.app:app --host $env:GATEWAY_HOST --port ([int]$env:GATEWAY_PORT)
+  & (Join-Path $RuntimeEnvironment "Scripts\uvicorn.exe") app.gateway.app:app --host $env:GATEWAY_HOST --port ([int]$env:GATEWAY_PORT)
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {

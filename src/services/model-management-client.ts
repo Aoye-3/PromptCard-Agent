@@ -12,6 +12,7 @@ import {
   type ModelConnectionTestResult,
   type ModelSlot
 } from '@/domain/models/model-management'
+import { createRuntimeHttpClient, RuntimeHttpError } from './runtime-http-client'
 
 export type {
   ImageGenerationProviderDiagnostic,
@@ -56,20 +57,16 @@ type FetchImplementation = typeof fetch
 export const createModelManagementClient = (
   fetchImplementation: FetchImplementation = (...args) => globalThis.fetch(...args)
 ) => {
+  const runtimeRequest = createRuntimeHttpClient(fetchImplementation)
   const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
-    const response = await fetchImplementation(`${MODEL_MANAGEMENT_BASE}${path}`, {
-      credentials: 'include',
-      ...init
-    })
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null)
-      const detail = isRecord(payload) && isRecord(payload.detail) ? payload.detail : {}
-      const code = safeErrorIdentifier(detail.code, 'runtime_request_failed')
-      const field = safeErrorIdentifier(detail.field)
-      throw new ModelManagementClientError(code, detail.retryable === true, field)
+    try {
+      return await runtimeRequest<T>(`${MODEL_MANAGEMENT_BASE}${path}`, init)
+    } catch (error) {
+      if (error instanceof RuntimeHttpError) {
+        throw new ModelManagementClientError(error.code, error.retryable, error.field)
+      }
+      throw error
     }
-    if (response.status === 204) return undefined as T
-    return response.json() as Promise<T>
   }
 
   return {
@@ -215,20 +212,7 @@ const jsonRequest = (method: string, body: unknown): RequestInit => ({
 })
 
 const jsonHeaders = (): Record<string, string> => {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const csrfToken = readCookie('csrf_token')
-  if (csrfToken) headers['X-CSRF-Token'] = csrfToken
-  return headers
-}
-
-const readCookie = (name: string): string | undefined => {
-  if (typeof document === 'undefined') return undefined
-  const prefix = `${name}=`
-  return document.cookie
-    .split(';')
-    .map(part => part.trim())
-    .find(part => part.startsWith(prefix))
-    ?.slice(prefix.length)
+  return { 'Content-Type': 'application/json' }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object')

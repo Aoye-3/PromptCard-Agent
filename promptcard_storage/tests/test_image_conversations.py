@@ -124,7 +124,7 @@ class ImageConversationMigrationTest(unittest.TestCase):
         }
         conversations = migrated.list_image_generation_conversations(project_id="project-one")
 
-        self.assertEqual(migrated.health()["schemaVersion"], 4)
+        self.assertEqual(migrated.health()["schemaVersion"], 5)
         self.assertEqual(len(first_ids), 1)
         self.assertEqual(len(conversations["conversations"]), 2)
         self.assertEqual(migrated.list_image_generation_placements(project_id="project-one")["placements"], [])
@@ -202,7 +202,9 @@ class ImageConversationStoreTest(unittest.TestCase):
                 "run-cross-project", project_id="project-two"
             ))
         with self.assertRaises(MissingItem):
-            self.store.get_image_generation_run("run-cross-project")
+            self.store.get_image_generation_run(
+                "run-cross-project", project_id="project-two"
+            )
 
     def test_conversation_and_run_pagination_are_project_scoped(self) -> None:
         for fixture in (
@@ -329,7 +331,8 @@ class ImageConversationAppContractTest(unittest.TestCase):
         ))
 
         response = self.client.get(
-            "/api/image-generation-runs", params={"conversationId": "conversation-one"}
+            "/api/image-generation-runs",
+            params={"projectId": "project-one", "conversationId": "conversation-one"},
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["id"] for item in response.json()["runs"]], ["run-one"])

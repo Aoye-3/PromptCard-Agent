@@ -1,222 +1,154 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.gateway.promptcard_runtime import build_runtime_prompt, parse_agent_workspace_proposals
+from app.gateway.model_management.catalog import model_by_id
+from app.gateway.model_management.connection_store import default_connection_store_path
+from app.gateway.promptcard_runtime import (
+    PromptCardRuntimeMessageRequest,
+    validate_agent_proposals,
+)
 from app.gateway.routers import promptcard_runtime
 
 
-def test_parse_agent_workspace_proposals_filters_unknown_card_ids():
-    text = """
-```json
-{
-  "kind": "agent_workspace_proposals",
-  "proposals": [
-    {
-      "kind": "workspace_card_update",
-      "id": "keep",
-      "agentName": "DeepSeek Agent",
-      "updates": [{"cardId": "card-1", "content": "Updated"}],
-      "rationale": "ok",
-      "status": "pending",
-      "createdAt": 1
-    },
-    {
-      "kind": "workspace_card_update",
-      "id": "drop",
-      "agentName": "DeepSeek Agent",
-      "updates": [{"cardId": "missing-card", "content": "Nope"}],
-      "rationale": "bad",
-      "status": "pending",
-      "createdAt": 2
-    }
-  ]
-}
-```
-"""
-    workspace_context = {
+def test_ark_multimodal_text_model_is_in_catalog():
+    model = model_by_id("doubao-seed-2-0-lite-260215")
+
+    assert model is not None
+    assert model["providerId"] == "volcengine-ark"
+    assert model["modality"] == "chat"
+    assert model["capabilities"]["input"] == ["text", "image"]
+
+
+def test_connection_store_uses_promptcard_runtime_state_dir(monkeypatch):
+    state_dir = Path(__file__).parent / ".runtime-state-test"
+    monkeypatch.setenv("PROMPTCARD_RUNTIME_STATE_DIR", str(state_dir))
+
+    assert default_connection_store_path() == state_dir / "promptcard-model-connections.json"
+
+
+def test_selected_canvas_text_node_only_accepts_update_for_selected_node():
+    context = {
         "snapshot": {
-            "cards": [{"id": "card-1", "type": "subject", "content": ""}],
+            "selectedNodeId": "text-1",
+            "selectedNode": {"id": "text-1", "kind": "text", "userText": "old"},
+            "nodes": [
+                {"id": "text-1", "kind": "text"},
+                {"id": "text-2", "kind": "text"},
+            ],
         }
     }
+    proposals = [
+        {
+            "kind": "free_canvas_text_update",
+            "id": "keep",
+            "nodeId": "text-1",
+            "mode": "replace",
+            "userText": "new",
+        },
+        {
+            "kind": "free_canvas_text_update",
+            "id": "drop",
+            "nodeId": "text-2",
+            "mode": "replace",
+            "userText": "wrong target",
+        },
+        {
+            "kind": "free_canvas_text_create",
+            "id": "drop-create",
+            "userText": "must not create while a text node is selected",
+        },
+    ]
 
-    proposals = parse_agent_workspace_proposals(text, workspace_context=workspace_context)
-
-    assert [proposal["id"] for proposal in proposals] == ["keep"]
-    assert proposals[0]["updates"] == [{"cardId": "card-1", "content": "Updated"}]
-
-
-def test_workspace_permission_scope_rejects_prompt_library_write_proposals():
-    text = """
-```json
-{
-  "kind": "prompt_library_write_proposal",
-  "proposal": {
-    "id": "library-write",
-    "agentName": "DeepSeek Agent",
-    "operation": "create",
-    "targetPresetId": null,
-    "presetDraft": {
-      "type": "style",
-      "category": "agent",
-      "label": "Library only",
-      "content": "Must not be executable from workspace chat"
-    },
-    "rationale": "wrong scope",
-    "status": "pending",
-    "createdAt": 1
-  }
-}
-```
-"""
-
-    proposals = parse_agent_workspace_proposals(
-        text,
+    validated = validate_agent_proposals(
+        proposals,
+        workspace_context=context,
         permission_scope="workspace-chatbot-agent",
     )
 
-    assert proposals == []
+    assert [proposal["id"] for proposal in validated] == ["keep"]
 
 
-def test_prompt_library_permission_scope_allows_prompt_library_write_proposals():
-    text = """
-```json
-{
-  "kind": "prompt_library_write_proposal",
-  "proposal": {
-    "id": "library-write",
-    "agentName": "DeepSeek Agent",
-    "operation": "create",
-    "targetPresetId": null,
-    "presetDraft": {
-      "type": "style",
-      "category": "agent",
-      "label": "Library only",
-      "content": "Prompt Library owns this write"
-    },
-    "rationale": "right scope",
-    "status": "pending",
-    "createdAt": 1
-  }
-}
-```
-"""
-
-    proposals = parse_agent_workspace_proposals(
-        text,
-        permission_scope="prompt-library-agent",
-    )
-
-    assert [proposal["id"] for proposal in proposals] == ["library-write"]
-
-
-def test_prompt_library_permission_scope_rejects_update_and_archive_proposals():
-    text = """
-```json
-{
-  "kind": "agent_workspace_proposals",
-  "proposals": [
-    {
-      "kind": "prompt_library_write_proposal",
-      "id": "create",
-      "agentName": "DeepSeek Agent",
-      "operation": "create",
-      "targetPresetId": null,
-      "presetDraft": {
-        "type": "style",
-        "category": "agent",
-        "label": "Create",
-        "content": "Allowed"
-      },
-      "rationale": "additive",
-      "status": "pending",
-      "createdAt": 1
-    },
-    {
-      "kind": "prompt_library_write_proposal",
-      "id": "update",
-      "agentName": "DeepSeek Agent",
-      "operation": "update",
-      "targetPresetId": "preset-1",
-      "presetDraft": {
-        "type": "style",
-        "category": "agent",
-        "label": "Update",
-        "content": "Rejected"
-      },
-      "rationale": "not allowed",
-      "status": "pending",
-      "createdAt": 2
-    },
-    {
-      "kind": "prompt_library_write_proposal",
-      "id": "archive",
-      "agentName": "DeepSeek Agent",
-      "operation": "archive",
-      "targetPresetId": "preset-2",
-      "presetDraft": {
-        "type": "style",
-        "category": "agent",
-        "label": "Archive",
-        "content": "Rejected"
-      },
-      "rationale": "not allowed",
-      "status": "pending",
-      "createdAt": 3
+def test_canvas_without_selected_text_node_only_accepts_text_create():
+    context = {
+        "snapshot": {
+            "selectedNodeId": None,
+            "selectedNode": None,
+            "nodes": [{"id": "image-1", "kind": "image"}],
+        }
     }
-  ]
-}
-```
-"""
+    proposals = [
+        {
+            "kind": "free_canvas_text_update",
+            "id": "drop-update",
+            "nodeId": "missing",
+            "mode": "replace",
+            "userText": "wrong",
+        },
+        {
+            "kind": "free_canvas_text_create",
+            "id": "keep-create",
+            "title": "Agent Prompt",
+            "userText": "new prompt",
+        },
+    ]
 
-    proposals = parse_agent_workspace_proposals(
-        text,
-        permission_scope="prompt-library-agent",
-    )
-
-    assert [proposal["id"] for proposal in proposals] == ["create"]
-
-
-def test_workspace_runtime_prompt_documents_prompt_library_write_boundary(monkeypatch):
-    monkeypatch.setattr("app.gateway.promptcard_runtime._load_presets", lambda: [])
-
-    prompt = build_runtime_prompt(
-        "improve current card",
-        workspace_context={"contextId": "card:project:0", "snapshot": {"cards": []}},
+    validated = validate_agent_proposals(
+        proposals,
+        workspace_context=context,
         permission_scope="workspace-chatbot-agent",
     )
 
-    assert "Prompt Library writes are forbidden in this workspace chatbot scope" in prompt
-    assert "prompt_library_write_proposal" in prompt
+    assert [proposal["id"] for proposal in validated] == ["keep-create"]
 
 
-def test_prompt_library_runtime_prompt_allows_library_write_proposals(monkeypatch):
-    monkeypatch.setattr("app.gateway.promptcard_runtime._load_presets", lambda: [])
+def test_prompt_library_scope_only_accepts_additive_create():
+    proposals = [
+        {
+            "kind": "prompt_library_write_proposal",
+            "id": "keep",
+            "operation": "create",
+            "presetDraft": {
+                "type": "style",
+                "category": "agent",
+                "label": "Cinematic",
+                "content": "cinematic light",
+            },
+        },
+        {
+            "kind": "prompt_library_write_proposal",
+            "id": "drop",
+            "operation": "update",
+            "targetPresetId": "preset-1",
+            "presetDraft": {
+                "type": "style",
+                "category": "agent",
+                "label": "Overwrite",
+                "content": "not allowed",
+            },
+        },
+    ]
 
-    prompt = build_runtime_prompt(
-        "split these prompts into presets",
+    validated = validate_agent_proposals(
+        proposals,
+        workspace_context=None,
         permission_scope="prompt-library-agent",
     )
 
-    assert "Prompt Library scope" in prompt
-    assert "Only create new Prompt Library presets" in prompt
-    assert "prompt_library_write_proposal" in prompt
+    assert [proposal["id"] for proposal in validated] == ["keep"]
 
 
-def test_messages_endpoint_uses_promptcard_runtime_service(monkeypatch):
-    async def fake_send_message(body, request):
-        assert body.thread_id is None
-        assert body.content == "补全选中卡片"
-        assert body.mode == "card-workspace"
-        assert body.session_key == "workspace:card:project-1"
-        assert body.project_id == "project-1"
-        assert body.workspace_context["contextId"] == "card:project-1:0"
+def test_messages_endpoint_keeps_public_contract(monkeypatch):
+    async def fake_send_message(body: PromptCardRuntimeMessageRequest, request):
+        assert body.content == "补全提示词"
         return {
             "threadId": "thread-1",
-            "text": "agent response",
+            "text": "已生成待确认修改。",
             "proposals": [],
-            "diagnostics": {"runtime": "ok"},
+            "diagnostics": {"orchestrator": "pi"},
         }
 
     monkeypatch.setattr(promptcard_runtime.runtime_service, "send_message", fake_send_message)
@@ -227,115 +159,54 @@ def test_messages_endpoint_uses_promptcard_runtime_service(monkeypatch):
         response = client.post(
             "/api/promptcard/runtime/messages",
             json={
-                "content": "补全选中卡片",
-                "mode": "card-workspace",
-                "sessionKey": "workspace:card:project-1",
+                "content": "补全提示词",
+                "mode": "free-canvas-workspace",
+                "sessionKey": "workspace:free-canvas:project-1",
                 "projectId": "project-1",
                 "workspaceContext": {
-                    "contextId": "card:project-1:0",
-                    "mode": "card-workspace",
+                    "contextId": "free-canvas:project-1:text-1",
+                    "mode": "free-canvas-workspace",
                     "projectId": "project-1",
                     "projectTitle": "Project",
-                    "snapshot": {"cards": [{"id": "card-1"}]},
+                    "snapshot": {
+                        "selectedNodeId": "text-1",
+                        "selectedNode": {"id": "text-1", "kind": "text"},
+                        "nodes": [{"id": "text-1", "kind": "text"}],
+                    },
                 },
             },
         )
 
     assert response.status_code == 200
     assert response.json()["threadId"] == "thread-1"
+    assert response.json()["diagnostics"]["orchestrator"] == "pi"
 
 
-def test_parse_three_stage_field_update_filters_unknown_fields():
-    text = """
-```json
-{
-  "kind": "agent_workspace_proposals",
-  "proposals": [
-    {
-      "kind": "three_stage_field_update",
-      "id": "keep",
-      "agentName": "DeepSeek Agent",
-      "stageKey": "characterBoard",
-      "fieldId": "characterCore",
-      "mode": "replace",
-      "content": "Sharper character",
-      "rationale": "ok",
-      "status": "pending",
-      "createdAt": 1
-    },
-    {
-      "kind": "three_stage_field_update",
-      "id": "drop",
-      "agentName": "DeepSeek Agent",
-      "stageKey": "characterBoard",
-      "fieldId": "missingField",
-      "mode": "replace",
-      "content": "Nope",
-      "rationale": "bad",
-      "status": "pending",
-      "createdAt": 2
-    }
-  ]
-}
-```
-"""
-    workspace_context = {
-        "snapshot": {
-            "selectedStage": "characterBoard",
-            "selectedFieldId": "characterCore",
-            "sections": {
-                "characterBoard": {
-                    "fields": {"characterCore": "Existing"}
-                }
-            },
-        }
-    }
-
-    proposals = parse_agent_workspace_proposals(
-        text,
-        workspace_context=workspace_context,
-        permission_scope="workspace-chatbot-agent",
-    )
-
-    assert [proposal["id"] for proposal in proposals] == ["keep"]
-    assert proposals[0]["kind"] == "three_stage_field_update"
-    assert proposals[0]["content"] == "Sharper character"
-
-
-def test_status_endpoint_returns_promptcard_runtime_sections(monkeypatch):
-    async def fake_status(request):
+def test_media_analysis_endpoint_keeps_selected_asset_boundary(monkeypatch):
+    async def fake_analyze(body, request):
+        assert body.asset_id == "asset-selected"
+        assert body.content_type == "image/png"
         return {
-            "runtime": {"ok": True},
-            "auth": {"ok": True},
-            "models": {"ok": True, "count": 1},
-            "tools": {"ok": True, "count": 2},
-            "storage": {"ok": True},
+            "threadId": "media-thread-1",
+            "text": "低饱和电影光。",
+            "proposals": [],
+            "diagnostics": {"attachmentCount": 1},
         }
 
-    monkeypatch.setattr(promptcard_runtime.runtime_service, "status", fake_status)
+    monkeypatch.setattr(promptcard_runtime.runtime_service, "analyze_media", fake_analyze)
     app = FastAPI()
     app.include_router(promptcard_runtime.router)
 
     with TestClient(app) as client:
-        response = client.get("/api/promptcard/runtime/status")
+        response = client.post(
+            "/api/promptcard/runtime/media-analysis",
+            json={
+                "assetId": "asset-selected",
+                "contentType": "image/png",
+                "analysisType": "style",
+                "content": "分析风格",
+            },
+        )
 
     assert response.status_code == 200
-    assert response.json()["runtime"]["ok"] is True
-    assert set(response.json()) == {"runtime", "auth", "models", "tools", "storage"}
-
-
-def test_bootstrap_endpoint_delegates_to_promptcard_runtime_service(monkeypatch):
-    async def fake_bootstrap(request, response):
-        response.set_cookie("access_token", "test-token")
-        return {"user": {"email": "admin@promptcard.dev"}, "expires_in": 3600}
-
-    monkeypatch.setattr(promptcard_runtime.runtime_service, "bootstrap", fake_bootstrap)
-    app = FastAPI()
-    app.include_router(promptcard_runtime.router)
-
-    with TestClient(app) as client:
-        response = client.post("/api/promptcard/runtime/bootstrap", json={})
-
-    assert response.status_code == 200
-    assert response.json()["user"]["email"] == "admin@promptcard.dev"
-    assert "access_token" in response.headers["set-cookie"]
+    assert response.json()["diagnostics"]["attachmentCount"] == 1

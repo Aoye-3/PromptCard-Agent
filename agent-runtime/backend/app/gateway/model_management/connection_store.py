@@ -42,7 +42,10 @@ class UnavailableConnectionDependencyProvider:
 
 
 def default_connection_store_path() -> Path:
-    home = Path(os.getenv("DEER_FLOW_HOME") or ".deer-flow")
+    home = Path(
+        os.getenv("PROMPTCARD_RUNTIME_STATE_DIR")
+        or ".promptcard-runtime"
+    )
     return home / "promptcard-model-connections.json"
 
 

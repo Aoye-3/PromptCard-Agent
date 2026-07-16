@@ -12,3 +12,5 @@ Architecture Decision Records capture durable product and engineering decisions 
 - [ADR-008: Isolate Image Providers Behind Model Slots And Durable Local Runs](./ADR-008-provider-neutral-image-generation.md)
 - [ADR-009: Drive Image UI From Catalog Capabilities And Gate Assignments On Proven Readiness](./ADR-009-capability-driven-image-model-readiness.md)
 - [ADR-010: Project Image Generation Conversations And Durable Canvas Placements](./ADR-010-project-image-generation-conversations.md)
+- [ADR-011: Preserve Original Images And Use Permanent Provider Derivatives](./ADR-011-original-and-derived-image-assets.md)
+- [ADR-012: Replace DeerFlow With A Focused pi Text Agent And Ark Gateway](./ADR-012-pi-text-agent-and-ark-runtime.md)

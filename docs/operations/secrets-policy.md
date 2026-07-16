@@ -9,7 +9,7 @@ PromptCard model credentials are stored only through Python `keyring` in the ope
 - service: `dev.promptcard.manager.shell`
 - username: `connection:<connectionId>`
 
-`$DEER_FLOW_HOME/promptcard-model-connections.json` stores only provider/model metadata and `credentialRef`. Project JSON, PromptCard SQLite, Recent Captures, generation history, browser storage, logs, API responses, and generated assets must never contain credential values.
+`$PROMPTCARD_RUNTIME_STATE_DIR/promptcard-model-connections.json` stores only provider/model metadata and `credentialRef`. Project JSON, PromptCard SQLite, Recent Captures, generation history, browser storage, logs, API responses, and generated assets must never contain credential values.
 
 Connection create/update requests may carry a user-entered credential to Agent Runtime. The backend writes it to keyring and returns only `credentialConfigured` plus a display mask. Omitting the credential during update preserves it; an empty value removes it. If keyring is unavailable or read-back verification fails, the operation fails without a plaintext fallback.
 

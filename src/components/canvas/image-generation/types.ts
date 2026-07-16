@@ -5,7 +5,15 @@ export type ImageGenerationWorkflow =
   | 'region-edit'
 
 export type ImageGenerationTurnState = 'queued' | 'running' | 'succeeded' | 'failed'
-export type ImageGenerationTurnAction = 'again' | 'edit' | 'reference' | 'place' | 'media'
+export type ImageGenerationTurnAction =
+  | 'view'
+  | 'again'
+  | 'edit'
+  | 'region-edit'
+  | 'reference'
+  | 'place'
+  | 'history'
+  | 'media'
 
 export interface ImageGenerationTurnSettings {
   workflow: ImageGenerationWorkflow
@@ -48,9 +56,24 @@ export interface SelectOption<T extends string = string> {
 export interface ImageGenerationComposerProps {
   prompt: string
   onPromptChange: (value: string) => void
-  references?: Array<{ referenceId: string; label: string; imageUrl: string; mentioned: boolean }>
+  promptDocument?: import('@/models/PromptHistory.model').PromptDocument
+  onPromptDocumentChange?: (document: import('@/models/PromptHistory.model').PromptDocument) => void
+  unresolvedReferenceIds?: string[]
+  references?: Array<{
+    referenceId: string
+    assetId?: string
+    sourceAssetId?: string
+    label: string
+    imageUrl: string
+    mentioned: boolean
+    role?: 'source-image' | 'reference-image'
+    order?: number
+  }>
   onMentionReference?: (referenceId: string) => void
   onRemoveReference?: (referenceId: string) => void
+  onMoveReference?: (referenceId: string, direction: -1 | 1) => void
+  onReferenceRoleChange?: (referenceId: string, role: 'source-image' | 'reference-image') => void
+  maxImages?: number
   workflows: SelectOption<ImageGenerationWorkflow>[]
   workflow: ImageGenerationWorkflow
   onWorkflowChange: (value: ImageGenerationWorkflow) => void
@@ -63,6 +86,12 @@ export interface ImageGenerationComposerProps {
   aspectRatios: string[]
   aspectRatio: string
   onAspectRatioChange: (value: string) => void
+  customWidth?: number
+  customHeight?: number
+  onCustomSizeChange?: (width: number, height: number) => void
+  promptOptimizationModes?: Array<'standard' | 'fast'>
+  promptOptimization?: 'standard' | 'fast'
+  onPromptOptimizationChange?: (value: 'standard' | 'fast') => void
   outputFormats: string[]
   outputFormat: string
   onOutputFormatChange: (value: string) => void
@@ -73,6 +102,7 @@ export interface ImageGenerationComposerProps {
   onInjectSelectedNode?: (nodeId: string) => void
   onUpload: (file: File) => void
   onEditRegions?: () => void
+  onEditAnnotations?: () => void
   onSubmit: () => void
   disabled?: boolean
   missingRequirements?: string[]
@@ -89,6 +119,11 @@ export interface ImageGenerationConversationPanelProps {
   conversations: ImageGenerationConversationSummary[]
   onNewConversation: () => void
   onContinueConversation: (conversationId: string) => void
+  onOpenHistoryConversation?: (conversationId: string) => void
+  onLoadMoreConversations?: () => void
+  onLoadMoreConversationRuns?: (conversationId: string) => void
+  hasMoreConversations?: boolean
+  hasMoreConversationRuns?: (conversationId: string) => boolean
   onTurnAction?: (turn: ImageGenerationTurn, action: ImageGenerationTurnAction) => void
 }
 
@@ -98,4 +133,9 @@ export interface ImageGenerationHistoryDialogProps {
   initialConversationId?: string
   onClose: () => void
   onContinue: (conversationId: string) => void
+  onSelectConversation?: (conversationId: string) => void
+  onLoadMoreConversations?: () => void
+  onLoadMoreRuns?: (conversationId: string) => void
+  hasMoreConversations?: boolean
+  hasMoreRuns?: (conversationId: string) => boolean
 }

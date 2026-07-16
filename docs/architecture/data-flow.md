@@ -54,15 +54,14 @@ Source updates must treat durable data and local runtime state as out of scope. 
 
 ## Agent Collaboration Data
 
-The frontend sends a bounded workspace snapshot to the Agent Runtime. The runtime response may include structured JSON proposals:
+The frontend sends a bounded workspace snapshot and at most 100 Prompt Library items through the Python Gateway to the pi text Agent.
 
-- `workspace_card_create`
-- `workspace_card_update`
-- `storyboard_update`
-- `prompt_library_write_proposal`
+The maintained pi runtime may return only these proposal kinds:
 
-Card workspace proposals can be auto-applied by the collaboration panel. Prompt Library proposals require user approval before durable mutation.
+- `free_canvas_text_update`: update the exact selected Canvas text node;
+- `free_canvas_text_create`: create a Canvas text node when no text node is selected;
+- `prompt_library_write_proposal`: add one new Prompt Library preset.
 
-Storyboard workspace changes use pure row/sequence helpers from `src/domain/storyboard/storyboard-operations.ts` so UI handlers remain focused on user events and rendering.
+Media analysis is read-only and returns no mutation proposal. Every maintained proposal remains pending until the user explicitly selects Apply or Reject; no Canvas or Prompt Library change is auto-applied.
 
-Three-stage workspace snapshots include selected page, selected item, selected form, and selected form type. `selectedPairId` is retained as `null` for compatibility. Video prompt context must be built from the selected form itself and must not include a paired storyboard summary.
+The frontend parser still recognizes older card, storyboard, and three-stage proposal shapes for compatibility with existing tests and historical responses. Those shapes are not emitted by the maintained pi tool surface and must not be treated as current Agent capability.

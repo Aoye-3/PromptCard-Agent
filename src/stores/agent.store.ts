@@ -154,7 +154,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   bootstrapRuntime: async () => {
     try {
       const bootstrap = await agentRuntimeService.bootstrap()
-      const user = ((bootstrap as { user?: AgentUser }).user || (await agentRuntimeService.me())) as AgentUser
+      const user = (bootstrap as { user?: AgentUser }).user as AgentUser
       const [catalog, modelConfig] = await Promise.all([
         loadRuntimeCatalog(),
         agentRuntimeService.getModelConfig()
@@ -214,7 +214,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (content, _presets, options) => {
+  sendMessage: async (content, presets, options) => {
     const sessionKey = options?.sessionKey
     if (!sessionKey) {
       throw new Error('Agent sessionKey is required')
@@ -248,7 +248,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         permissionScope: options?.permissionScope || (options?.workspaceContext ? 'workspace-chatbot-agent' : 'prompt-library-agent'),
         sessionKey,
         projectId: options?.workspaceContext?.projectId,
-        workspaceContext: options?.workspaceContext
+        workspaceContext: options?.workspaceContext,
+        promptLibrary: presets.map(preset => ({
+          id: preset.id,
+          type: preset.type,
+          category: preset.category,
+          label: preset.label,
+          content: preset.content,
+          meta: preset.meta
+        }))
       })
       const proposals = result.proposals.map(proposal => ({
         ...proposal,

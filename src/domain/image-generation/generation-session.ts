@@ -205,6 +205,7 @@ export const buildImageGenerationRequest = (
     },
     inputs: snapshot.inputAssets.map(input => ({
       referenceId: input.referenceId,
+      role: input.role,
       assetId: input.assetId,
       order: input.order
     })),
@@ -220,7 +221,8 @@ export const buildImageGenerationRequest = (
       ? { width: node.settings.width, height: node.settings.height }
       : {}),
     outputFormat: node.settings.outputFormat,
-    watermark: node.settings.watermark
+    watermark: node.settings.watermark,
+    promptOptimization: 'standard'
   }
 }
 

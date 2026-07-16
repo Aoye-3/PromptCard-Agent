@@ -8,27 +8,30 @@ The maintained frontend contract is the PromptCard Runtime Boundary. In developm
 
 ## PromptCard Runtime Boundary
 
+Authenticated browser mutations are protected by the Runtime CSRF middleware. The maintained frontend client sends the session cookie with `credentials: "include"`, reads the CSRF cookie, and copies it to `X-CSRF-Token`. Direct callers that omit or mismatch the token receive a structured rejection before model, keyring, Storage, or provider work begins.
+
 ### `GET /agent-api/promptcard/runtime/status`
 
-Returns a compact health view for the embedded runtime:
+Returns a compact health view for the Python Gateway, pi text Agent, Storage, and `chat.primary` assignment:
 
 ```json
 {
-  "runtime": { "ok": true, "service": "promptcard-runtime-boundary" },
-  "auth": { "ok": true, "adminCount": 1 },
+  "runtime": { "ok": true, "service": "promptcard-runtime", "orchestrator": "pi" },
+  "auth": { "ok": true, "mode": "local-process-token" },
   "models": { "ok": true, "count": 1 },
-  "tools": { "ok": true, "count": 10 },
-  "storage": { "ok": true, "payload": { "ok": true } }
+  "tools": { "ok": true, "count": 4 },
+  "storage": { "ok": true },
+  "textAgent": { "ok": true, "payload": { "service": "promptcard-pi-text-agent", "orchestrator": "pi" } }
 }
 ```
 
 ### `POST /agent-api/promptcard/runtime/bootstrap`
 
-Creates or reuses the app-managed PromptCard admin user and sets the runtime session cookie. This replaces frontend calls to DeerFlow auth internals.
+Creates the process-local PromptCard browser session and sets the HttpOnly runtime cookie. There is no separate DeerFlow account or login flow.
 
 ### `GET /agent-api/promptcard/runtime/catalog`
 
-Returns the PromptCard UI catalog:
+Returns the focused text-Agent catalog. The current tool surface contains Prompt Library search plus proposal emitters; generic skills and subagents are disabled.
 
 ```json
 {
@@ -36,8 +39,8 @@ Returns the PromptCard UI catalog:
   "skills": [],
   "tools": [],
   "builtins": [],
-  "subagentEnabled": true,
-  "agents": []
+  "subagentEnabled": false,
+  "agents": [{ "id": "promptcard-text-agent", "name": "PromptCard Text Agent" }]
 }
 ```
 
@@ -47,9 +50,9 @@ Model management separates provider definitions, model capabilities, named conne
 
 ### `GET /agent-api/promptcard/runtime/model-catalog`
 
-Returns provider definitions and model catalog entries. The current image entry is `doubao-seedream-5-0-pro-260628` with capability metadata for modes, reference count, regions, resolutions, ratios, custom-size limits, output count, and streaming.
+Returns provider definitions and model catalog entries. The current image entry is `doubao-seedream-5-0-pro-260628` with capability metadata for modes, reference count, regions, resolutions, ratios, custom-size limits, prompt optimization, official input constraints, raster annotations, output transports, output count, and streaming.
 
-The catalog is the frontend source of truth for image controls. UI code must consume `modes`, `resolutions`, `aspectRatios`, `customSize`, `outputFormats`, `watermark`, `maxReferenceImages`, `regionInputs`, `outputCount`, and `streaming` instead of branching on a Seedream model ID.
+The catalog is the frontend source of truth for image controls. UI code must consume `modes`, `resolutions`, `aspectRatios`, `customSize`, `promptOptimization`, `inputConstraints`, `annotationInputs`, `outputFormats`, `responseTransports`, `watermark`, `maxReferenceImages`, `regionInputs`, `outputCount`, and `streaming` instead of branching on a Seedream model ID.
 
 ### `GET /agent-api/promptcard/runtime/image-generation-status`
 
@@ -211,13 +214,20 @@ The frontend sends normalized intent and local asset IDs. The Runtime creates th
     ]
   },
   "inputs": [
-    { "referenceId": "subject", "assetId": "local-input.png", "order": 0 }
+    {
+      "referenceId": "subject",
+      "role": "source-image",
+      "assetId": "provider-input.jpg",
+      "sourceAssetId": "original-input.heic",
+      "order": 0
+    }
   ],
   "regions": [
     { "type": "bbox", "referenceId": "subject", "x1": 100, "y1": 120, "x2": 700, "y2": 800 }
   ],
   "resolution": "2K",
   "aspectRatio": "smart",
+  "promptOptimization": "standard",
   "outputFormat": "png",
   "watermark": false
 }
@@ -225,7 +235,9 @@ The frontend sends normalized intent and local asset IDs. The Runtime creates th
 
 `conversationId` identifies a project-level Image Generation Agent conversation and does not require `nodeId`. Legacy node-bound callers may send `nodeId` instead; at least one identity is required. When a conversation already exists, Runtime verifies that it belongs to `projectId` before provider access and maps a mismatch to a sanitized not-found response. Runtime compiles only this request's prompt, inputs, regions, and settings; it never reads or appends earlier conversation runs.
 
-For `aspectRatio: "custom"`, positive integer `width` and `height` are required and must satisfy the selected model capability limits.
+For `aspectRatio: "custom"`, positive integer `width` and `height` are required and must satisfy 921600–4624220 total pixels and `1:16–16:1`. The total image count includes the source image and cannot exceed ten. At most one input may use `role: "source-image"`. `edit` and `region-edit` require a source image; `region-edit` also requires at least one point or bounding box.
+
+`promptOptimization` is `standard` or `fast` and defaults to `standard`. The adapter sends the value through Ark `OptimizePromptOptions`. The backend may request provider output as URL or `b64_json`; this transport is not an ordinary UI parameter, and the successful Runtime response never contains either provider payload.
 
 Success:
 
@@ -243,6 +255,8 @@ Success:
 
 New requests require `PROMPTCARD_IMAGE_GENERATION_NODE_V1=true`; otherwise the endpoint returns `403 image_generation_disabled` before creating a run or reading a credential. Validation/provider/storage failures use a sanitized `detail` object with `code`, `message`, `retryable`, and, after run creation, `runId`. Capacity and rate-limit errors return `429`; retryable infrastructure errors return `503`; other request/provider errors return `422`.
 
+The project Image Generation tab is independent from the pi text Agent message route. It does not create a text-Agent session, call the chat model, or append previous image-generation turns to the provider prompt.
+
 ### `POST /agent-api/promptcard/runtime/messages`
 
 Request:
@@ -251,17 +265,25 @@ Request:
 {
   "threadId": "optional-existing-thread",
   "content": "User message",
-  "mode": "card-workspace",
+  "mode": "free-canvas",
   "permissionScope": "workspace-chatbot-agent",
-  "sessionKey": "workspace:card:project",
+  "sessionKey": "workspace:canvas:project",
   "projectId": "project",
   "workspaceContext": {
-    "contextId": "card:project:0",
-    "mode": "card-workspace",
+    "contextId": "canvas:project",
+    "mode": "free-canvas",
     "projectId": "project",
     "projectTitle": "Project",
-    "snapshot": {}
-  }
+    "snapshot": {
+      "selectedNodeId": "text-node-1",
+      "selectedNode": {
+        "id": "text-node-1",
+        "kind": "text",
+        "userText": "existing prompt"
+      }
+    }
+  },
+  "promptLibrary": []
 }
 ```
 
@@ -276,12 +298,39 @@ Response:
 }
 ```
 
-Supported workspace modes are `prompt-library`, `card-workspace`, `storyboard-workspace`, and `three-stage-workspace`. Card, storyboard, and three-stage Chatbox surfaces should use the `workspace-chatbot-agent` permission scope. Prompt Library Agent surfaces should use `prompt-library-agent`.
+Current proposal behavior:
 
-New PromptCard UI calls must include `sessionKey`. The backend stores `sessionKey`, `projectId`, `mode`, and `permissionScope` in DeerFlow thread metadata when creating a thread and rejects later attempts to reuse that thread from a different session or project.
+- `workspace-chatbot-agent` with one selected text node may return only `free_canvas_text_update` for that exact node.
+- `workspace-chatbot-agent` without a selected text node may return only `free_canvas_text_create`.
+- `prompt-library-agent` may return only additive `prompt_library_write_proposal` records.
+- All proposals remain pending until the frontend user selects Apply or Reject.
 
-The backend owns thread creation, prompt construction, configured DeepSeek model selection, DeerFlow run execution, assistant text extraction, and proposal parsing.
+New PromptCard UI calls must include `sessionKey`. pi keeps bounded process-local message history and rejects an existing `threadId` when its `sessionKey`, `projectId`, or `mode` conflicts with the new request.
 
-## Compatibility Routes
+The Python Gateway validates the browser request and returned proposals. The pi runtime owns prompt orchestration and proposal tools. The Gateway resolves `chat.primary` and calls the Volcengine Ark SDK without exposing the credential to pi.
 
-DeerFlow-native routes such as `/agent-api/threads`, `/agent-api/models`, `/agent-api/tools`, `/agent-api/skills`, `/agent-api/agents`, and `/agent-api/v1/auth/*` remain available for compatibility and internal adapter use. PromptCard frontend features should prefer the boundary routes above.
+### `POST /agent-api/promptcard/runtime/media-analysis`
+
+Request:
+
+```json
+{
+  "threadId": "optional-existing-thread",
+  "assetId": "selected-media-asset",
+  "contentType": "image/png",
+  "analysisType": "style",
+  "content": ""
+}
+```
+
+`analysisType` is `style`, `freeform`, or `prompt`. The Gateway loads exactly the requested asset from PromptCard Storage, accepts image content only, limits the asset to 30 MiB, and sends one image attachment to pi/Ark. The response has the same `threadId`, `text`, `proposals`, and `diagnostics` shape as `/messages`, but media analysis returns no mutation proposals.
+
+Video analysis is not part of the current API behavior.
+
+## Internal Route
+
+`POST /api/promptcard/runtime/internal/chat` is local-service-only. It requires `X-PromptCard-Internal-Token`, resolves the assigned Ark connection, and is not proxied as a browser integration contract.
+
+## Removed Routes
+
+DeerFlow-native thread, run, auth, model, tool, skill, agent, memory, channel, MCP, upload, and sandbox routes are removed. New integrations must use the PromptCard Runtime Boundary above.

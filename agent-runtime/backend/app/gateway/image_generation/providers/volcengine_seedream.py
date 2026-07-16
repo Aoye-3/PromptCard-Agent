@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from volcenginesdkarkruntime import Ark
+from volcenginesdkarkruntime.types.images import OptimizePromptOptions
 
 from app.gateway.image_generation.contracts import (
     ImageGenerationRequest,
@@ -53,10 +54,14 @@ class VolcengineSeedreamProvider:
         *,
         api_key: str,
         base_url: str,
+        response_format: str = "url",
         client_factory: ArkClientFactory = Ark,
     ) -> None:
+        if response_format not in {"url", "b64_json"}:
+            raise ValueError("unsupported_response_format")
         self._api_key = api_key
         self._base_url = base_url
+        self._response_format = response_format
         self._client_factory = client_factory
 
     def generate(self, request: ImageGenerationRequest) -> ImageGenerationResult:
@@ -65,11 +70,19 @@ class VolcengineSeedreamProvider:
         size = _sdk_size(request)
         if request.output_format not in {"png", "jpeg"}:
             raise ProviderError("unsupported_output_format", "Seedream supports only PNG and JPEG output", False)
+        if request.prompt_optimization not in {"standard", "fast"}:
+            raise ProviderError(
+                "unsupported_prompt_optimization",
+                "Seedream supports standard and fast prompt optimization",
+                False,
+            )
 
         try:
             compiled = compile_seedream_prompt(request.prompt_document, request.inputs, request.regions)
         except PromptCompilationError as error:
             raise ProviderError(error.code, str(error), False) from error
+        if not compiled.prompt.strip():
+            raise ProviderError("prompt_required", "Seedream requires a non-empty prompt", False)
 
         provider_error: ProviderError | None = None
         try:
@@ -80,8 +93,9 @@ class VolcengineSeedreamProvider:
                 image=list(compiled.images) if compiled.images else None,
                 size=size,
                 output_format=request.output_format,
-                response_format="url",
+                response_format=self._response_format,
                 watermark=request.watermark,
+                optimize_prompt_options=OptimizePromptOptions(mode=request.prompt_optimization),
             )
         except ProviderError:
             raise
@@ -91,18 +105,47 @@ class VolcengineSeedreamProvider:
         if provider_error is not None:
             raise provider_error from None
 
+        response_error = _response_error(response)
+        if response_error is not None:
+            raise ProviderError(
+                "provider_request_failed",
+                _redact_sensitive_text(response_error, self._api_key),
+                False,
+                _request_id(response),
+            ) from None
         data = getattr(response, "data", None)
         if not isinstance(data, list) or len(data) != 1:
             raise ProviderError("invalid_output_count", "Seedream must return exactly one image", False, _request_id(response))
         output = data[0]
+        item_error = _response_error(output)
+        if item_error is not None:
+            raise ProviderError(
+                "provider_request_failed",
+                _redact_sensitive_text(item_error, self._api_key),
+                False,
+                _request_id(response),
+            ) from None
         url = getattr(output, "url", None)
-        if not isinstance(url, str) or not url:
-            raise ProviderError("invalid_provider_response", "Seedream response did not include an image URL", False, _request_id(response))
+        b64_json = getattr(output, "b64_json", None)
+        url = url if isinstance(url, str) and url else None
+        b64_json = b64_json if isinstance(b64_json, str) and b64_json else None
+        if (url is None) == (b64_json is None):
+            raise ProviderError(
+                "invalid_provider_response",
+                "Seedream response did not include exactly one image payload",
+                False,
+                _request_id(response),
+            )
 
         size = getattr(output, "size", None)
         return ImageGenerationResult(
-            image=ProviderImage(url=url, size=size if isinstance(size, str) and size else None),
+            image=ProviderImage(
+                url=url,
+                b64_json=b64_json,
+                size=size if isinstance(size, str) and size else None,
+            ),
             request_id=_request_id(response),
+            usage=_usage_snapshot(getattr(response, "usage", None)),
         )
 
 
@@ -147,6 +190,35 @@ def _normalize_provider_error(error: Exception, api_key: str) -> ProviderError:
 
     raw_message = str(error).strip() or "Provider request failed"
     return ProviderError(code, _redact_sensitive_text(raw_message, api_key), retryable, request_id)
+
+
+def _response_error(value: object) -> str | None:
+    error = getattr(value, "error", None)
+    if error is None:
+        return None
+    message = getattr(error, "message", None)
+    code = getattr(error, "code", None)
+    parts = [
+        text
+        for text in (code, message)
+        if isinstance(text, str) and text.strip()
+    ]
+    return ": ".join(parts) if parts else "Provider request failed"
+
+
+def _usage_snapshot(value: object) -> dict[str, int] | None:
+    fields = {
+        "generatedImages": "generated_images",
+        "outputTokens": "output_tokens",
+        "totalTokens": "total_tokens",
+    }
+    usage = {
+        target: count
+        for target, source in fields.items()
+        if isinstance((count := getattr(value, source, None)), int)
+        and not isinstance(count, bool)
+    }
+    return usage or None
 
 
 def _status_code(value: object) -> int | None:

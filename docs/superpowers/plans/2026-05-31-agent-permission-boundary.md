@@ -1,5 +1,7 @@
 # Agent Permission Boundary Implementation Plan
 
+> Historical implementation record. The permission-scope principle remains valid, but the DeerFlow runtime and broad workspace proposal assumptions were superseded by [ADR-012](../../decisions/ADR-012-pi-text-agent-and-ark-runtime.md) and [Plan 006](../../Plan/006-pi-text-agent-minimal-closed-loop.md). Do not use this document as the current runtime contract.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Separate Prompt Library write authority from builder AI chat assistance so Prompt Library is the only reusable prompt write interface.

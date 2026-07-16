@@ -14,6 +14,11 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
+from app.gateway.internal_auth import (
+    INTERNAL_AUTH_HEADER_NAME,
+    is_valid_internal_auth_token,
+)
+
 CSRF_COOKIE_NAME = "csrf_token"
 CSRF_HEADER_NAME = "X-CSRF-Token"
 CSRF_TOKEN_LENGTH = 64  # bytes
@@ -36,6 +41,8 @@ def should_check_csrf(request: Request) -> bool:
     GET, HEAD, OPTIONS, and TRACE are exempt per RFC 7231.
     """
     if request.method not in ("POST", "PUT", "DELETE", "PATCH"):
+        return False
+    if is_valid_internal_auth_token(request.headers.get(INTERNAL_AUTH_HEADER_NAME)):
         return False
 
     path = request.url.path.rstrip("/")

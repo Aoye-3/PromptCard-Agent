@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import os
 import threading
 import time
@@ -29,10 +30,16 @@ from app.gateway.image_generation.providers.volcengine_seedream import Volcengin
 from app.gateway.image_generation.result_fetcher import FetchedImage, ImageFetchError, ImageResultFetcher, validate_image_content
 from app.gateway.model_management.catalog import model_by_id
 from app.gateway.model_management.connection_store import ModelConnectionStore, get_connection_store
+from app.gateway.model_management.diagnostics import collect_image_generation_status
 
 MAX_RUNNING_PER_CONNECTION = 2
 MAX_RUNNING_TOTAL = 4
-MAX_INPUT_IMAGE_BYTES_TOTAL = 50 * 1024 * 1024
+MAX_INPUT_IMAGE_BYTES_TOTAL = 300 * 1024 * 1024
+MAX_INPUT_IMAGE_BYTES = 30 * 1024 * 1024
+MAX_INPUT_IMAGE_PIXELS = 36_000_000
+MIN_INPUT_IMAGE_SIDE_EXCLUSIVE = 14
+MIN_INPUT_IMAGE_RATIO = 1 / 16
+MAX_INPUT_IMAGE_RATIO = 16
 
 
 class GenerationError(RuntimeError):
@@ -72,6 +79,7 @@ class ConnectionMetadata:
     provider_id: str
     api_base: str
     enabled: bool
+    last_test_ok: bool | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +87,8 @@ class GenerationAssetInput:
     reference_id: str
     asset_id: str
     order: int
+    role: str = "reference-image"
+    source_asset_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +109,7 @@ class GenerationCommand:
     height: int | None
     output_format: str
     watermark: bool
+    prompt_optimization: str = "standard"
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +128,7 @@ class ImageGenerationStorage(Protocol):
 
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]: ...
 
-    def get_run(self, run_id: str) -> dict[str, Any]: ...
+    def get_run(self, run_id: str, project_id: str) -> dict[str, Any]: ...
 
     def load_asset(self, asset_id: str) -> StorageAsset: ...
 
@@ -134,6 +145,7 @@ class ConnectionResolver(Protocol):
 
 ProviderFactory = Callable[[ConnectionContext], ImageGenerationProvider]
 ModelLookup = Callable[[str], dict[str, Any] | None]
+ReadinessProbe = Callable[[], dict[str, object]]
 
 
 class ImageGenerationService:
@@ -148,6 +160,7 @@ class ImageGenerationService:
         max_running_per_connection: int = MAX_RUNNING_PER_CONNECTION,
         max_running_total: int = MAX_RUNNING_TOTAL,
         max_input_bytes_total: int = MAX_INPUT_IMAGE_BYTES_TOTAL,
+        readiness_probe: ReadinessProbe | None = None,
     ) -> None:
         self._storage = storage
         self._connections = connections
@@ -157,6 +170,7 @@ class ImageGenerationService:
         self._max_running_per_connection = max_running_per_connection
         self._max_running_total = max_running_total
         self._max_input_bytes_total = max_input_bytes_total
+        self._readiness_probe = readiness_probe
         self._running: dict[str, int] = {}
         self._running_total = 0
         self._running_lock = threading.Lock()
@@ -198,7 +212,7 @@ class ImageGenerationService:
         if create_failure is not None:
             raise create_failure from None
 
-        self._start_run(command.run_id)
+        self._start_run(command.run_id, command.project_id)
 
         capacity_error = self._try_acquire(command.connection_id)
         acquired = capacity_error is None
@@ -211,6 +225,7 @@ class ImageGenerationService:
             if capacity_error == "global":
                 raise GenerationError("generation_capacity_reached", "Image generation service capacity is reached", True, command.run_id)
 
+            self._validate_runtime_readiness(command.run_id)
             metadata = self._connections.resolve_metadata(command.connection_id)
             self._validate_capabilities(command, metadata)
             provider_request = self._provider_request(command)
@@ -226,7 +241,7 @@ class ImageGenerationService:
             provider = self._provider_factory(connection)
             provider_result = provider.generate(provider_request)
             provider_request_id = provider_result.request_id
-            fetched = self._result_fetcher.fetch(provider_result.image.url)
+            fetched = self._resolve_provider_image(provider_result.image, command)
             asset = self._storage.upload_asset(f"generated-{command.run_id}{fetched.extension}", fetched.content_type, fetched.content)
             asset_id = _required_response_id(asset, "asset")
             capture = self._storage.create_capture(_capture_payload(command, fetched, asset_id))
@@ -237,6 +252,8 @@ class ImageGenerationService:
             }
             if provider_request_id:
                 success_patch["providerRequestId"] = provider_request_id
+            if provider_result.usage:
+                success_patch["providerUsage"] = provider_result.usage
             self._storage.update_run(command.run_id, success_patch)
             outcome = GenerationOutcome(
                 run_id=command.run_id,
@@ -284,7 +301,7 @@ class ImageGenerationService:
             raise GenerationError("generation_failed", "Image generation failed", False, command.run_id)
         return outcome
 
-    def _start_run(self, run_id: str) -> None:
+    def _start_run(self, run_id: str, project_id: str) -> None:
         start_failed = False
         try:
             self._storage.update_run(run_id, {"state": "running"})
@@ -294,7 +311,7 @@ class ImageGenerationService:
             return
 
         failure = GenerationError("storage_write_failed", "Image generation run could not be started", True, run_id)
-        if self._reconcile_start_failure(run_id, failure):
+        if self._reconcile_start_failure(run_id, project_id, failure):
             raise failure from None
         raise GenerationError(
             "terminal_persistence_failed",
@@ -303,15 +320,20 @@ class ImageGenerationService:
             run_id,
         ) from None
 
-    def _reconcile_start_failure(self, run_id: str, failure: GenerationError) -> bool:
-        state = self._read_run_state(run_id)
+    def _reconcile_start_failure(
+        self,
+        run_id: str,
+        project_id: str,
+        failure: GenerationError,
+    ) -> bool:
+        state = self._read_run_state(run_id, project_id)
         if state == "queued":
             retry_failed = False
             try:
                 self._storage.update_run(run_id, {"state": "running"})
             except Exception:
                 retry_failed = True
-            state = self._read_run_state(run_id) if retry_failed else "running"
+            state = self._read_run_state(run_id, project_id) if retry_failed else "running"
 
         if state == "running":
             patch = {
@@ -329,12 +351,12 @@ class ImageGenerationService:
                 terminal_write_failed = True
             if not terminal_write_failed:
                 return True
-            state = self._read_run_state(run_id)
+            state = self._read_run_state(run_id, project_id)
         return state == "failed"
 
-    def _read_run_state(self, run_id: str) -> str | None:
+    def _read_run_state(self, run_id: str, project_id: str) -> str | None:
         try:
-            run = self._storage.get_run(run_id)
+            run = self._storage.get_run(run_id, project_id)
         except Exception:
             return None
         state = run.get("state")
@@ -363,9 +385,58 @@ class ImageGenerationService:
             )
         return credential
 
+    def _validate_runtime_readiness(self, run_id: str) -> None:
+        if self._readiness_probe is None:
+            return
+        try:
+            status = self._readiness_probe()
+        except Exception:
+            raise GenerationError(
+                "image_generation_status_unavailable",
+                "Image generation readiness could not be checked",
+                True,
+                run_id,
+            ) from None
+        if status.get("serverEnabled") is not True:
+            raise GenerationError(
+                "image_generation_disabled",
+                "Image generation is disabled by the server rollout gate",
+                False,
+                run_id,
+            )
+        credential_store = status.get("credentialStore")
+        if not isinstance(credential_store, dict) or credential_store.get("available") is not True:
+            raise GenerationError(
+                "credential_store_unavailable",
+                "Model credential storage is unavailable",
+                True,
+                run_id,
+            )
+        providers = status.get("providers")
+        provider = next(
+            (
+                item
+                for item in providers
+                if isinstance(item, dict) and item.get("providerId") == "volcengine-ark"
+            ),
+            None,
+        ) if isinstance(providers, list) else None
+        provider_status = provider.get("status") if isinstance(provider, dict) else None
+        if provider_status != "ready":
+            code = {
+                "missing": "ark_sdk_missing",
+                "incompatible": "ark_sdk_incompatible",
+                "check_failed": "ark_sdk_check_failed",
+            }.get(provider_status, "ark_sdk_unavailable")
+            raise GenerationError(code, "The Ark SDK is unavailable", provider_status == "check_failed", run_id)
+
     def _validate_capabilities(self, command: GenerationCommand, connection: ConnectionMetadata) -> None:
         if not connection.enabled:
             raise GenerationError("connection_disabled", "The selected model connection is disabled", False, command.run_id)
+        if connection.last_test_ok is None:
+            raise GenerationError("connection_not_tested", "The selected model connection has not been tested", False, command.run_id)
+        if connection.last_test_ok is not True:
+            raise GenerationError("connection_test_failed", "The selected model connection test failed", False, command.run_id)
         model = self._model_lookup(command.model_id)
         if model is None or model.get("modality") != "image":
             raise GenerationError("image_model_not_found", "The selected image model is unavailable", False, command.run_id)
@@ -386,6 +457,34 @@ class ImageGenerationService:
             raise GenerationError("unsupported_model_capability", "The selected model capability contract is unsupported", False, command.run_id)
         if command.output_format not in {"png", "jpeg"}:
             raise GenerationError("unsupported_output_format", "Only PNG and JPEG output are supported", False, command.run_id)
+        prompt_optimization = capabilities.get("promptOptimization")
+        prompt_modes = prompt_optimization.get("modes", []) if isinstance(prompt_optimization, dict) else []
+        if command.prompt_optimization not in prompt_modes:
+            raise GenerationError(
+                "unsupported_prompt_optimization",
+                "The selected model does not support this prompt optimization mode",
+                False,
+                command.run_id,
+            )
+        if not any(
+            (
+                isinstance(segment, PromptTextSegment)
+                and bool(segment.text.strip())
+            )
+            or (
+                isinstance(segment, PromptReferenceSegment)
+                and bool(segment.reference_id.strip())
+            )
+            for segment in command.prompt_document.segments
+        ):
+            raise GenerationError("prompt_required", "Image generation requires a non-empty prompt", False, command.run_id)
+        source_count = 0
+        for image in command.inputs:
+            if image.role not in {"source-image", "reference-image"}:
+                raise GenerationError("invalid_image_role", "A reference image role is invalid", False, command.run_id)
+            source_count += image.role == "source-image"
+        if source_count > 1:
+            raise GenerationError("too_many_source_images", "Only one source image is allowed", False, command.run_id)
         if command.mode in {"edit", "region-edit"} and not command.inputs:
             raise GenerationError("reference_image_required", "This generation mode requires a reference image", False, command.run_id)
         if command.mode == "region-edit" and not command.regions:
@@ -451,7 +550,15 @@ class ImageGenerationService:
         for source in command.inputs:
             try:
                 asset = self._storage.load_asset(source.asset_id)
-                validate_image_content(asset.content, asset.content_type)
+                validate_image_content(
+                    asset.content,
+                    asset.content_type,
+                    max_bytes=MAX_INPUT_IMAGE_BYTES,
+                    max_pixels=MAX_INPUT_IMAGE_PIXELS,
+                    min_side_exclusive=MIN_INPUT_IMAGE_SIDE_EXCLUSIVE,
+                    min_aspect_ratio=MIN_INPUT_IMAGE_RATIO,
+                    max_aspect_ratio=MAX_INPUT_IMAGE_RATIO,
+                )
             except Exception:
                 raise GenerationError("invalid_input_asset", "A reference image asset is missing or invalid", False, command.run_id) from None
             input_bytes_total += len(asset.content)
@@ -468,6 +575,8 @@ class ImageGenerationService:
                     reference_id=source.reference_id,
                     image=f"data:{asset.content_type};base64,{encoded}",
                     order=source.order,
+                    role=source.role,
+                    source_asset_id=source.source_asset_id,
                 )
             )
         return ImageGenerationRequest(
@@ -481,6 +590,41 @@ class ImageGenerationService:
             height=command.height,
             output_format=command.output_format,
             watermark=command.watermark,
+            prompt_optimization=command.prompt_optimization,
+        )
+
+    def _resolve_provider_image(
+        self,
+        image: Any,
+        command: GenerationCommand,
+    ) -> FetchedImage:
+        if image.url:
+            return self._result_fetcher.fetch(image.url)
+        if not image.b64_json:
+            raise ProviderError(
+                "invalid_provider_response",
+                "Image provider returned no image payload",
+                False,
+            )
+        try:
+            content = base64.b64decode(image.b64_json, validate=True)
+        except (binascii.Error, ValueError):
+            raise ProviderError(
+                "invalid_provider_response",
+                "Image provider returned invalid base64 image data",
+                False,
+            ) from None
+        content_type = "image/png" if command.output_format == "png" else "image/jpeg"
+        try:
+            width, height, extension = validate_image_content(content, content_type)
+        except ImageFetchError as error:
+            raise ProviderError(error.code, error.message, error.retryable) from None
+        return FetchedImage(
+            content=content,
+            content_type=content_type,
+            width=width,
+            height=height,
+            extension=extension,
         )
 
     def _try_acquire(self, connection_id: str) -> str | None:
@@ -515,6 +659,12 @@ class StoredConnectionResolver:
             provider_id=str(connection.get("providerId", "")),
             api_base=str(connection.get("apiBase", "")),
             enabled=connection.get("enabled") is True,
+            last_test_ok=(
+                connection.get("lastTest", {}).get("ok")
+                if isinstance(connection.get("lastTest"), dict)
+                and isinstance(connection["lastTest"].get("ok"), bool)
+                else None
+            ),
         )
 
     def get_credential(self, connection_id: str) -> str | None:
@@ -537,8 +687,12 @@ class PromptCardStorageClient:
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         return self._json("PATCH", f"/api/image-generation-runs/{quote(run_id, safe='')}/state", json=patch)
 
-    def get_run(self, run_id: str) -> dict[str, Any]:
-        return self._json("GET", f"/api/image-generation-runs/{quote(run_id, safe='')}")
+    def get_run(self, run_id: str, project_id: str) -> dict[str, Any]:
+        return self._json(
+            "GET",
+            f"/api/image-generation-runs/{quote(run_id, safe='')}",
+            params={"projectId": project_id},
+        )
 
     def load_asset(self, asset_id: str) -> StorageAsset:
         try:
@@ -580,6 +734,7 @@ def build_default_image_generation_service() -> ImageGenerationService:
         connections=StoredConnectionResolver(get_connection_store()),
         provider_factory=_provider_for,
         result_fetcher=ImageResultFetcher(),
+        readiness_probe=collect_image_generation_status,
     )
 
 
@@ -606,7 +761,13 @@ def _queued_run(command: GenerationCommand) -> dict[str, Any]:
                 "segments": [_prompt_segment_snapshot(segment) for segment in command.prompt_document.segments],
             },
             "inputAssets": [
-                {"referenceId": item.reference_id, "assetId": item.asset_id, "order": item.order}
+                {
+                    "referenceId": item.reference_id,
+                    "assetId": item.asset_id,
+                    **({"sourceAssetId": item.source_asset_id} if item.source_asset_id is not None else {}),
+                    "role": item.role,
+                    "order": item.order,
+                }
                 for item in command.inputs
             ],
             "regions": [_region_snapshot(region) for region in command.regions],
@@ -616,6 +777,7 @@ def _queued_run(command: GenerationCommand) -> dict[str, Any]:
             **({"height": command.height} if command.aspect_ratio == "custom" and command.height is not None else {}),
             "outputFormat": command.output_format,
             "watermark": command.watermark,
+            "promptOptimization": command.prompt_optimization,
         },
         "outputAssetIds": [],
     }
@@ -671,10 +833,10 @@ def _capture_payload(command: GenerationCommand, image: FetchedImage, asset_id: 
     }
 
 
-def _required_response_id(payload: dict[str, Any], kind: str) -> str:
+def _required_response_id(payload: dict[str, Any], _kind: str) -> str:
     value = payload.get("id")
     if not isinstance(value, str) or not value:
-        raise StorageGatewayError(f"Missing {kind} id")
+        raise StorageGatewayError()
     return value
 
 

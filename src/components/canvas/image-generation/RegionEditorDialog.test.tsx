@@ -1,4 +1,10 @@
-import { Children, isValidElement, type ReactElement, type ReactNode } from 'react'
+import {
+  Children,
+  isValidElement,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactElement,
+  type ReactNode
+} from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { describe, expect, it, vi } from 'vitest'
@@ -6,6 +12,7 @@ import {
   RegionEditorDialog,
   RegionEditorDialogView
 } from './RegionEditorDialog'
+import { trapFocusWithinDialog } from './dialog-focus'
 import type { BoundImageRegion, ImageRegionCapabilities } from '@/domain/image-generation/regions'
 
 const capabilities: ImageRegionCapabilities = {
@@ -285,5 +292,48 @@ describe('RegionEditorDialog', () => {
       x: 100,
       y: 100
     }])
+  })
+
+  it('maps pointer coordinates through the same zoom transform used by overlays', () => {
+    const onSave = vi.fn()
+    const renderer = mountEditor(
+      <RegionEditorDialog
+        scopeKey="generator-zoom"
+        mode="region-edit"
+        capabilities={capabilities}
+        sources={[source]}
+        initialRegions={[]}
+        onSave={onSave}
+      />
+    )
+    const root = renderer.root
+    act(() => root.findByProps({ 'aria-label': 'Zoom in' }).props.onClick())
+    act(() => root.findByProps({ 'aria-label': 'Zoom in' }).props.onClick())
+    const viewport = root.find(node => typeof node.props.onPointerDown === 'function')
+    act(() => viewport.props.onPointerDown(pointerEvent(250, 250)))
+    act(() => root.findByProps({ 'data-save-regions': true }).props.onClick())
+
+    expect(onSave).toHaveBeenCalledWith([expect.objectContaining({
+      type: 'point',
+      x: 333,
+      y: 333
+    })])
+  })
+
+  it('traps tab focus inside the dialog', () => {
+    const first = { focus: vi.fn() }
+    const last = { focus: vi.fn() }
+    const preventDefault = vi.fn()
+    const dialog = {
+      querySelectorAll: () => [first, last]
+    } as unknown as HTMLElement
+
+    expect(trapFocusWithinDialog(
+      { key: 'Tab', shiftKey: false, preventDefault } as unknown as ReactKeyboardEvent,
+      dialog,
+      last as unknown as Element
+    )).toBe(true)
+    expect(preventDefault).toHaveBeenCalled()
+    expect(first.focus).toHaveBeenCalled()
   })
 })

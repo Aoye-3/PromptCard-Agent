@@ -1,6 +1,6 @@
 # Release Checklist
 
-- `npm.cmd run test -- --run`
+- `npm.cmd test -- --run`
 - `npm.cmd run build`
 - `npm.cmd run agent:check` when Agent Runtime changes are included
 - `npm.cmd run tauri:dev` when desktop shell behavior changes
@@ -13,8 +13,15 @@
 - Confirm `public/app-icon.png`, the browser favicon, and generated Tauri icons display the maintained application icon
 - Confirm the Update screen can read/write `logs/desktop-profile/config/update-source.json`
 - Confirm update preview classifies protected data/runtime paths and manual-review paths before apply
-- Confirm update preview treats `agent-runtime/backend/`, AgentHarness code, runtime scripts, runtime Docker files, and `agent-runtime/skills/public/` as source-owned
-- Confirm update preview keeps `agent-runtime/.deer-flow/`, `agent-runtime/.agent/`, `.env*`, and `agent-runtime/config.yaml` out of automatic apply
+- Confirm update preview treats `agent-runtime/backend/` and `text-agent-runtime/` as source-owned
+- Confirm update preview keeps `agent-runtime/.promptcard-runtime/`, `agent-runtime/.agent/`, and `.env*` out of automatic apply
 - Confirm update apply rejects a dirty Git worktree before running `git merge --ff-only FETCH_HEAD`
 - Confirm a SQLite/assets backup under `backups/` succeeds before source files are changed
 - Confirm incomplete capabilities are labeled as roadmap or not yet implemented
+- Confirm PromptCard Storage health reports schema v5 before enabling Seedream 5.0 Pro generation
+- Confirm the image-generation Playwright pair starts real SQLite Storage and Runtime DI fake and passes without an existing service on ports `38100–38102`
+- Confirm JPEG/PNG/WebP direct input plus BMP/TIFF/GIF/HEIC/HEIF original-and-derivative import
+- Confirm Windows live Ark smoke tests for text-to-image, 2–10 reference images, smart edit, point, bbox, and raster visual markup
+- Confirm the live Ark matrix includes standard/fast, 1K/2K, preset/custom size, PNG/JPEG, both watermark values, and Arabic/Japanese/German prompts
+- Confirm generated result localization succeeds for the configured URL transport; keep Base64 covered by adapter tests unless the backend transport is intentionally switched
+- Confirm no provider temporary URL, API key, authorization header, local path, or raw provider body appears in Runtime responses, run snapshots, logs, or test output

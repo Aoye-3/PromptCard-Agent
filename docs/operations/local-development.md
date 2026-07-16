@@ -9,22 +9,24 @@ npm.cmd run dev
 npm.cmd run dev:with-agent
 npm.cmd run storage:dev
 npm.cmd run agent:dev
+npm.cmd run text-agent:dev
 npm.cmd run agent:check
 npm.cmd run build
-npm.cmd run test -- --run
+npm.cmd test -- --run
 ```
 
 Command purposes:
 
 - `dev`: start the Vite frontend. It reads `PROMPTCARD_FRONTEND_PORT` when set and otherwise defaults to port `3000`.
-- `dev:with-agent`: allocate local ports, start or reuse the storage service, Agent Runtime, and Vite frontend, then write `logs/dev-runtime.json`.
+- `dev:with-agent`: allocate local ports, start or reuse Storage, the pi text Agent, the Python Gateway, and Vite, then write `logs/dev-runtime.json`.
 - `tauri:dev`: start the desktop dev shell; closing its window also stops the local PromptCard services it uses.
 - `storage:dev`: start only the local storage service. It reads `PROMPTCARD_STORAGE_HOST` and `PROMPTCARD_STORAGE_PORT`, defaulting to `127.0.0.1:8002`.
-- `agent:dev`: start only the Agent Runtime. It reads `GATEWAY_HOST` and `GATEWAY_PORT`, defaulting to `127.0.0.1:8001`.
-- `agent:check`: validate Agent Runtime config loading.
+- `agent:dev`: start only the Python PromptCard Gateway. It reads `GATEWAY_HOST` and `GATEWAY_PORT`, defaulting to `127.0.0.1:8001`.
+- `text-agent:dev`: start only the pi text Agent.
+- `agent:check`: validate the Python Gateway/Ark import and pi TypeScript runtime.
 - `startup:test`: start from `start.bat` and verify the full local startup flow.
 - `build`: run TypeScript and production Vite build.
-- `test -- --run`: run Vitest once.
+- `npm.cmd test -- --run`: run Vitest once.
 
 ## Development Server Control
 
@@ -56,22 +58,24 @@ Runtime manifest shape:
   "frontendUrl": "http://127.0.0.1:<frontend-port>/",
   "agentUrl": "http://127.0.0.1:<agent-port>",
   "agentHealthUrl": "http://127.0.0.1:<agent-port>/health",
+  "textAgentUrl": "http://127.0.0.1:<text-agent-port>",
+  "textAgentHealthUrl": "http://127.0.0.1:<text-agent-port>/health",
   "storageUrl": "http://127.0.0.1:<storage-port>",
   "storageHealthUrl": "http://127.0.0.1:<storage-port>/health"
 }
 ```
 
-Storage reuse requires service version `2.0.0`, schema version `2`, SQLite capability, and the expected data directory. Frontend reuse also fetches the Vite entry module and rejects a server that exposes raw CommonJS React modules instead of optimized dependencies.
+Storage reuse requires service version `2.0.0`, schema version `5`, SQLite capability, and the expected data directory. Frontend reuse also fetches the Vite entry module and rejects a server that exposes raw CommonJS React modules instead of optimized dependencies.
 
 The manifest health URLs are the source of truth for local startup success. Historical `logs/*.log` files may exist from older runs, but the current hidden background startup path does not require redirected stdout/stderr logs.
 
-When `agent-runtime/backend/.venv` already exists, the startup scripts run that environment's `python.exe` and `uvicorn.exe` directly. `uv run` remains the fallback for first-time environment creation and uses the repository-local `.uv-cache`.
+Storage and Agent Runtime share the workspace-local `agent-runtime/backend/.python`, `.venv`, and repository `.uv-cache`. On first startup, the Storage launcher provisions/synchronizes that environment before importing `promptcard_storage`; it does not fall back to a Python runtime on another drive. Later starts run the workspace environment's `python.exe` and `uvicorn.exe` directly.
 
 Port selection behavior:
 
 - frontend defaults to port `3000`; if that port is busy and `PROMPTCARD_FRONTEND_PORT` is not set, startup automatically tries the next available local port.
-- agent and storage use dynamic local ports during `dev:with-agent`.
-- explicit `PROMPTCARD_FRONTEND_PORT`, `PROMPTCARD_AGENT_PORT`, or `PROMPTCARD_STORAGE_PORT` values are strict; startup fails if the selected port is occupied.
+- Gateway, pi text Agent, and Storage use dynamic local ports during `dev:with-agent`.
+- explicit `PROMPTCARD_FRONTEND_PORT`, `PROMPTCARD_AGENT_PORT`, `PROMPTCARD_TEXT_AGENT_PORT`, or `PROMPTCARD_STORAGE_PORT` values are strict; startup fails if the selected port is occupied.
 - Vite proxies `/agent-api` and `/storage-api` using `PROMPTCARD_AGENT_URL` and `PROMPTCARD_STORAGE_URL`, so frontend business code keeps same-origin relative routes.
 - Storage health is the one special storage proxy: `/storage-api/health` maps to `<storageUrl>/health`, while normal `/storage-api/*` calls map to `<storageUrl>/api/*`.
 
@@ -102,7 +106,8 @@ npm.cmd run startup:test
 The test starts from `start.bat`, skips the interactive pause through `PROMPTCARD_START_SKIP_PAUSE=1`, and verifies:
 
 - storage service health from `logs/dev-runtime.json`
-- Agent Runtime health from `logs/dev-runtime.json`
+- Python Gateway health from `logs/dev-runtime.json`
+- pi text Agent health from `logs/dev-runtime.json`
 - Vite frontend health from `logs/dev-runtime.json`
 - frontend HTML includes the Vite React entry module
 - browser render check shows the project screen without console errors
@@ -121,10 +126,10 @@ Keep generated runtime dependencies and caches ignored. The Agent scripts keep g
 - uv cache: `.uv-cache`
 - runtime port manifest: `logs/dev-runtime.json`
 - generated Tauri dynamic dev config: `logs/tauri.dev-runtime.conf.json`
-- PromptCard model connection metadata: `$DEER_FLOW_HOME/promptcard-model-connections.json`
+- PromptCard model connection metadata: `$PROMPTCARD_RUNTIME_STATE_DIR/promptcard-model-connections.json`
 - PromptCard model credentials: operating-system keyring entries managed through Model Management
 
-The maintained launchers do not require `API-Key.txt`, `DEEPSEEK_API_KEY`, or `ARK_API_KEY`. The stack must start without model credentials; a credential is read from keyring only for a validated invocation. Never commit API keys, local runtime caches, virtual environments, or generated DeerFlow data.
+The maintained launchers do not require `API-Key.txt`, `DEEPSEEK_API_KEY`, or `ARK_API_KEY`. The stack must start without model credentials; a credential is read from keyring only for a validated invocation. Never commit API keys, local runtime caches, virtual environments, or generated runtime state.
 
 ## Troubleshooting
 
@@ -160,7 +165,9 @@ Then start or reuse the runtime:
 npm.cmd run agent:dev
 ```
 
-Check that one supported key source exists and contains a usable DeepSeek-style key. Prefer setting `PROMPTCARD_AGENT_API_KEY_FILE` when running outside the default local workspace. Do not print the key.
+In Model Management, verify that a tested Volcengine Ark connection is assigned to `chat.primary`. Do not print the key.
+
+If Gateway health succeeds but text messages fail, also check `textAgentHealthUrl` from `logs/dev-runtime.json`. `npm.cmd run text-agent:dev` starts only the pi service for focused diagnosis.
 
 For the PromptCard boundary API, check:
 
@@ -173,7 +180,7 @@ If the raw Agent process starts but this endpoint fails, run `npm.cmd run agent:
 
 ### Agent Check Fails Before Runtime Loads
 
-If `npm.cmd run agent:check` fails with a missing key message, verify the key path resolution order above. A successful config check prints model/tool configuration only, not the secret.
+`npm.cmd run agent:check` does not require a model credential. It verifies the PromptCard Gateway/Ark imports and pi TypeScript runtime. Configure and test the credential through Model Management before a live model call.
 
 ### Missing Playwright Browser
 
@@ -189,7 +196,7 @@ The build may report a CSS warning around slash-containing generated width class
 
 ### Agent Runtime Became Too Large
 
-Check for unexpected generated files outside the ignored runtime paths. The intended local state is `agent-runtime/backend/.venv`, `.uv-cache`, `agent-runtime/.deer-flow`, `data/`, and `logs/`.
+Check for unexpected generated files outside the ignored runtime paths. The intended local state is `agent-runtime/backend/.venv`, `.uv-cache`, `.promptcard-runtime`, `data/`, and `logs/`. The pi runtime has no durable session directory.
 
 ## Roadmap / Not Yet Implemented
 

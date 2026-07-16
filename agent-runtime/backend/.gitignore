@@ -18,11 +18,9 @@ log/*
 .venv
 venv/
 
-# User config file
-config.yaml
-
-# Langgraph
-.langgraph_api
+# PromptCard runtime/test state
+.promptcard-runtime/
+pytest-tmp/
 
 # Claude Code settings
 .claude/settings.local.json

@@ -116,6 +116,7 @@ function New-PromptCardDevRuntime {
     [string]$ManifestPath,
     [string]$FrontendUrlOverride,
     [string]$AgentHealthUrlOverride,
+    [string]$TextAgentHealthUrlOverride,
     [string]$StorageHealthUrlOverride
   )
 
@@ -145,6 +146,18 @@ function New-PromptCardDevRuntime {
   }
 
   $storageHealthUrl = $StorageHealthUrlOverride
+  $textAgentHealthUrl = $TextAgentHealthUrlOverride
+  if (!$textAgentHealthUrl) {
+    $textAgent = Resolve-PromptCardPort -Name "pi text Agent" -EnvName "PROMPTCARD_TEXT_AGENT_PORT" -HostName $hostName -PreferredPort 0 -ReservedPorts $reservedPorts
+    $textAgentUrl = "http://${hostName}:$($textAgent.Port)"
+    $textAgentHealthUrl = "$textAgentUrl/health"
+  }
+  else {
+    $textAgentUrl = Get-PromptCardOrigin $textAgentHealthUrl
+    $textAgentUri = [System.Uri]$textAgentHealthUrl
+    $reservedPorts[[int]$textAgentUri.Port] = $true
+  }
+
   if (!$storageHealthUrl) {
     $storage = Resolve-PromptCardPort -Name "Storage service" -EnvName "PROMPTCARD_STORAGE_PORT" -HostName $hostName -PreferredPort 0 -ReservedPorts $reservedPorts
     $storageUrl = "http://${hostName}:$($storage.Port)"
@@ -159,18 +172,22 @@ function New-PromptCardDevRuntime {
   $frontendUri = [System.Uri]$frontendUrl
   $agentUri = [System.Uri]$agentUrl
   $storageUri = [System.Uri]$storageUrl
+  $textAgentUri = [System.Uri]$textAgentUrl
 
   $runtime = [pscustomobject]@{
-    schemaVersion = 1
+    schemaVersion = 2
     createdAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     frontendUrl = $frontendUrl
     agentUrl = $agentUrl
     agentHealthUrl = $agentHealthUrl
+    textAgentUrl = $textAgentUrl
+    textAgentHealthUrl = $textAgentHealthUrl
     storageUrl = $storageUrl
     storageHealthUrl = $storageHealthUrl
     ports = [pscustomobject]@{
       frontend = [int]$frontendUri.Port
       agent = [int]$agentUri.Port
+      textAgent = [int]$textAgentUri.Port
       storage = [int]$storageUri.Port
     }
   }
@@ -188,11 +205,14 @@ function Set-PromptCardDevRuntimeEnvironment {
   $env:PROMPTCARD_FRONTEND_PORT = [string]$Runtime.ports.frontend
   $env:PROMPTCARD_AGENT_URL = $Runtime.agentUrl
   $env:PROMPTCARD_AGENT_PORT = [string]$Runtime.ports.agent
+  $env:PROMPTCARD_TEXT_AGENT_URL = $Runtime.textAgentUrl
+  $env:PROMPTCARD_TEXT_AGENT_PORT = [string]$Runtime.ports.textAgent
   $env:PROMPTCARD_STORAGE_URL = $Runtime.storageUrl
   $env:PROMPTCARD_STORAGE_PORT = [string]$Runtime.ports.storage
   $env:PROMPTCARD_STORAGE_HEALTH_URL = $Runtime.storageHealthUrl
   $env:GATEWAY_HOST = "127.0.0.1"
   $env:GATEWAY_PORT = [string]$Runtime.ports.agent
+  $env:PROMPTCARD_GATEWAY_INTERNAL_URL = "$($Runtime.agentUrl)/api/promptcard/runtime"
   $env:GATEWAY_CORS_ORIGINS = "$frontendOrigin,http://localhost:$($Runtime.ports.frontend)"
   $env:PROMPTCARD_STORAGE_HOST = "127.0.0.1"
 }
@@ -205,7 +225,11 @@ function Read-PromptCardDevRuntime {
   }
 
   try {
-    return Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    $runtime = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    if ($runtime.schemaVersion -ne 2 -or !$runtime.textAgentHealthUrl -or !$runtime.ports.textAgent) {
+      return $null
+    }
+    return $runtime
   }
   catch {
     return $null

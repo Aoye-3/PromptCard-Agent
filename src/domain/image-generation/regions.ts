@@ -20,6 +20,7 @@ export interface ImageDisplayMetrics {
   imageWidth: number
   imageHeight: number
   devicePixelRatio?: number
+  zoom?: number
 }
 
 export interface ContainedImageRect {
@@ -122,11 +123,14 @@ export const containedImageRect = (metrics: ImageDisplayMetrics): ContainedImage
   )
   const width = metrics.imageWidth * scale
   const height = metrics.imageHeight * scale
+  const zoom = Math.max(0.01, metrics.zoom || 1)
+  const zoomedWidth = width * zoom
+  const zoomedHeight = height * zoom
   return {
-    x: (metrics.viewportWidth - width) / 2,
-    y: (metrics.viewportHeight - height) / 2,
-    width,
-    height
+    x: (metrics.viewportWidth - zoomedWidth) / 2,
+    y: (metrics.viewportHeight - zoomedHeight) / 2,
+    width: zoomedWidth,
+    height: zoomedHeight
   }
 }
 

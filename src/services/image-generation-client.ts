@@ -1,10 +1,13 @@
 import type { ImageGenerationMode } from '@/domain/image-generation/image-generation'
 import { getRuntimeErrorPresentation } from '@/domain/models/model-management'
 import type { PromptDocument } from '@/models/PromptHistory.model'
+import { createRuntimeHttpClient, RuntimeHttpError } from './runtime-http-client'
 
 export type ImageGenerationInput = {
   referenceId: string
+  role?: 'source-image' | 'reference-image'
   assetId: string
+  sourceAssetId?: string
   order: number
 }
 
@@ -28,6 +31,7 @@ export interface ImageGenerationRequest {
   height?: number
   outputFormat: 'png' | 'jpeg'
   watermark: boolean
+  promptOptimization: 'standard' | 'fast'
 }
 
 export interface ImageGenerationResult {
@@ -68,25 +72,21 @@ export const requestImageGeneration = async (
     throw new ImageGenerationClientError('invalid_input', false)
   }
   const request = cloneRequest(input)
-  let response: Response
+  const runtimeRequest = createRuntimeHttpClient(fetcher)
+  let payload: unknown
   try {
-    response = await fetcher('/agent-api/promptcard/runtime/image-generations', {
+    payload = await runtimeRequest('/agent-api/promptcard/runtime/image-generations', {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       body: JSON.stringify(request)
     })
-  } catch {
-    throw new ImageGenerationClientError('service_unavailable', true)
-  }
-
-  const payload = await response.json().catch(() => null) as Record<string, unknown> | null
-  if (!response.ok) {
-    const detail = isRecord(payload?.detail) ? payload.detail : {}
-    const code = safeErrorIdentifier(detail.code, 'generation_failed')
+  } catch (error) {
+    if (!(error instanceof RuntimeHttpError)) {
+      throw new ImageGenerationClientError('service_unavailable', true)
+    }
     throw new ImageGenerationClientError(
-      code,
-      detail.retryable === true,
-      isLocalIdentifier(detail.runId) ? detail.runId : undefined
+      safeErrorIdentifier(error.code, 'generation_failed'),
+      error.retryable,
+      error.runId
     )
   }
   return parseResult(payload)
@@ -170,7 +170,9 @@ const cloneRequest = (input: ImageGenerationRequest): ImageGenerationRequest => 
   },
   inputs: input.inputs.map(item => ({
     referenceId: item.referenceId,
+    ...(item.role ? { role: item.role } : {}),
     assetId: item.assetId,
+    ...(item.sourceAssetId ? { sourceAssetId: item.sourceAssetId } : {}),
     order: item.order
   })),
   regions: input.regions.map(region => region.type === 'point'
@@ -185,12 +187,13 @@ const cloneRequest = (input: ImageGenerationRequest): ImageGenerationRequest => 
     ? { width: input.width, height: input.height }
     : {}),
   outputFormat: input.outputFormat,
-  watermark: input.watermark
+  watermark: input.watermark,
+  promptOptimization: input.promptOptimization
 })
 
-const parseResult = (payload: Record<string, unknown> | null): ImageGenerationResult => {
+const parseResult = (payload: unknown): ImageGenerationResult => {
   if (
-    !payload
+    !isRecord(payload)
     || !isLocalIdentifier(payload.runId)
     || payload.state !== 'succeeded'
     || !isLocalIdentifier(payload.assetId)

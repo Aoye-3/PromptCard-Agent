@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bot, Loader2, RefreshCw, Send, Wand2 } from 'lucide-react'
+import { Bot, Check, Loader2, RefreshCw, Send, Wand2, X } from 'lucide-react'
 import { useAgentStore } from '@/stores/agent.store'
 import { usePresetStore } from '@/stores/preset.store'
 import type {
@@ -41,6 +41,7 @@ export function AgentCollaborationPanel({
   const session = getAgentSession(sessionKey)
   const messages = session.messages
   const running = session.running
+  const pendingProposals = session.proposals.filter(proposal => proposal.status === 'pending')
   const visibleRuntimeError = session.runtimeError || runtimeError
   const { presets, initialized, init } = usePresetStore()
   const [draft, setDraft] = useState('告诉 Agent 你想怎么修改当前选中的提示词卡片。')
@@ -144,6 +145,38 @@ export function AgentCollaborationPanel({
         )}
       </div>
 
+      {pendingProposals.length > 0 && (
+        <div className="shrink-0 space-y-2 border-t border-gray-100 p-3">
+          {pendingProposals.slice(-3).map(proposal => (
+            <div key={proposal.id} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <div className="text-xs font-black text-amber-900">{proposalTitle(proposal)}</div>
+              <p className="mt-1 line-clamp-3 text-xs leading-5 text-amber-800">{proposalSummary(proposal)}</p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full bg-gray-950 px-3 py-1.5 text-xs font-black text-white"
+                  onClick={async () => {
+                    await onApplyWorkspaceProposal(proposal)
+                    markProposalStatus(proposal.id, 'approved', sessionKey)
+                  }}
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Apply
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded-full border border-amber-300 px-3 py-1.5 text-xs font-black text-amber-900"
+                  onClick={() => markProposalStatus(proposal.id, 'rejected', sessionKey)}
+                >
+                  <X className="h-3.5 w-3.5" />
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className={`${compact ? 'shrink-0 p-3' : 'p-5'} border-t border-gray-100`}>
         <div className={`${compact ? 'mb-2 gap-1.5' : 'mb-3 gap-2'} flex flex-wrap`}>
           <QuickPrompt
@@ -195,6 +228,23 @@ function QuickPrompt({ label, onClick }: { label: string; onClick: () => void })
 
 function isDirectWorkspaceProposal(proposal: AgentWorkspaceProposal) {
   return proposal.kind === 'workspace_card_create' || proposal.kind === 'workspace_card_update'
+}
+
+function proposalTitle(proposal: AgentWorkspaceProposal) {
+  if (proposal.kind === 'free_canvas_text_update') return 'Update selected text node'
+  if (proposal.kind === 'free_canvas_text_create') return 'Create text node'
+  if (proposal.kind === 'prompt_library_write_proposal') return 'Add Prompt Library preset'
+  return 'Agent workspace proposal'
+}
+
+function proposalSummary(proposal: AgentWorkspaceProposal) {
+  if (proposal.kind === 'free_canvas_text_update' || proposal.kind === 'free_canvas_text_create') {
+    return proposal.userText
+  }
+  if (proposal.kind === 'prompt_library_write_proposal') {
+    return `${proposal.presetDraft.label}: ${proposal.presetDraft.content}`
+  }
+  return proposal.rationale
 }
 
 function summarizeAppliedChanges(proposals: AgentWorkspaceProposal[]) {

@@ -73,6 +73,6 @@ export default defineConfig({
     }
   },
   test: {
-    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**', 'agent-runtime/**', '**/.pytest_cache/**']
+    exclude: ['node_modules/**', 'dist/**', 'tests/e2e/**', 'agent-runtime/**', '.tmp/**', '**/.pytest_cache/**']
   }
 })

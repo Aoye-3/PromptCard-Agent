@@ -1,5 +1,7 @@
 # Doubao Seedream 5.0 Pro 画布图片节点与模型管理重构实施计划
 
+> Historical execution plan. Its `DEER_FLOW_HOME` and pre-migration model-config references describe the state that was replaced. Current behavior is defined by [ADR-008](../../decisions/ADR-008-provider-neutral-image-generation.md), [ADR-010](../../decisions/ADR-010-project-image-generation-conversations.md), and [Image Generation and Model Management](../../architecture/image-generation-and-model-management.md).
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在当前 PromptCard 画布项目模式中交付可真实运行的 Doubao Seedream 5.0 Pro 图片生成节点，打通快捷提示词、媒体资产、参考图、智能改图、区域重绘、永久生成历史、安全凭据与可替换的模型管理体系。

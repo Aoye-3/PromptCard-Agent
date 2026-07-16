@@ -2,7 +2,9 @@
 
 ## Status
 
-Paused
+Superseded by [ADR-012](../decisions/ADR-012-pi-text-agent-and-ark-runtime.md) and [Plan 006](./006-pi-text-agent-minimal-closed-loop.md)
+
+This document is retained as historical design context. Its DeerFlow/LangGraph assumptions are not current architecture.
 
 ## Date
 

@@ -32,6 +32,8 @@ Free Canvas persists a normalized `image-generator` node and structured prompt/r
 
 PromptCard Storage schema v3 owns append-only `image_generation_runs`. Runs follow `queued -> running -> succeeded|failed`; terminal records have no ordinary update or delete path. Successful output is localized as a normal asset and `generatedResult` Recent Capture before the run becomes `succeeded`. Project or node deletion does not delete runs or their output assets.
 
+Later accepted decisions extend this boundary without changing it: [ADR-010](./ADR-010-project-image-generation-conversations.md) adds project conversations and durable placements in schema v4, while [ADR-011](./ADR-011-original-and-derived-image-assets.md) adds permanent original/derived image relationships in schema v5.
+
 New generation is protected by both the UI flag `imageGenerationNodeV1` and the server flag `PROMPTCARD_IMAGE_GENERATION_NODE_V1`. Disabling either gate stops new requests without making existing history or media unreadable.
 
 ## Alternatives Considered
@@ -64,6 +66,6 @@ New generation is protected by both the UI flag `imageGenerationNodeV1` and the 
 
 - Adding a provider requires catalog metadata, a provider adapter, endpoint/output-host policy, and contract tests; it does not require a new canvas node schema.
 - Keyring availability is an operational prerequisite for saving credentials. There is no plaintext fallback.
-- Storage schema v3 is forward-only. Application rollback must keep v3 history readable.
+- Storage is forward-only. Application rollback must keep the current schema v5 history, conversation, placement, and derivation records readable.
 - Permanent history consumes disk until a separately designed compliance-erasure workflow exists.
 - Seedream 5.0 Pro currently advertises only the implemented 1K/2K, single-output, non-streaming contract. Unsupported 4K, native mask, cancellation, sequential, and grouped output features must not appear in the UI.

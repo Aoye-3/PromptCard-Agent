@@ -42,9 +42,15 @@ describe('image generation session', () => {
     expect(buildImageGenerationRequest('project-1', node, snapshot)).toEqual({
       projectId: 'project-1', nodeId: 'generator-1', connectionId: 'ark-primary', modelId: 'seedream',
       mode: 'region-edit', promptDocument: snapshot.promptDocument,
-      inputs: [{ referenceId: 'source-ref', assetId: 'asset-source', order: 0 }],
+      inputs: [{
+        referenceId: 'source-ref',
+        role: 'source-image',
+        assetId: 'asset-source',
+        order: 0
+      }],
       regions: [{ type: 'bbox', referenceId: 'source-ref', x1: 100, y1: 200, x2: 400, y2: 600 }],
-      resolution: '2K', aspectRatio: '16:9', outputFormat: 'png', watermark: false
+      resolution: '2K', aspectRatio: '16:9', outputFormat: 'png', watermark: false,
+      promptOptimization: 'standard'
     })
   })
 

@@ -3,6 +3,9 @@ export type ModelSlot = 'chat.primary' | 'image.primary'
 export type ImageModelMode = 'generate' | 'edit' | 'region-edit'
 export type ImageOutputFormat = 'png' | 'jpeg'
 export type ImageRegionInput = 'point' | 'bbox'
+export type ImagePromptOptimizationMode = 'standard' | 'fast'
+export type ImageAnnotationInput = 'raster-markup'
+export type ImageResponseTransport = 'url' | 'b64_json'
 
 export interface ModelProvider {
   id: string
@@ -11,8 +14,8 @@ export interface ModelProvider {
 }
 
 export interface ModelCapabilities {
-  modes?: string[]
-  resolutions?: string[]
+  modes?: ImageModelMode[]
+  resolutions?: Array<'1K' | '2K'>
   aspectRatios?: string[]
   customSize?: {
     minPixels: number
@@ -20,11 +23,26 @@ export interface ModelCapabilities {
     minAspectRatio: number
     maxAspectRatio: number
   } | null
-  outputFormats?: string[]
+  outputFormats?: ImageOutputFormat[]
   watermark?: boolean
   maxReferenceImages?: number
   mentionStrategy?: string
-  regionInputs?: string[]
+  promptOptimization?: {
+    modes: ImagePromptOptimizationMode[]
+    default: ImagePromptOptimizationMode
+  }
+  inputConstraints?: {
+    formats: string[]
+    maxImages: number
+    maxBytesPerImage: number
+    maxPixelsPerImage: number
+    minSideExclusive: number
+    minAspectRatio: number
+    maxAspectRatio: number
+  }
+  annotationInputs?: ImageAnnotationInput[]
+  regionInputs?: ImageRegionInput[]
+  responseTransports?: ImageResponseTransport[]
   outputCount?: number
   streaming?: boolean
 }
@@ -141,11 +159,19 @@ const RUNTIME_ERROR_PRESENTATIONS: Record<string, RuntimeErrorPresentation> = {
   connection_test_failed: { message: '所选模型连接的最近一次测试失败。', action: '前往连接' },
   assignment_missing: { message: '尚未配置默认图片模型。', action: '前往配置' },
   runtime_disabled: { message: '图片生成服务尚未启用。', action: '查看服务状态' },
+  image_generation_disabled: { message: '图片生成服务尚未启用。', action: '查看服务状态' },
   ark_sdk_missing: { message: 'Ark SDK 尚未安装或无法导入。', action: '重新检测' },
   ark_sdk_incompatible: { message: 'Ark SDK 版本不兼容。', action: '重新检测' },
   ark_sdk_check_failed: { message: '无法检测 Ark SDK。', action: '重新检测' },
   invalid_size: { message: '所选图片尺寸不受支持。', action: '修改参数' },
+  invalid_custom_size: { message: '自定义图片尺寸不符合模型限制。', action: '修改参数' },
+  too_many_images: { message: '图片输入超过模型上限。', action: '修改参数' },
   invalid_input: { message: '图片生成输入无效。', action: '修改参数' },
+  invalid_input_asset: { message: '参考图片不符合模型要求。', action: '修改参数' },
+  input_images_too_large: { message: '参考图片总大小超过限制。', action: '修改参数' },
+  csrf_validation_failed: { message: '服务安全校验失败，请刷新后重试。', action: '刷新重试' },
+  request_forbidden: { message: '当前请求未通过安全校验。', action: '刷新重试' },
+  authentication_failed: { message: '模型服务凭据无效。', action: '更新凭据' },
   invalid_runtime_response: { message: '图片生成服务返回了无效结果。', action: '稍后重试' },
   generation_busy: { message: '当前模型连接正在处理其他请求。', action: '稍后重试' },
   rate_limited: { message: '图片服务请求过于频繁，请稍后重试。', action: '稍后重试' },

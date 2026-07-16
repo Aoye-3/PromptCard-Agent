@@ -44,22 +44,22 @@ Quick-message UI drafts contain only `name` and `body`; reference media remains 
 
 `agent.store` owns frontend Agent runtime state:
 
-- runtime and auth status
-- current user
-- models, skills, tools, built-in tool names, and subagent flag
-- active thread ID
-- Agent messages
-- running state
-- parsed Agent workspace proposals
-- Prompt library write proposals
+- runtime, local browser-session, catalog, and model-assignment status
+- per-surface pi thread IDs
+- Agent messages and running state
+- parsed pending Canvas text proposals
+- pending Prompt Library create proposals
 
 It delegates HTTP calls to `agent-runtime-service`.
 
 Agent permission scope is enforced before proposals reach UI execution:
 
-- `prompt-library-agent` is reserved for the Prompt Library page, where Prompt decomposition, additive write proposals, and approval live.
-- `workspace-chatbot-agent` is used by builder AIChatbotBox surfaces. It can apply current-workspace changes such as card and storyboard updates, but Prompt Library write proposals are filtered out and cannot be approved there.
-- The Agent dashboard is diagnostic; it does not own Prompt Library write approval.
+- `prompt-library-agent` is reserved for Prompt Library decomposition and additive create proposals.
+- `workspace-chatbot-agent` is the Free Canvas text-writing surface. A selected text node permits only an exact-node update proposal; no selected text node permits only a create proposal.
+- `media-analysis-agent` analyzes one explicitly selected image and cannot emit mutation proposals.
+- The Agent dashboard is diagnostic and model-management oriented; it does not own Prompt Library or Canvas approval.
+
+pi thread history is process-local. Reuse is valid only when `threadId`, `sessionKey`, `projectId`, and `mode` remain compatible.
 
 ## Storage Model
 
@@ -199,16 +199,15 @@ The proposal is not a preset until the user approves it.
 
 ### `AgentWorkspaceProposal`
 
-`AgentWorkspaceProposal` is the shared parsed output shape for Agent-authored changes. Current supported kinds are:
+`AgentWorkspaceProposal` is the shared parsed output shape for Agent-authored changes. The maintained pi runtime emits:
 
-- `workspace_card_update`: update existing card titles and/or content by real `cardId`
-- `workspace_card_create`: add a new card to the current card workspace
-- `storyboard_update`: update storyboard sequence or row fields
-- `three_stage_field_update`: update a focused three-stage field
-- `free_canvas_text_update`: update only user text segments on a Free Canvas text node
-- `prompt_library_write_proposal`: create a new Prompt library preset after approval in Prompt Library scope
+- `free_canvas_text_update`: replace or append only the user-text segment of the exact selected Free Canvas text node;
+- `free_canvas_text_create`: create a new Free Canvas text node when no text node is selected;
+- `prompt_library_write_proposal`: create a new Prompt Library preset after approval in Prompt Library scope.
 
-In builder AIChatbotBox surfaces, card workspace proposals are applied immediately when `autoApplyWorkspaceChanges` is enabled. Prompt library proposals are filtered out in workspace scope and can only be approved from the Prompt Library page.
+All three remain pending until explicit Apply/Reject. Prompt Library proposals are filtered out of workspace scope, and Canvas proposals are not accepted in Prompt Library scope.
+
+The TypeScript union and parser retain older `workspace_card_*`, `storyboard_update`, and `three_stage_field_update` shapes for compatibility. The focused pi runtime has no tools that emit them.
 
 The Prompt Library page owns batch proposal approval. Selected pending create proposals are converted into `IPreset` drafts through `preset.store.addPreset()`, then marked approved. Batch rejection only marks proposals rejected; it does not mutate Prompt Library records.
 
@@ -231,4 +230,4 @@ Free Canvas loading normalizes missing project data by creating an empty `freeCa
 - There is no production server-side project database in the current frontend app.
 - There is no schema migration framework beyond current normalization helpers.
 - Agent proposal persistence is currently frontend store state, not an independent durable audit log.
-- Auto-applied card workspace changes rely on normal project/workspace autosave; there is no separate durable Agent action audit log yet.
+- Script/storyboard decomposition proposal types are not part of the current pi tool surface.

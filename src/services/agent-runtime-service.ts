@@ -96,11 +96,6 @@ const messageText = (content: unknown): string => {
 export const agentRuntimeService = {
   health: () => requestJson<Record<string, unknown>>(`${PROMPTCARD_RUNTIME_BASE}/status`),
 
-  setupStatus: () =>
-    requestJson<{ needs_setup?: boolean; initialized?: boolean }>(
-      `${AGENT_API_BASE}/v1/auth/setup-status`
-    ),
-
   bootstrap: () =>
     requestJson<{ user?: unknown; expires_in?: number }>(
       `${PROMPTCARD_RUNTIME_BASE}/bootstrap`,
@@ -110,26 +105,6 @@ export const agentRuntimeService = {
         body: JSON.stringify({})
       }
     ),
-
-  initialize: (email: string, password: string) =>
-    requestJson(`${AGENT_API_BASE}/v1/auth/initialize`, {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify({ email, password, name: 'PromptCard Admin' })
-    }),
-
-  login: async (email: string, password: string) => {
-    const body = new URLSearchParams()
-    body.set('username', email)
-    body.set('password', password)
-    return requestJson(`${AGENT_API_BASE}/v1/auth/login/local`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body
-    })
-  },
-
-  me: () => requestJson(`${AGENT_API_BASE}/v1/auth/me`),
 
   catalog: () =>
     requestJson<{
@@ -164,6 +139,7 @@ export const agentRuntimeService = {
     sessionKey?: string
     projectId?: string
     workspaceContext?: unknown
+    promptLibrary?: Array<Record<string, unknown>>
   }) =>
     requestJson<{
       threadId: string
@@ -178,6 +154,24 @@ export const agentRuntimeService = {
       ...response,
       proposals: filterProposalsForPermissionScope(response.proposals, body.permissionScope)
     })),
+
+  analyzeMedia: (body: {
+    threadId?: string
+    assetId: string
+    contentType: string
+    analysisType: 'style' | 'freeform' | 'prompt'
+    content: string
+  }) =>
+    requestJson<{
+      threadId: string
+      text: string
+      proposals: AgentWorkspaceProposal[]
+      diagnostics?: Record<string, unknown>
+    }>(`${PROMPTCARD_RUNTIME_BASE}/media-analysis`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify(body)
+    }),
 
   getModelConfig: () =>
     requestJson<DeepSeekModelConfig>(`${PROMPTCARD_RUNTIME_BASE}/model-config`),
@@ -237,7 +231,7 @@ export function parseAgentWorkspaceProposals(
   const seenProposalIds = new Set<string>()
   const jsonCandidates = [
     ...text.matchAll(/```json\s*([\s\S]*?)```/gi),
-    ...text.matchAll(/(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|free_canvas_text_update)"[\s\S]*\})/gi)
+    ...text.matchAll(/(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|free_canvas_text_update|free_canvas_text_create)"[\s\S]*\})/gi)
   ].map(match => match[1])
 
   for (const candidate of jsonCandidates) {
@@ -275,7 +269,7 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
     contextId: typeof proposal.contextId === 'string' ? proposal.contextId : undefined,
     threadId: proposal.threadId ?? null,
     runId: proposal.runId ?? null,
-    agentName: String(proposal.agentName || 'DeepSeek Agent'),
+    agentName: String(proposal.agentName || 'PromptCard Agent'),
     rationale: String(proposal.rationale || ''),
     status: proposal.status === 'approved' || proposal.status === 'rejected' ? proposal.status : 'pending',
     createdAt: Number(proposal.createdAt || Date.now())
@@ -360,6 +354,15 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
       nodeId: String(proposal.nodeId),
       mode: proposal.mode === 'append' ? 'append' : 'replace',
       userText: String(proposal.userText)
+    }
+  }
+
+  if (kind === 'free_canvas_text_create' && typeof proposal.userText === 'string' && proposal.userText.trim()) {
+    return {
+      ...base,
+      kind: 'free_canvas_text_create',
+      title: typeof proposal.title === 'string' ? proposal.title : 'Agent Prompt',
+      userText: proposal.userText
     }
   }
 

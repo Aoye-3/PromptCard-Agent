@@ -32,6 +32,14 @@ Use numbered filenames:
 
 - [001: Cross-Platform Clipboard Asset Workbench](./001-cross-platform-clipboard-asset-workbench.md)
 - [002: Floating Capture Video Asset MVP](./002-floating-capture-video-asset-mvp.md)
-- [003: Agent Positioning And Harness Engineering](./003-agent-positioning-and-harness-engineering.md)
 - [004: Update Module Integration](./004-update-module-integration.md)
-- [005: Seedream Image Node Frontend Interaction](./005-seedream-image-node-frontend-interaction.md)
+
+## Implemented Baselines
+
+- [005: Seedream Project Image Generation Implementation Status](./005-seedream-image-node-frontend-implementation-status.md)
+- [006: pi Text Agent Minimal Closed Loop](./006-pi-text-agent-minimal-closed-loop.md)
+
+## Superseded Plans
+
+- [003: Agent Positioning And Harness Engineering](./003-agent-positioning-and-harness-engineering.md) — superseded by ADR-012 and Plan 006.
+- [005: Seedream Image Node Frontend Interaction](./005-seedream-image-node-frontend-interaction.md) — superseded by ADR-010 and the project-level image-generation implementation.

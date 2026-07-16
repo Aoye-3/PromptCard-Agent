@@ -1,16 +1,12 @@
-# Skills and Tools
+# Text Agent Tools
 
-Runtime skills are loaded from the configured skills path in `agent-runtime/config.yaml`.
+The pi text Agent has a deliberately small tool surface:
 
-The Agent panel shows the current runtime tool and builtin catalog under `Tools / ToolUse`. This is a visibility and diagnostics surface; it does not grant extra permissions beyond the backend runtime configuration and proposal validators.
+- `search_prompt_library`: searches only the bounded snapshot supplied by the frontend.
+- `emit_canvas_text_update`: proposes an update to the exact selected Canvas text node.
+- `emit_canvas_text_create`: proposes a new Canvas text node when no text node is selected.
+- `emit_prompt_library_create`: proposes one additive Prompt Library preset.
 
-The current safe tool surface includes:
+There are no filesystem, shell, web-search, sandbox, MCP, subagent, or direct-write tools.
 
-- web fetch and image search when dependencies are available
-- read-only file tools
-- PromptCard Prompt Library search/read/propose-write tools
-- subagent support through runtime context flags
-
-Direct Prompt Library mutation by an Agent should remain a proposal flow requiring user approval.
-
-Workspace Chatbox surfaces for card, storyboard, and three-stage projects use the shared Agent Runtime with `workspace-chatbot-agent` permission scope. Prompt Library Agent surfaces use `prompt-library-agent` and remain limited to Prompt Library proposals.
+Every `emit_*` tool creates a pending proposal. The frontend must present Apply/Reject controls and remains the only component that can commit a Canvas or Prompt Library change.

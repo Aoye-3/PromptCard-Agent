@@ -11,7 +11,7 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 from PIL import Image, UnidentifiedImageError
 
-MAX_IMAGE_BYTES = 25 * 1024 * 1024
+MAX_IMAGE_BYTES = 200 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
 MAX_REDIRECTS = 3
 OFFICIAL_IMAGE_HOSTS = frozenset({"ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com"})
@@ -184,6 +184,9 @@ def validate_image_content(
     *,
     max_bytes: int = MAX_IMAGE_BYTES,
     max_pixels: int = MAX_IMAGE_PIXELS,
+    min_side_exclusive: int | None = None,
+    min_aspect_ratio: float | None = None,
+    max_aspect_ratio: float | None = None,
 ) -> tuple[int, int, str]:
     normalized_content_type = content_type.split(";", 1)[0].strip().lower()
     expected = ALLOWED_IMAGE_MIME_TYPES.get(normalized_content_type)
@@ -202,6 +205,27 @@ def validate_image_content(
                 width, height = image.size
                 if width <= 0 or height <= 0 or width * height > max_pixels:
                     raise ImageFetchError("image_pixel_budget_exceeded", "Image exceeds the pixel limit", False)
+                if min_side_exclusive is not None and (
+                    width <= min_side_exclusive or height <= min_side_exclusive
+                ):
+                    raise ImageFetchError(
+                        "invalid_image_dimensions",
+                        "Image dimensions are below the supported minimum",
+                        False,
+                    )
+                ratio = width / height
+                if (
+                    min_aspect_ratio is not None
+                    and ratio < min_aspect_ratio
+                ) or (
+                    max_aspect_ratio is not None
+                    and ratio > max_aspect_ratio
+                ):
+                    raise ImageFetchError(
+                        "invalid_image_aspect_ratio",
+                        "Image aspect ratio is unsupported",
+                        False,
+                    )
                 if image.format != expected[0]:
                     raise ImageFetchError("invalid_image_data", "Image type does not match its content", False)
                 image.verify()

@@ -27,20 +27,20 @@ Connection deletion is dependency-aware. Assignment references are authoritative
 
 ## Data flow
 
-1. The project Image Generation tab submits only the current turn's normalized prompt document, local reference `assetId` values, optional point/bounding-box regions, resolution, output format, `connectionId`, `modelId`, and `conversationId` through the browser boundary `POST /agent-api/promptcard/runtime/image-generations`. The Gateway owns the internal `/api/promptcard/runtime/image-generations` route. Browser code must not send Runtime requests through Vite's vendor-facing `/api` proxy. It does not send prior messages. Legacy callers may send `nodeId` instead. The Runtime generates the immutable run ID; clients do not choose it.
+1. The project Image Generation tab submits only the current turn's normalized prompt document, ordered local image inputs, roles (`source-image` or `reference-image`), optional original `sourceAssetId`, point/bounding-box regions, resolution/custom size, prompt-optimization mode, output format, watermark, `connectionId`, `modelId`, and `conversationId` through the browser boundary `POST /agent-api/promptcard/runtime/image-generations`. The shared Runtime HTTP client includes cookies, copies the CSRF cookie into `X-CSRF-Token`, and normalizes string/object error responses. The Gateway owns the internal `/api/promptcard/runtime/image-generations` route. Browser code must not send Runtime requests through Vite's vendor-facing `/api` proxy. It does not send prior messages. Legacy callers may send `nodeId` instead. The Runtime generates the immutable run ID; clients do not choose it.
 2. The Gateway creates a queued run in PromptCard Storage, transitions it to running, then validates connection metadata, catalog capability, prompt/region references, decoded local image assets, and request limits.
 3. Only after validation does the Gateway retrieve the connection credential from the operating-system keyring and construct the selected provider adapter.
-4. The Seedream adapter compiles ordered image mentions and region markup, then calls the Volcengine Ark SDK.
-5. The result fetcher accepts only the exact official HTTPS CDN host, revalidates and pins a public DNS address on every redirect hop, preserves Host/TLS SNI, limits downloads to 25 MB and 40 megapixels, and verifies PNG/JPEG/WebP bytes with Pillow.
+4. The Seedream adapter compiles ordered image mentions and region markup, sends an explicit watermark value, maps `standard`/`fast` to the SDK's native `OptimizePromptOptions`, and calls the Volcengine Ark SDK. It accepts exactly one URL or Base64 result; sequential, stream, web-search, mask, groups, and multi-output parameters are never sent.
+5. URL result localization accepts only the exact official HTTPS CDN host, revalidates and pins a public DNS address on every redirect hop, preserves Host/TLS SNI, limits downloads to the same 200 MB ceiling accepted by Storage and 40 megapixels, and verifies PNG/JPEG/WebP bytes with Pillow. Base64 results pass the same byte, MIME, decode, and pixel checks before Storage receives them.
 6. PromptCard Storage stores the generated file as a local asset, creates a `generatedResult` Recent Capture, and commits the run as succeeded. Failures commit a normalized failed state. Provider URLs and credentials are never persisted.
 
-The request may contain at most ten total input images and 50 MB of loaded input asset bytes. The Runtime permits two concurrent generations per connection and four globally. These are trusted server limits; frontend validation is only an earlier usability check.
+The request may contain at most ten total input images. Each provider input is limited to 30 MB and 36 million pixels, both sides must be greater than 14 pixels, and its aspect ratio must be within `1:16–16:1`; ten maximum-sized inputs therefore have a 300 MB aggregate ceiling. The Runtime permits two concurrent generations per connection and four globally. These are trusted server limits; frontend validation is only an earlier usability check.
 
 Run snapshots and API errors may contain technical identifiers and normalized error codes, but never credentials, authorization headers, provider URL query strings, local filesystem paths, or raw exception text.
 
 ## Credential storage and platform requirements
 
-Connection metadata lives at `$DEER_FLOW_HOME/promptcard-model-connections.json`. It contains provider/model assignments and a `credentialRef`; the secret is stored by Python `keyring` under service `dev.promptcard.manager.shell` and username `connection:<connectionId>`.
+Connection metadata lives at `$PROMPTCARD_RUNTIME_STATE_DIR/promptcard-model-connections.json`. It contains provider/model assignments and a `credentialRef`; the secret is stored by Python `keyring` under service `dev.promptcard.manager.shell` and username `connection:<connectionId>`.
 
 The runtime account must have an available keyring backend:
 
@@ -54,9 +54,11 @@ Do not use `API-Key.txt`, parse `sk-` strings, set `DEEPSEEK_API_KEY`/`ARK_API_K
 
 ## Migration and transactional rollback
 
-Legacy `$DEER_FLOW_HOME/promptcard-model-config.json` data is migrated idempotently into a deterministic DeepSeek connection plus the `chat.primary` assignment. When the legacy record contains `apiKey`, migration writes it to keyring, verifies both keyring and connection state, then removes `apiKey` from the legacy JSON. If any step fails, connection bytes, the legacy file, and the previous keyring value are restored; an incomplete rollback is surfaced explicitly.
+The deprecated model-config compatibility API writes through the same provider-neutral connection store and keyring. New text-Agent configuration should assign a tested Volcengine Ark connection to `chat.primary`.
 
-PromptCard Storage migrates schema v3 to v4 in place by adding permanent project conversations, nullable `conversation_id`/`node_id` run ownership, project/conversation indexes, and canvas placements. Old runs are deterministically grouped by `projectId + nodeId`; migration never creates placement work for old successful runs. The migration does not delete projects, captures, presets, or assets and must not be rolled back to v3.
+PromptCard Storage migrates schema v3 to v4 in place by adding permanent project conversations, nullable `conversation_id`/`node_id` run ownership, project/conversation indexes, and canvas placements. Old runs are deterministically grouped by `projectId + nodeId`; migration never creates placement work for old successful runs.
+
+Schema v5 adds permanent `image_asset_derivations`. Official input formats are JPEG, PNG, WebP, BMP, TIFF, GIF, HEIC, and HEIF. The original upload is always retained. BMP/TIFF/GIF/HEIC/HEIF, rotated standard images, and visual annotations produce provider-safe PNG/JPEG derivatives; GIF/TIFF use the first frame/page, EXIF orientation is applied, and alpha is preserved through PNG. Derivations of kind `preview`, `provider-input`, and `annotation-flattened` strongly reference both source and derived assets. The migration does not delete projects, captures, presets, conversations, runs, placements, or assets and must not be rolled back below v5. See [ADR-011](../decisions/ADR-011-original-and-derived-image-assets.md).
 
 ## History capacity, backup, and restore
 
@@ -71,9 +73,11 @@ python -m promptcard_storage.maintenance --data-dir data backup backups\manual-i
 python -m promptcard_storage.maintenance --data-dir data restore backups\manual-image-generation
 ```
 
-Stop writers before restore. Restore validates schema/integrity and creates a pre-restore snapshot when live storage exists. The Storage backup does not contain operating-system keyring secrets or `$DEER_FLOW_HOME/promptcard-model-connections.json`; after moving to another OS user/profile, restore non-secret connection metadata separately and re-enter credentials through model management.
+Stop writers before restore. Restore validates schema/integrity and creates a pre-restore snapshot when live storage exists. The Storage backup does not contain operating-system keyring secrets or `$PROMPTCARD_RUNTIME_STATE_DIR/promptcard-model-connections.json`; after moving to another OS user/profile, restore non-secret connection metadata separately and re-enter credentials through model management.
 
 ## Seedream 5.0 Pro contract
+
+The authoritative source snapshots for this contract are indexed in [Seedream 官方参考资料](../references/volcengine/seedream/README.md). Check the online document timestamp before changing provider mappings or advertised capabilities.
 
 | Capability | Supported contract |
 | --- | --- |
@@ -81,7 +85,12 @@ Stop writers before restore. Restore validates schema/integrity and creates a pr
 | Reference images | 0-10, unique `referenceId` and order; prompt mentions compile to ordered image labels |
 | Regions | point or bounding box, integer coordinates 0-999; bounding-box minimums must be less than maximums |
 | Resolution | 1K or 2K |
+| Aspect ratio | smart, eight documented presets, or custom dimensions within 921600–4624220 pixels and `1:16–16:1` |
+| Prompt optimization | `standard` (default) or `fast` |
+| Input formats | JPEG, PNG, WebP, BMP, TIFF, GIF, HEIC, HEIF through original + provider-derivative import |
+| Visual markup | freehand, arrow, rectangle, ellipse, and text; saved non-destructively and rasterized to a derived image |
 | Output | exactly one PNG or JPEG; no streaming |
+| Provider response transport | URL or `b64_json`, selected by the backend adapter rather than the ordinary UI |
 | Watermark | boolean request option |
 | Native mask/cancel/4K | not advertised by the current adapter |
 
@@ -94,7 +103,7 @@ The frontend exposes four user workflows over the three provider modes:
 - smart edit -> `edit` with a source image;
 - region edit -> `region-edit` with a source image and point/bounding-box instruction.
 
-A non-empty local PromptDocument overrides an upstream prompt connection; upstream text is used only when the local document is empty. Structured `@` tokens persist stable `referenceId` values. Reordering modifies `inputOrder`, and the Runtime compiler derives the current `图N` labels from that order.
+A non-empty local PromptDocument overrides an upstream prompt connection; upstream text is used only when the local document is empty. Structured `@` tokens persist stable `referenceId` values. Reordering modifies `order`, and the Runtime compiler derives the current `图N` labels from that order. Removing an image does not silently remove its token; the unresolved token blocks generation until it is removed or rebound.
 
 ## Common operational errors
 
@@ -110,7 +119,7 @@ A non-empty local PromptDocument overrides an upstream prompt connection; upstre
 | `unsafe_image_url`, `image_download_failed`, `invalid_image_data` | Provider output failed the remote-result security/decoding boundary. |
 | `storage_write_failed`, `terminal_persistence_failed` | Verify PromptCard Storage health and disk space before retrying. |
 | `image_generation_disabled` | Enable the trusted server rollout flag only after dependencies and a connection are ready. |
-| `input_images_too_large` | Reduce the aggregate bytes of all source/reference images below 50 MB. |
+| `input_images_too_large` | Reduce the aggregate bytes of all source/reference images below 300 MB and keep every image at or below 30 MB. |
 | `generation_busy`, `generation_capacity_reached` | Wait for the per-connection or global concurrency slot to become available. |
 
 ## Adding a second image provider
@@ -131,4 +140,4 @@ New generation requires both rollout gates:
 
 The Runtime itself treats an absent server flag as disabled and checks it before run creation, credential access, or provider invocation. The combined development launcher sets the server flag to `1` when no explicit override is present; production deployment must opt into its own rollout. The frontend flag defaults on in development and off in production unless a persisted setting overrides it. Run `npm.cmd run agent:check`, create and successfully test a Volcengine Ark connection, and assign it to `image.primary` before real-provider smoke testing. Disabling either gate stops new UI generations but leaves existing nodes, connection metadata, run history, Recent Captures, and assets readable.
 
-Never roll PromptCard Storage back from schema v4 to v3. A code rollback must preserve forward-compatible reading of conversations, runs, and placements or keep the current Storage service running until compatible code is restored.
+Never roll PromptCard Storage back below schema v5. A code rollback must preserve forward-compatible reading of conversations, runs, placements, originals, and derivatives or keep the current Storage service running until compatible code is restored.

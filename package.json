@@ -13,6 +13,8 @@
     "storage:test": "python -m unittest discover -s promptcard_storage/tests -p \"test_*.py\"",
     "agent:dev": "powershell -ExecutionPolicy Bypass -File scripts/start-agent-runtime.ps1",
     "agent:check": "powershell -ExecutionPolicy Bypass -File scripts/check-agent-runtime.ps1",
+    "text-agent:dev": "node --experimental-strip-types text-agent-runtime/src/server.ts",
+    "text-agent:check": "tsc -p text-agent-runtime/tsconfig.json",
     "startup:test": "powershell -ExecutionPolicy Bypass -File scripts/test-start-from-bat.ps1",
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 30",
@@ -21,6 +23,8 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@earendil-works/pi-agent-core": "^0.80.8",
+    "@earendil-works/pi-ai": "^0.80.8",
     "@tauri-apps/api": "^2.11.0",
     "@xyflow/react": "^12.11.0",
     "axios": "^1.6.0",

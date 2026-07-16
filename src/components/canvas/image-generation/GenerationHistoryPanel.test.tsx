@@ -10,8 +10,14 @@ const succeeded: ImageGenerationRun = {
   finishedAt: 200, outputAssetIds: ['asset-output.png'],
   requestSnapshot: {
     mode: 'generate', resolution: '2K', outputFormat: 'png', watermark: false,
+    promptOptimization: 'standard',
     promptDocument: { version: 1, segments: [{ type: 'text', text: 'A polished product' }] },
-    inputAssets: [{ referenceId: 'product', assetId: 'asset-input.png', order: 0 }],
+    inputAssets: [{
+      referenceId: 'product',
+      role: 'reference-image',
+      assetId: 'asset-input.png',
+      order: 0
+    }],
     regions: []
   }
 }

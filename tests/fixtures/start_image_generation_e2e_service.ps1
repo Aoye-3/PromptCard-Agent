@@ -27,6 +27,7 @@ if ($Service -eq "runtime") {
 
 $env:PROMPTCARD_AGENT_URL = "http://127.0.0.1:38101"
 $env:PROMPTCARD_STORAGE_URL = "http://127.0.0.1:38102"
+$env:PROMPTCARD_DESKTOP_DEV = "1"
 Set-Location $RepoRoot
-& npm.cmd run dev -- --host 127.0.0.1 --port 38100
+& npm.cmd run dev -- --host 127.0.0.1 --port 38100 --strictPort
 exit $LASTEXITCODE

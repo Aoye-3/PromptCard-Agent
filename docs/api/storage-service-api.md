@@ -4,7 +4,7 @@ The local storage service is the durable source of truth for projects, Prompt Li
 
 ## Health
 
-`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, and `recentCaptures`. Project image-generation conversations require schema version `4`.
+`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, and `recentCaptures`. Full image input/derivation support requires schema version `5`.
 
 - `GET /health`
 
@@ -33,12 +33,34 @@ The generated ID is safe to persist in project metadata and Recent Capture metad
 
 Succeeded image-generation runs also participate in the reference scan through `outputAssetIds`. Deleting a project or capture record must not make a historical generated output appear orphaned.
 
+### Image import and derivatives
+
+- `POST /api/image-assets/import`
+- `POST /api/image-assets/derivations`
+- `GET /api/image-assets/derivations/{sourceAssetId}`
+
+Import accepts raw JPEG, PNG, WebP, BMP, TIFF, GIF, HEIC, and HEIF bytes. The request sends the MIME type in `Content-Type`, the URL-encoded original filename in `X-File-Name`, and the image bytes as the body. It validates the declared signature, 30 MB maximum, 36 million-pixel maximum, sides greater than 14, and `1:16–16:1` aspect ratio. The response returns the permanent original plus preview/provider-input assets and decoded dimensions:
+
+```json
+{
+  "originalAsset": { "id": "original.heic", "contentType": "image/heic" },
+  "previewAsset": { "id": "preview.jpg", "contentType": "image/jpeg" },
+  "providerInputAsset": { "id": "provider.jpg", "contentType": "image/jpeg" },
+  "width": 3024,
+  "height": 4032
+}
+```
+
+PNG/JPEG/WebP can be reused directly when no orientation conversion is required. BMP/TIFF/GIF/HEIC/HEIF are converted to a standard provider derivative; GIF/TIFF use the first frame/page, EXIF orientation is applied, alpha uses PNG, and opaque content uses high-quality JPEG.
+
+The derivation POST records `sourceAssetId`, `derivedAssetId`, kind (`preview`, `provider-input`, or `annotation-flattened`), transform metadata, and an optional non-destructive annotation document. The GET endpoint returns `{ "derivations": [...] }` for the source asset. Both assets remain strong references. There is intentionally no derivative DELETE endpoint.
+
 ## Image Generation Runs
 
 - `POST /api/image-generation-runs`
 - `PATCH /api/image-generation-runs/{id}/state`
 - `GET /api/image-generation-runs?projectId=&nodeId=&conversationId=&cursor=&limit=`
-- `GET /api/image-generation-runs/{id}`
+- `GET /api/image-generation-runs/{id}?projectId=`
 
 There is intentionally no `DELETE` endpoint.
 
@@ -49,7 +71,7 @@ queued -> running -> succeeded
                   -> failed
 ```
 
-Creation requires project, connection, provider, model, normalized request snapshot, an empty `outputAssetIds` list, and at least one of `conversationId` or legacy `nodeId`. The first conversation run atomically creates its conversation row with the queued run. State patches may only contain fields allowed for their target state. Terminal records are immutable, and duplicate IDs return `409`.
+Creation requires project, connection, provider, model, normalized request snapshot, an empty `outputAssetIds` list, and at least one of `conversationId` or legacy `nodeId`. The first conversation run atomically creates its conversation row with the queued run. Run detail and list reads require a matching `projectId`; cross-project IDs return `404`. State patches may only contain fields allowed for their target state. Terminal records are immutable, and duplicate IDs return `409`.
 
 ## Image Generation Conversations And Placements
 

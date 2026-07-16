@@ -4,11 +4,11 @@ The desktop dev shell is a Tauri window for local self-use while the source tree
 
 ## What It Does
 
-- Starts or reuses the local storage service, Agent Runtime, and Vite frontend.
+- Starts or reuses PromptCard Storage, the pi text Agent, the Python Gateway, and the Vite frontend.
 - Opens the main desktop window titled `PromptCard Manager Dev Shell`.
 - Leaves the floating capture toolbar closed by default; users open it from the Capture Bar page when needed.
 - Loads the `frontendUrl` recorded in `logs/dev-runtime.json`, so Vite hot reload still reflects source edits even when port `3000` is already occupied.
-- Exits the whole Tauri app and stops the local storage service, Agent Runtime, and Vite frontend when the main desktop window closes.
+- Exits the whole Tauri app and stops PromptCard Storage, the pi text Agent, the Python Gateway, and the Vite frontend when the main desktop window closes.
 - Shows a desktop-only Update screen in the left sidebar for checking, previewing, backing up, and applying fast-forward source updates.
 
 The main webview sets `dragDropEnabled: false`. Windows requires this for Explorer file drags to reach the React HTML5 handlers used by the free canvas. Re-enabling Tauri's native interception would require a separate native path-to-asset bridge.
@@ -36,7 +36,7 @@ start-desktop.bat
 
 `start-desktop.vbs` is the quiet double-click entry point. It hides PowerShell and only shows a message box if the launcher exits with a non-zero code. `start-desktop.bat` runs the same launcher with visible progress output and is preferred when diagnosing startup.
 
-The desktop launcher prepares or reads `logs/dev-runtime.json`, starts Storage and Agent Runtime in background services-only mode, starts or reuses Vite, validates the frontend entry module, and then opens the Tauri shell. The service gate accepts PromptCard Storage only when `/health` reports `serviceVersion: "2.0.0"`, `schemaVersion: 4`, and SQLite capability; a schema mismatch is a launcher failure rather than a condition delegated to the React startup screen. Keep this contract synchronized with every Storage schema upgrade.
+The desktop launcher prepares or reads `logs/dev-runtime.json`, starts Storage, pi, and the Python Gateway in background services-only mode, starts or reuses Vite, validates the frontend entry module, and then opens the Tauri shell. The service gate accepts PromptCard Storage only when `/health` reports `serviceVersion: "2.0.0"`, `schemaVersion: 5`, and SQLite capability; a schema mismatch is a launcher failure rather than a condition delegated to the React startup screen. Keep this contract synchronized with every Storage schema upgrade.
 
 The launcher sets `PROMPTCARD_DESKTOP_DEV=1` before it starts Vite directly. Vite uses that flag to suppress its normal browser auto-open behavior; double-clicking `start-desktop.vbs` should open the Tauri shell, not a browser tab.
 
@@ -93,7 +93,7 @@ logs/
   tauri.dev-runtime.conf.json
   desktop-profile/
     agent-runtime/
-      .deer-flow/
+      .promptcard-runtime/
     config/
       desktop-shell.json
       update-source.json
@@ -103,7 +103,7 @@ Maintained launchers pass explicit paths to local services:
 
 ```text
 PROMPTCARD_STORAGE_DATA_DIR=<repository>\data
-DEER_FLOW_HOME=<desktop-profile>\agent-runtime\.deer-flow
+PROMPTCARD_RUNTIME_STATE_DIR=<desktop-profile>\agent-runtime\.promptcard-runtime
 PROMPTCARD_LIBRARY_FILE=<repository>\data\prompt-library-presets.json
 PROMPTCARD_LOGS_DIR=<desktop-profile>\logs
 PROMPTCARD_DESKTOP_PROFILE_ROOT=<desktop-profile>
@@ -115,9 +115,9 @@ Plain `npm.cmd run dev:with-agent` uses the repository storage root. All other m
 
 ## Shutdown Behavior
 
-Closing the main Tauri window stops the local PromptCard services resolved through the dev runtime manifest and exits the whole Tauri app. This prevents any open floating capture toolbar from keeping `promptcard-manager-dev-shell.exe` alive after the main window is gone.
+Closing the main Tauri window stops the local PromptCard services resolved through the dev runtime manifest, including pi and the Python Gateway, and exits the whole Tauri app. This prevents any open floating capture toolbar from keeping `promptcard-manager-dev-shell.exe` alive after the main window is gone.
 
-Closing the floating capture toolbar affects only that toolbar window. It must not stop the storage service, Agent Runtime, or Vite frontend. Reopen it from the Capture Bar page.
+Closing the floating capture toolbar affects only that toolbar window. It must not stop Storage, pi, the Python Gateway, or Vite. Reopen it from the Capture Bar page.
 
 Closing only the `start-desktop.bat` launcher terminal does not stop the desktop shell. Use the app window close button when you want the desktop shell and local services to shut down together.
 
@@ -141,7 +141,7 @@ The command set is:
 
 It uses the system Git credentials. The app does not store GitHub tokens or PATs.
 
-Automatic update currently covers AppShell, desktop shell, storage service, Agent Runtime backend, AgentHarness, runtime scripts, runtime Docker files, and bundled public Agent skills through this allowlist:
+Automatic update currently covers AppShell, desktop shell, storage service, the Python Gateway, and the pi text runtime through this allowlist:
 
 ```text
 src/
@@ -152,9 +152,7 @@ docs/
 public/
 vite/
 agent-runtime/backend/
-agent-runtime/scripts/
-agent-runtime/docker/
-agent-runtime/skills/public/
+text-agent-runtime/
 ```
 
 The update classifier continues to block or require manual review for local-only runtime data and configuration:
@@ -165,9 +163,8 @@ data/
 backups/
 .env*
 API-Key.txt
-agent-runtime/.deer-flow/
+agent-runtime/.promptcard-runtime/
 agent-runtime/.agent/
-agent-runtime/config.yaml
 ```
 
 The legacy Tauri command `git_pull_source` remains for compatibility with old desktop builds, but product UI should use the Update screen.

@@ -93,10 +93,13 @@ export const ImageGenerationTurnCard = ({ turn, compact = false, onAction }: Ima
       )}
       {turn.result && onAction && !compact && (
         <div className="flex flex-wrap gap-2" aria-label="生成结果操作">
+          <TurnAction label="查看大图" onClick={() => onAction(turn, 'view')} />
           <TurnAction label="再次生成" onClick={() => onAction(turn, 'again')} />
-          <TurnAction label="重新编辑" onClick={() => onAction(turn, 'edit')} />
+          <TurnAction label="智能改图" onClick={() => onAction(turn, 'edit')} />
+          <TurnAction label="局部修改" onClick={() => onAction(turn, 'region-edit')} />
           <TurnAction label="作为参考图" onClick={() => onAction(turn, 'reference')} />
           <TurnAction label="放入画布" onClick={() => onAction(turn, 'place')} />
+          <TurnAction label="查看本次历史" onClick={() => onAction(turn, 'history')} />
           <TurnAction label="媒体库查看" onClick={() => onAction(turn, 'media')} />
         </div>
       )}

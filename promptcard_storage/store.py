@@ -9,9 +9,14 @@ import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from typing import Any, Callable, Iterator, Literal
 
-from .assets import AssetStore, AssetValidationError
+from .assets import (
+    DEFAULT_MAX_ASSET_BYTES,
+    AssetStore,
+    AssetValidationError,
+    prepare_provider_image,
+)
 from .backup import BackupManager
 from .image_runs import (
     decode_cursor,
@@ -26,7 +31,7 @@ from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DATABASE_NAME = "promptcard.sqlite3"
 JSON_SOURCES = (
     "projects.json",
@@ -56,6 +61,7 @@ class SqliteStore:
         data_dir: Path,
         projects_seed: list[dict[str, Any]] | None = None,
         presets_seed: list[dict[str, Any]] | None = None,
+        image_preparer: Callable[[str, bytes], dict[str, Any]] | None = None,
     ) -> None:
         self.data_dir = data_dir
         self.database_path = data_dir / DATABASE_NAME
@@ -63,6 +69,7 @@ class SqliteStore:
         self.backups_dir = data_dir.parent / "backups"
         self.projects_seed = projects_seed or []
         self.presets_seed = presets_seed or []
+        self._prepare_provider_image = image_preparer or prepare_provider_image
         self._initialize_lock = threading.Lock()
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self._initialize()
@@ -75,7 +82,8 @@ class SqliteStore:
             + self.list_recent_captures()
             + self.list_presets()
             + [entry["payload"] for entry in self.list_preset_trash()]
-            + self._successful_image_run_payloads(),
+            + self._successful_image_run_payloads()
+            + self._image_asset_derivation_payloads(),
             now_ms,
         )
         self._backups = BackupManager(
@@ -106,6 +114,7 @@ class SqliteStore:
                 "imageGenerationRuns": True,
                 "imageGenerationConversations": True,
                 "imageGenerationPlacements": True,
+                "imageAssetDerivations": True,
             },
         }
 
@@ -529,10 +538,13 @@ class SqliteStore:
                 )
         return created
 
-    def get_image_generation_run(self, run_id: str) -> dict[str, Any]:
+    def get_image_generation_run(self, run_id: str, *, project_id: str) -> dict[str, Any]:
+        if not isinstance(project_id, str) or not project_id:
+            raise ValueError("Image generation run projectId is required")
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT payload_json FROM image_generation_runs WHERE id=?", (run_id,)
+                "SELECT payload_json FROM image_generation_runs WHERE id=? AND project_id=?",
+                (run_id, project_id),
             ).fetchone()
         if not row:
             raise MissingItem()
@@ -597,13 +609,14 @@ class SqliteStore:
         cursor: str | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
+        if not isinstance(project_id, str) or not project_id:
+            raise ValueError("Image generation run projectId is required")
         normalized_limit = normalize_page_limit(limit)
         cursor_value = decode_cursor(cursor)
         clauses: list[str] = []
         parameters: list[Any] = []
-        if project_id is not None:
-            clauses.append("project_id=?")
-            parameters.append(project_id)
+        clauses.append("project_id=?")
+        parameters.append(project_id)
         if node_id is not None:
             clauses.append("node_id=?")
             parameters.append(node_id)
@@ -641,12 +654,47 @@ class SqliteStore:
         parameters.append(normalized_limit + 1)
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT id, project_id, title, created_at, updated_at "
-                "FROM image_generation_conversations WHERE project_id=?" + cursor_clause
-                + " ORDER BY updated_at DESC, id DESC LIMIT ?",
+                """
+                SELECT
+                    conversation.id,
+                    conversation.project_id,
+                    conversation.title,
+                    conversation.created_at,
+                    conversation.updated_at,
+                    COUNT(run.id) AS turn_count,
+                    (
+                        SELECT latest.payload_json
+                        FROM image_generation_runs AS latest
+                        WHERE latest.conversation_id=conversation.id
+                          AND latest.project_id=conversation.project_id
+                        ORDER BY latest.created_at DESC, latest.id DESC
+                        LIMIT 1
+                    ) AS latest_payload,
+                    (
+                        SELECT preview.payload_json
+                        FROM image_generation_runs AS preview
+                        WHERE preview.conversation_id=conversation.id
+                          AND preview.project_id=conversation.project_id
+                          AND preview.state='succeeded'
+                        ORDER BY COALESCE(preview.finished_at, preview.created_at) DESC, preview.id DESC
+                        LIMIT 1
+                    ) AS preview_payload
+                FROM image_generation_conversations AS conversation
+                LEFT JOIN image_generation_runs AS run
+                  ON run.conversation_id=conversation.id
+                 AND run.project_id=conversation.project_id
+                WHERE conversation.project_id=?
+                """
+                + cursor_clause.replace("updated_at", "conversation.updated_at").replace("id <", "conversation.id <")
+                + """
+                GROUP BY conversation.id, conversation.project_id, conversation.title,
+                         conversation.created_at, conversation.updated_at
+                ORDER BY conversation.updated_at DESC, conversation.id DESC
+                LIMIT ?
+                """,
                 parameters,
             ).fetchall()
-            conversations = [self._image_conversation_summary(connection, row) for row in rows]
+            conversations = [self._image_conversation_summary_from_aggregate(row) for row in rows]
         has_more = len(conversations) > normalized_limit
         items = conversations[:normalized_limit]
         next_cursor = None
@@ -657,13 +705,44 @@ class SqliteStore:
     def get_image_generation_conversation(self, conversation_id: str, project_id: str) -> dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT id, project_id, title, created_at, updated_at "
-                "FROM image_generation_conversations WHERE id=? AND project_id=?",
+                """
+                SELECT
+                    conversation.id,
+                    conversation.project_id,
+                    conversation.title,
+                    conversation.created_at,
+                    conversation.updated_at,
+                    COUNT(run.id),
+                    (
+                        SELECT latest.payload_json
+                        FROM image_generation_runs AS latest
+                        WHERE latest.conversation_id=conversation.id
+                          AND latest.project_id=conversation.project_id
+                        ORDER BY latest.created_at DESC, latest.id DESC
+                        LIMIT 1
+                    ),
+                    (
+                        SELECT preview.payload_json
+                        FROM image_generation_runs AS preview
+                        WHERE preview.conversation_id=conversation.id
+                          AND preview.project_id=conversation.project_id
+                          AND preview.state='succeeded'
+                        ORDER BY COALESCE(preview.finished_at, preview.created_at) DESC, preview.id DESC
+                        LIMIT 1
+                    )
+                FROM image_generation_conversations AS conversation
+                LEFT JOIN image_generation_runs AS run
+                  ON run.conversation_id=conversation.id
+                 AND run.project_id=conversation.project_id
+                WHERE conversation.id=? AND conversation.project_id=?
+                GROUP BY conversation.id, conversation.project_id, conversation.title,
+                         conversation.created_at, conversation.updated_at
+                """,
                 (conversation_id, project_id),
             ).fetchone()
             if row is None:
                 raise MissingItem()
-            return self._image_conversation_summary(connection, row)
+            return self._image_conversation_summary_from_aggregate(row)
 
     def list_image_generation_conversation_runs(
         self,
@@ -739,26 +818,20 @@ class SqliteStore:
             )
         return updated
 
-    def _image_conversation_summary(
+    def _image_conversation_summary_from_aggregate(
         self,
-        connection: sqlite3.Connection,
         row: sqlite3.Row | tuple[Any, ...],
     ) -> dict[str, Any]:
-        conversation_id, project_id, title, created_at, updated_at = row
-        latest_row = connection.execute(
-            "SELECT payload_json FROM image_generation_runs WHERE conversation_id=? AND project_id=? "
-            "ORDER BY created_at DESC, id DESC LIMIT 1",
-            (conversation_id, project_id),
-        ).fetchone()
-        preview_row = connection.execute(
-            "SELECT payload_json FROM image_generation_runs WHERE conversation_id=? AND project_id=? AND state='succeeded' "
-            "ORDER BY COALESCE(finished_at, created_at) DESC, id DESC LIMIT 1",
-            (conversation_id, project_id),
-        ).fetchone()
-        turn_count = connection.execute(
-            "SELECT COUNT(*) FROM image_generation_runs WHERE conversation_id=? AND project_id=?",
-            (conversation_id, project_id),
-        ).fetchone()[0]
+        (
+            conversation_id,
+            project_id,
+            title,
+            created_at,
+            updated_at,
+            turn_count,
+            latest_payload,
+            preview_payload,
+        ) = row
         summary: dict[str, Any] = {
             "id": conversation_id,
             "projectId": project_id,
@@ -767,12 +840,12 @@ class SqliteStore:
             "updatedAt": updated_at,
             "turnCount": turn_count,
         }
-        if latest_row is not None:
-            latest = json.loads(latest_row[0])
+        if latest_payload is not None:
+            latest = json.loads(latest_payload)
             summary["latestRunId"] = latest["id"]
             summary["latestState"] = latest["state"]
-        if preview_row is not None:
-            output_ids = json.loads(preview_row[0]).get("outputAssetIds", [])
+        if preview_payload is not None:
+            output_ids = json.loads(preview_payload).get("outputAssetIds", [])
             if output_ids:
                 summary["previewAssetId"] = output_ids[0]
         return summary
@@ -787,7 +860,163 @@ class SqliteStore:
             for row in rows
         ]
 
-    def save_asset(self, filename: str, content_type: str, content: bytes, max_bytes: int = 20 * 1024 * 1024) -> dict[str, Any]:
+    def _image_asset_derivation_payloads(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT source_asset_id, derived_asset_id FROM image_asset_derivations"
+            ).fetchall()
+        return [
+            {"sourceAssetId": row[0], "derivedAssetId": row[1]}
+            for row in rows
+        ]
+
+    def import_image_asset(
+        self,
+        filename: str,
+        content_type: str,
+        content: bytes,
+    ) -> dict[str, Any]:
+        prepared = self._prepare_provider_image(content_type, content)
+        original = self.save_asset(filename, content_type, content, max_bytes=30 * 1024 * 1024)
+        if prepared["converted"]:
+            derived_filename = f"{Path(filename).stem}.png" if prepared["contentType"] == "image/png" else f"{Path(filename).stem}.jpg"
+            provider_input = self.save_asset(
+                derived_filename,
+                prepared["contentType"],
+                prepared["content"],
+                max_bytes=30 * 1024 * 1024,
+            )
+        else:
+            provider_input = original
+        transform = {
+            "sourceContentType": content_type.lower(),
+            "outputContentType": provider_input["contentType"],
+            "firstFrameOnly": content_type.lower() in {"image/gif", "image/tiff"},
+            "exifOrientationApplied": True,
+        }
+        preview = self.create_image_asset_derivation({
+            "sourceAssetId": original["id"],
+            "derivedAssetId": provider_input["id"],
+            "kind": "preview",
+            "transform": transform,
+        })
+        provider = self.create_image_asset_derivation({
+            "sourceAssetId": original["id"],
+            "derivedAssetId": provider_input["id"],
+            "kind": "provider-input",
+            "transform": transform,
+        })
+        return {
+            "originalAsset": original,
+            "previewAsset": provider_input,
+            "providerInputAsset": provider_input,
+            "width": prepared["width"],
+            "height": prepared["height"],
+            "derivations": [preview, provider],
+        }
+
+    def create_image_asset_derivation(self, item: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(item, dict):
+            raise ValueError("Image asset derivation must be an object")
+        if set(item) - {
+            "sourceAssetId",
+            "derivedAssetId",
+            "kind",
+            "transform",
+            "annotationDocument",
+        }:
+            raise ValueError("Image asset derivation contains unsupported fields")
+        source_asset_id = item.get("sourceAssetId")
+        derived_asset_id = item.get("derivedAssetId")
+        kind = item.get("kind")
+        if not isinstance(source_asset_id, str) or not source_asset_id:
+            raise ValueError("Image asset derivation sourceAssetId is required")
+        if not isinstance(derived_asset_id, str) or not derived_asset_id:
+            raise ValueError("Image asset derivation derivedAssetId is required")
+        if kind not in {"preview", "provider-input", "annotation-flattened"}:
+            raise ValueError("Image asset derivation kind is invalid")
+        transform = item.get("transform", {})
+        annotation_document = item.get("annotationDocument")
+        if not isinstance(transform, dict):
+            raise ValueError("Image asset derivation transform must be an object")
+        if annotation_document is not None and not isinstance(annotation_document, dict):
+            raise ValueError("Image asset derivation annotationDocument must be an object")
+        created_at = now_ms()
+        derivation_id = uuid.uuid4().hex
+        with self._transaction() as connection:
+            registered = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT asset_id FROM assets WHERE asset_id IN (?, ?)",
+                    (source_asset_id, derived_asset_id),
+                )
+            }
+            if source_asset_id not in registered or derived_asset_id not in registered:
+                raise MissingItem()
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO image_asset_derivations(
+                        id, source_asset_id, derived_asset_id, kind,
+                        transform_json, annotation_document_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        derivation_id,
+                        source_asset_id,
+                        derived_asset_id,
+                        kind,
+                        _json(transform),
+                        _json(annotation_document) if annotation_document is not None else None,
+                        created_at,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateItem(f"{source_asset_id}:{derived_asset_id}:{kind}") from exc
+        return {
+            "id": derivation_id,
+            "sourceAssetId": source_asset_id,
+            "derivedAssetId": derived_asset_id,
+            "kind": kind,
+            "transform": deepcopy(transform),
+            **(
+                {"annotationDocument": deepcopy(annotation_document)}
+                if annotation_document is not None
+                else {}
+            ),
+            "createdAt": created_at,
+        }
+
+    def list_image_asset_derivations(self, source_asset_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, source_asset_id, derived_asset_id, kind,
+                       transform_json, annotation_document_json, created_at
+                FROM image_asset_derivations
+                WHERE source_asset_id=?
+                ORDER BY created_at, id
+                """,
+                (source_asset_id,),
+            ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "sourceAssetId": row[1],
+                "derivedAssetId": row[2],
+                "kind": row[3],
+                "transform": json.loads(row[4]),
+                **(
+                    {"annotationDocument": json.loads(row[5])}
+                    if row[5] is not None
+                    else {}
+                ),
+                "createdAt": row[6],
+            }
+            for row in rows
+        ]
+
+    def save_asset(self, filename: str, content_type: str, content: bytes, max_bytes: int = DEFAULT_MAX_ASSET_BYTES) -> dict[str, Any]:
         try:
             return self._assets.save(filename, content_type, content, max_bytes)
         except LookupError as exc:
@@ -904,6 +1133,19 @@ class SqliteStore:
                 except Exception:
                     connection.rollback()
                     raise
+            if current_version == 4:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._create_image_asset_derivations_v5_schema(connection)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                        (5, "add-image-asset-derivations", now_ms()),
+                    )
+                    connection.commit()
+                    current_version = 5
+                except Exception:
+                    connection.rollback()
+                    raise
             if current_version != SCHEMA_VERSION:
                 raise MigrationError(f"Unsupported SQLite schema version: {current_version}")
 
@@ -933,6 +1175,7 @@ class SqliteStore:
         """)
         self._create_recent_captures_schema(connection)
         self._create_image_generation_v4_schema(connection)
+        self._create_image_asset_derivations_v5_schema(connection)
 
     def _insert_project(self, connection: sqlite3.Connection, item: dict[str, Any], status: str, trash: dict[str, Any] | None = None) -> None:
         connection.execute(
@@ -1035,6 +1278,26 @@ class SqliteStore:
             );
             CREATE INDEX IF NOT EXISTS image_generation_placements_project_state_order
                 ON image_generation_canvas_placements(project_id, state, created_at, run_id);
+        """)
+
+    def _create_image_asset_derivations_v5_schema(self, connection: sqlite3.Connection) -> None:
+        connection.executescript("""
+            CREATE TABLE IF NOT EXISTS image_asset_derivations(
+                id TEXT PRIMARY KEY,
+                source_asset_id TEXT NOT NULL,
+                derived_asset_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('preview','provider-input','annotation-flattened')),
+                transform_json TEXT NOT NULL,
+                annotation_document_json TEXT,
+                created_at INTEGER NOT NULL,
+                UNIQUE(source_asset_id, derived_asset_id, kind),
+                FOREIGN KEY(source_asset_id) REFERENCES assets(asset_id) ON DELETE RESTRICT,
+                FOREIGN KEY(derived_asset_id) REFERENCES assets(asset_id) ON DELETE RESTRICT
+            );
+            CREATE INDEX IF NOT EXISTS image_asset_derivations_source_order
+                ON image_asset_derivations(source_asset_id, created_at, id);
+            CREATE INDEX IF NOT EXISTS image_asset_derivations_derived
+                ON image_asset_derivations(derived_asset_id);
         """)
 
     def _migrate_image_generation_v4(self, connection: sqlite3.Connection) -> None:
@@ -1189,7 +1452,18 @@ JsonCollectionStore = SqliteStore
 
 
 def _content_type_for_path(path: Path) -> str | None:
-    return {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}.get(path.suffix.lower())
+    return {
+        ".bmp": "image/bmp",
+        ".gif": "image/gif",
+        ".heic": "image/heic",
+        ".heif": "image/heif",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".tif": "image/tiff",
+        ".tiff": "image/tiff",
+        ".webp": "image/webp",
+    }.get(path.suffix.lower())
 
 
 def _ensure_unique_ids(items: list[dict[str, Any]], label: str) -> None:

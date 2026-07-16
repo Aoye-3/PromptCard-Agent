@@ -137,7 +137,7 @@ class ImageRunSchemaMigrationTest(unittest.TestCase):
         finally:
             connection.close()
 
-        self.assertEqual(versions, [2, 3, 4])
+        self.assertEqual(versions, [2, 3, 4, 5])
         self.assertEqual(table, ("image_generation_runs",))
         self.assertIn("image_generation_runs_project_order", indexes)
         self.assertIn("image_generation_runs_node_order", indexes)
@@ -171,7 +171,12 @@ class ImageRunStoreTest(unittest.TestCase):
         self.store.trash_projects([updated_project["id"]])
         self.store.delete_project_trash([updated_project["id"]])
 
-        self.assertEqual(self.store.get_image_generation_run(created_run["id"]), created_run)
+        self.assertEqual(
+            self.store.get_image_generation_run(
+                created_run["id"], project_id="project-one"
+            ),
+            created_run,
+        )
         page = self.store.list_image_generation_runs(project_id="project-one")
         self.assertEqual([item["id"] for item in page["runs"]], ["run-retained"])
         with self.assertRaises(MissingItem):
@@ -250,7 +255,12 @@ class ImageRunStoreTest(unittest.TestCase):
                     self.store.update_image_generation_run_state(run["id"], {
                         "state": "succeeded", "outputAssetIds": [asset_id], "finishedAt": 120,
                     })
-                self.assertEqual(self.store.get_image_generation_run(run["id"])["state"], "running")
+                self.assertEqual(
+                    self.store.get_image_generation_run(
+                        run["id"], project_id="project-one"
+                    )["state"],
+                    "running",
+                )
 
     def test_rejects_succeeded_outputs_that_are_not_registered_assets(self) -> None:
         run = self.store.create_image_generation_run(run_payload("run-missing-output"))
@@ -262,7 +272,12 @@ class ImageRunStoreTest(unittest.TestCase):
                 "state": "succeeded", "outputAssetIds": [missing_asset_id], "finishedAt": 120,
             })
 
-        self.assertEqual(self.store.get_image_generation_run(run["id"])["state"], "running")
+        self.assertEqual(
+            self.store.get_image_generation_run(
+                run["id"], project_id="project-one"
+            )["state"],
+            "running",
+        )
 
 
 @unittest.skipUnless(TestClient and create_app, "FastAPI contract dependencies are not installed")
@@ -299,7 +314,13 @@ class ImageRunAppContractTest(unittest.TestCase):
             json={"state": "running", "requestSnapshot": {"mode": "edit"}},
         )
         self.assertEqual(snapshot_patch.status_code, 400)
-        self.assertEqual(self.client.get("/api/image-generation-runs/run-state").json()["state"], "queued")
+        self.assertEqual(
+            self.client.get(
+                "/api/image-generation-runs/run-state",
+                params={"projectId": "project-one"},
+            ).json()["state"],
+            "queued",
+        )
 
         running = self.client.patch(
             "/api/image-generation-runs/run-state/state",
@@ -351,7 +372,13 @@ class ImageRunAppContractTest(unittest.TestCase):
             params={"projectId": "project-one", "nodeId": "node-one", "limit": 1, "cursor": first.json()["nextCursor"]},
         )
         self.assertEqual([item["id"] for item in second.json()["runs"]], ["run-one"])
-        self.assertEqual(self.client.get("/api/image-generation-runs", params={"limit": 101}).status_code, 400)
+        self.assertEqual(
+            self.client.get(
+                "/api/image-generation-runs",
+                params={"projectId": "project-one", "limit": 101},
+            ).status_code,
+            400,
+        )
 
     def test_running_run_can_finish_failed_with_a_stable_error(self) -> None:
         self.assertEqual(

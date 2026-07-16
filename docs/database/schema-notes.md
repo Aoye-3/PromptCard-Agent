@@ -16,6 +16,9 @@ Core frontend schemas:
 - `RecentCaptureItemViewModel`
 - `IFreeCanvasImageGeneratorNode`
 - `ImageGenerationRun`
+- `ImageGenerationConversation`
+- `ImageGenerationCanvasPlacement`
+- `ImageAssetDerivation`
 
 Schema changes should be documented with migration or normalization behavior. Prefer extending `meta` for Prompt Library metadata rather than changing the top-level `IPreset` shape.
 
@@ -91,9 +94,11 @@ The current producers create native `screenshot` records and clipboard `pastedMe
 
 UI code converts durable records to `RecentCaptureItemViewModel` through the media normalization helpers. Preview surfaces resolve image thumbnails from `storage.assets.url(assetId)`. Prompt `meta.media` and Free Canvas image nodes retain that same `assetId`; linkage fields record relationships but never represent additional physical files.
 
-## Image Generator And Run Shapes
+## Image Generation Conversation, Legacy Node, And Run Shapes
 
-`IFreeCanvasImageGeneratorNode` is persisted inside `IPromptProject.freeCanvas.nodes` with `kind: "image-generator"`. It stores provider-neutral intent:
+New generation work is owned by the project-level Image Generation conversation UI. Its unsent `ImageGenerationComposerDraft` is frontend-only and contains the current `PromptDocument`, ordered image inputs, input roles, regions, selected model binding, resolution/ratio/custom size, prompt optimization, format, watermark, and optional annotation document. A draft is cleared after submission except for retained model/size preferences; it is not durable history.
+
+`IFreeCanvasImageGeneratorNode` remains a compatibility shape persisted inside older `IPromptProject.freeCanvas.nodes` records with `kind: "image-generator"`. It stores the former provider-neutral intent:
 
 - `mode: "generate" | "edit" | "region-edit"`
 - `binding: { connectionId, modelId }`
@@ -102,9 +107,9 @@ UI code converts durable records to `RecentCaptureItemViewModel` through the med
 - `regions` with stable `referenceId` and normalized point/bbox coordinates
 - optional `activeRunId` and `primaryAssetId`
 
-Free Canvas edges persist `targetHandle`, input order, and stable `referenceId`. Those fields are part of project normalization and must survive save/reload; provider-specific prompt labels are compiled at invocation time.
+Legacy Free Canvas edges persist `targetHandle`, input order, and stable `referenceId`. Those fields remain part of project normalization so old projects load without loss. The node is now read-only: no Inspector, node mutation, edge change, reload, or selection event may invoke image generation. Its only creation action is an explicit user command that opens the project Image Generation tab and pre-fills a new draft.
 
-`ImageGenerationRun` is not embedded in the project. PromptCard Storage schema v4 persists it independently with:
+`ImageGenerationRun` is not embedded in the project. PromptCard Storage schema v5 persists it independently with:
 
 - project plus conversation or legacy node identity, connection/provider/model identity;
 - immutable `requestSnapshot` containing structured prompt, ordered input assets, regions, and settings;
@@ -112,6 +117,18 @@ Free Canvas edges persist `targetHandle`, input order, and stable `referenceId`.
 - local `outputAssetIds` for success, or a normalized error for failure;
 
 `ImageGenerationConversation` stores project-scoped title/timestamps and derives latest-run, preview-asset, and turn-count summaries from runs. `ImageGenerationCanvasPlacement` stores one successful conversation run as `pending` or `placed` with its ordinary image node ID. Neither record has a normal delete transition.
-- optional provider request ID and numeric usage fields.
+
+Runs may additionally contain an optional provider request ID and sanitized numeric usage fields.
 
 Terminal runs are immutable and have no DELETE endpoint. Run snapshots reject sensitive field names and never contain credentials, provider temporary URLs, or local filesystem paths.
+
+`ImageAssetDerivation` records a permanent source/derived relationship:
+
+- `sourceAssetId`
+- `derivedAssetId`
+- `kind: "preview" | "provider-input" | "annotation-flattened"`
+- conversion/transform metadata
+- optional `ImageAnnotationDocument`
+- creation timestamp
+
+Original and derived assets are both strong references for diagnostics and backup/restore. Visual annotations are non-destructive documents with normalized coordinates; the submitted provider image is a separately stored rasterized derivative.

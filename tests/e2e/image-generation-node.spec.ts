@@ -22,7 +22,7 @@ test('project image conversation uses real Runtime and SQLite while canvas conti
   await expect(page.getByText('默认图片模型已就绪')).toBeVisible()
 
   await page.getByRole('button', { name: '注入当前节点' }).click()
-  const prompt = page.getByRole('textbox', { name: '图片描述' })
+  const prompt = page.getByRole('form', { name: '图片生成输入' }).getByRole('textbox').first()
   await expect(prompt).toHaveValue('银色机械装置，干净产品摄影')
   await prompt.fill('第一轮：银色机械装置，电影感产品摄影')
   const firstGenerationResponse = page.waitForResponse(response => response.url().includes('/image-generations'))

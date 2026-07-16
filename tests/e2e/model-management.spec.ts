@@ -4,10 +4,14 @@ test.setTimeout(90_000)
 
 const secret = 'task15-super-secret'
 const catalog = {
-  providers: [{ id: 'ark', displayName: 'Volcengine Ark', defaultApiBase: 'https://ark.example.test/api/v3' }],
+  providers: [{
+    id: 'volcengine-ark',
+    displayName: 'Volcengine Ark',
+    defaultApiBase: 'https://ark.cn-beijing.volces.com/api/v3'
+  }],
   models: [{
     id: 'doubao-seedream-5-0-pro-260628',
-    providerId: 'ark',
+    providerId: 'volcengine-ark',
     displayName: 'Seedream 5 Pro',
     modality: 'image',
     capabilities: {
@@ -48,6 +52,10 @@ test('creates a credential-backed image connection and assigns image.primary wit
     connections.push(connection)
     await route.fulfill({ json: connection })
   })
+  await page.route('**/agent-api/promptcard/runtime/model-connections/ark-task15/test', async route => {
+    connections[0].lastTest = { ok: true, checkedAt: 1, message: 'Connection ok.' }
+    await route.fulfill({ json: { success: true, message: 'Connection ok.' } })
+  })
   await page.route('**/agent-api/promptcard/runtime/model-assignments', route => route.fulfill({ json: { assignments } }))
   await page.route('**/agent-api/promptcard/runtime/model-assignments/image.primary', async route => {
     assignmentBody = route.request().postDataJSON() as Record<string, unknown>
@@ -55,28 +63,48 @@ test('creates a credential-backed image connection and assigns image.primary wit
     assignments.push(assignment)
     await route.fulfill({ json: assignment })
   })
+  await page.route('**/agent-api/promptcard/runtime/image-generation-status', route => route.fulfill({
+    json: {
+      serverEnabled: true,
+      checkedAt: 1,
+      credentialStore: { available: true },
+      providers: [{
+        providerId: 'volcengine-ark',
+        status: 'ready',
+        sdk: {
+          packageName: 'volcengine-python-sdk',
+          installedVersion: '5.0.36',
+          requiredVersion: '5.0.36',
+          compatible: true,
+          error: null
+        }
+      }]
+    }
+  }))
   await page.goto('/', { waitUntil: 'commit' })
   await page.locator('[data-app-nav-tab="agents"]').click()
+  await page.getByRole('button', { name: '图片生成模型' }).click()
 
   const panel = page.locator('[data-model-management-panel]')
   await expect(panel).toBeVisible()
   await panel.locator('input').nth(0).fill('Task15 Ark')
-  await panel.locator('input').nth(1).fill('https://ark.example.test/api/v3')
+  await expect(panel.getByRole('textbox', { name: 'API 地址' })).toHaveValue('https://ark.cn-beijing.volces.com/api/v3')
+  await expect(panel.getByRole('textbox', { name: 'API 地址' })).toHaveAttribute('readonly', '')
   await panel.locator('input[type="password"]').fill(secret)
-  await panel.locator('[data-model-connection-save]').click()
+  await panel.getByRole('button', { name: '保存并测试' }).click()
 
   await expect(panel.getByText('Task15 Ark', { exact: true }).first()).toBeVisible()
   expect(createBody).toMatchObject({
-    providerId: 'ark',
+    providerId: 'volcengine-ark',
     displayName: 'Task15 Ark',
-    apiBase: 'https://ark.example.test/api/v3',
+    apiBase: 'https://ark.cn-beijing.volces.com/api/v3',
     enabled: true,
     credential: secret
   })
   await expect(panel.locator('input[type="password"]')).toHaveValue('')
   await expect(page.locator('body')).not.toContainText(secret)
 
-  const imageAssignment = panel.locator('label').filter({ hasText: 'image.primary' }).locator('select')
+  const imageAssignment = panel.getByRole('combobox', { name: '选择默认模型' })
   await imageAssignment.selectOption('ark-task15::doubao-seedream-5-0-pro-260628')
   await expect(imageAssignment).toHaveValue('ark-task15::doubao-seedream-5-0-pro-260628')
   expect(assignmentBody).toEqual({

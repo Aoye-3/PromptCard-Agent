@@ -53,4 +53,37 @@ describe('ImageGenerationHistoryDialog', () => {
     expect(focusPrevious).toHaveBeenCalled()
     vi.unstubAllGlobals()
   })
+
+  it('loads conversation and run pages on explicit history actions', () => {
+    const onSelectConversation = vi.fn()
+    const onLoadMoreConversations = vi.fn()
+    const onLoadMoreRuns = vi.fn()
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(
+        <ImageGenerationHistoryDialog
+          open
+          conversations={conversations}
+          onClose={vi.fn()}
+          onContinue={vi.fn()}
+          onSelectConversation={onSelectConversation}
+          onLoadMoreConversations={onLoadMoreConversations}
+          onLoadMoreRuns={onLoadMoreRuns}
+          hasMoreConversations
+          hasMoreRuns={conversationId => conversationId === 'conversation-1'}
+        />
+      )
+    })
+
+    const selectedConversation = renderer.root.findAllByType('button').find(button => (
+      button.props['aria-current'] === 'true'
+    ))
+    act(() => selectedConversation?.props.onClick())
+    act(() => renderer.root.findByProps({ 'aria-label': '加载更多图片生成会话' }).props.onClick())
+    act(() => renderer.root.findByProps({ 'aria-label': '加载更多当前会话记录' }).props.onClick())
+
+    expect(onSelectConversation).toHaveBeenCalledWith('conversation-1')
+    expect(onLoadMoreConversations).toHaveBeenCalledTimes(1)
+    expect(onLoadMoreRuns).toHaveBeenCalledWith('conversation-1')
+  })
 })

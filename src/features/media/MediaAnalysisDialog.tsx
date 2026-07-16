@@ -1,6 +1,7 @@
 import { FileText, MessageSquare, ShieldCheck, Wand2, X } from 'lucide-react'
 import { useState } from 'react'
 import { useI18n } from '@/i18n'
+import { agentRuntimeService } from '@/services/agent-runtime-service'
 import type { RecentCaptureItemViewModel } from './media-types'
 import { RecentCapturePreview } from './RecentCapturePreview'
 
@@ -13,8 +14,12 @@ export const MediaAnalysisDialog = ({
 }) => {
   const { t } = useI18n()
   const [agentInput, setAgentInput] = useState('')
+  const [analysisOutput, setAnalysisOutput] = useState('')
+  const [analysisError, setAnalysisError] = useState('')
+  const [analysisRunning, setAnalysisRunning] = useState(false)
 
   if (!capture) return null
+  const selectedCapture = capture
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t('mediaAnalysisDialogAria')} data-media-analysis-dialog>
@@ -67,15 +72,17 @@ export const MediaAnalysisDialog = ({
               </label>
 
               <div className="grid gap-2 sm:grid-cols-3" aria-label={t('mediaAnalysisActionsAria')}>
-                <PlaceholderAnalysisAction icon={<Wand2 className="h-4 w-4" />} label={t('mediaAnalysisActionStyle')} title={t('mediaAnalysisActionPendingTitle')} />
-                <PlaceholderAnalysisAction icon={<MessageSquare className="h-4 w-4" />} label={t('mediaAnalysisActionSend')} title={t('mediaAnalysisActionPendingTitle')} />
-                <PlaceholderAnalysisAction icon={<FileText className="h-4 w-4" />} label={t('mediaAnalysisActionPrompt')} title={t('mediaAnalysisActionPendingTitle')} />
+                <AnalysisAction icon={<Wand2 className="h-4 w-4" />} label={t('mediaAnalysisActionStyle')} disabled={analysisRunning} onClick={() => runAnalysis('style')} />
+                <AnalysisAction icon={<MessageSquare className="h-4 w-4" />} label={t('mediaAnalysisActionSend')} disabled={analysisRunning || !agentInput.trim()} onClick={() => runAnalysis('freeform')} />
+                <AnalysisAction icon={<FileText className="h-4 w-4" />} label={t('mediaAnalysisActionPrompt')} disabled={analysisRunning} onClick={() => runAnalysis('prompt')} />
               </div>
             </div>
 
             <div className="mx-4 mb-4 flex min-h-[180px] flex-1 flex-col rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4" data-media-analysis-output>
               <div className="text-xs font-black uppercase tracking-wide text-gray-500">{t('mediaAnalysisOutputTitle')}</div>
-              <p className="mt-3 max-w-xl text-sm leading-6 text-gray-500">{t('mediaAnalysisOutputPlaceholder')}</p>
+              <p className={`mt-3 max-w-xl whitespace-pre-wrap text-sm leading-6 ${analysisError ? 'text-red-600' : 'text-gray-600'}`}>
+                {analysisError || analysisOutput || (analysisRunning ? 'Analyzing…' : t('mediaAnalysisOutputPlaceholder'))}
+              </p>
             </div>
 
             <div className="mx-4 mb-4 flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold leading-5 text-emerald-700">
@@ -87,22 +94,43 @@ export const MediaAnalysisDialog = ({
       </div>
     </div>
   )
+
+  async function runAnalysis(analysisType: 'style' | 'freeform' | 'prompt') {
+    setAnalysisRunning(true)
+    setAnalysisError('')
+    try {
+      await agentRuntimeService.bootstrap()
+      const result = await agentRuntimeService.analyzeMedia({
+        assetId: selectedCapture.assetId,
+        contentType: selectedCapture.contentType,
+        analysisType,
+        content: agentInput.trim()
+      })
+      setAnalysisOutput(result.text)
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setAnalysisRunning(false)
+    }
+  }
 }
 
-const PlaceholderAnalysisAction = ({
+const AnalysisAction = ({
   icon,
   label,
-  title
+  disabled,
+  onClick
 }: {
   icon: JSX.Element
   label: string
-  title: string
+  disabled: boolean
+  onClick: () => void
 }) => (
   <button
     type="button"
-    disabled
-    title={title}
-    className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-black text-gray-400 disabled:cursor-not-allowed"
+    disabled={disabled}
+    onClick={onClick}
+    className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
     data-media-analysis-action
   >
     {icon}

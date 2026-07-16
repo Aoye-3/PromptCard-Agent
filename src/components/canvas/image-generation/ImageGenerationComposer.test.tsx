@@ -2,6 +2,7 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { describe, expect, it, vi } from 'vitest'
 import { ImageGenerationComposer } from './ImageGenerationComposer'
 import type { ImageGenerationComposerProps } from './types'
+import type { PromptDocument } from '@/models/PromptHistory.model'
 
 const createProps = (): ImageGenerationComposerProps => ({
   prompt: '生成一张产品图', onPromptChange: vi.fn(),
@@ -52,5 +53,97 @@ describe('ImageGenerationComposer', () => {
 
     expect(props.onUpload).toHaveBeenCalledWith(file)
     expect(props.onSubmit).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses a structured PromptDocument and keeps unresolved reference tokens visible', () => {
+    const document: PromptDocument = {
+      version: 1,
+      segments: [
+        { type: 'text', text: 'Use ' },
+        { type: 'reference', referenceId: 'missing-reference', label: 'Missing' }
+      ]
+    }
+    const props = {
+      ...createProps(),
+      promptDocument: document,
+      onPromptDocumentChange: vi.fn(),
+      unresolvedReferenceIds: ['missing-reference'],
+      references: [{
+        referenceId: 'reference-one',
+        assetId: 'asset-one',
+        label: 'One',
+        imageUrl: '/one.png',
+        mentioned: false,
+        role: 'reference-image' as const,
+        order: 0
+      }]
+    }
+
+    let renderer!: ReactTestRenderer
+    act(() => { renderer = create(<ImageGenerationComposer {...props} />) })
+
+    expect(renderer.root.findByProps({ 'data-reference-id': 'missing-reference' }).props['data-unresolved']).toBe(true)
+    expect(renderer.root.findAllByProps({ 'aria-label': '图片描述' })).toHaveLength(0)
+  })
+
+  it('supports source/reference roles, input ordering, prompt optimization, and custom dimensions', () => {
+    const props: ImageGenerationComposerProps = {
+      ...createProps(),
+      promptOptimizationModes: ['standard', 'fast'],
+      promptOptimization: 'standard',
+      onPromptOptimizationChange: vi.fn(),
+      aspectRatios: ['1:1', 'custom'],
+      aspectRatio: 'custom',
+      customWidth: 2048,
+      customHeight: 2048,
+      onCustomSizeChange: vi.fn(),
+      references: [{
+        referenceId: 'reference-one',
+        assetId: 'asset-one',
+        label: 'One',
+        imageUrl: '/one.png',
+        mentioned: false,
+        role: 'reference-image',
+        order: 0
+      }],
+      onReferenceRoleChange: vi.fn(),
+      onMoveReference: vi.fn()
+    }
+    let renderer!: ReactTestRenderer
+    act(() => { renderer = create(<ImageGenerationComposer {...props} />) })
+    const root = renderer.root
+
+    act(() => root.findByProps({ 'aria-label': '提示词优化' }).props.onChange({ target: { value: 'fast' } }))
+    act(() => root.findByProps({ 'aria-label': '输入角色 One' }).props.onChange({ target: { value: 'source-image' } }))
+    act(() => root.findByProps({ 'aria-label': '下移 One' }).props.onClick())
+    act(() => root.findByProps({ 'aria-label': '自定义宽度' }).props.onChange({ target: { value: '2496' } }))
+    act(() => root.findByProps({ 'aria-label': '自定义高度' }).props.onChange({ target: { value: '1664' } }))
+
+    expect(props.onPromptOptimizationChange).toHaveBeenCalledWith('fast')
+    expect(props.onReferenceRoleChange).toHaveBeenCalledWith('reference-one', 'source-image')
+    expect(props.onMoveReference).toHaveBeenCalledWith('reference-one', 1)
+    expect(props.onCustomSizeChange).toHaveBeenCalledWith(2496, 2048)
+    expect(props.onCustomSizeChange).toHaveBeenCalledWith(2048, 1664)
+  })
+
+  it('accepts every official Seedream input format and blocks the eleventh image', () => {
+    const props: ImageGenerationComposerProps = {
+      ...createProps(),
+      references: Array.from({ length: 10 }, (_, order) => ({
+        referenceId: `reference-${order}`,
+        assetId: `asset-${order}`,
+        label: `${order}`,
+        imageUrl: `/${order}.png`,
+        mentioned: false,
+        role: order === 0 ? 'source-image' : 'reference-image',
+        order
+      }))
+    }
+    let renderer!: ReactTestRenderer
+    act(() => { renderer = create(<ImageGenerationComposer {...props} />) })
+
+    const upload = renderer.root.findByProps({ 'aria-label': '上传本地参考图' })
+    expect(upload.props.accept).toBe('image/jpeg,image/png,image/webp,image/bmp,image/tiff,image/gif,image/heic,image/heif,.heic,.heif')
+    expect(renderer.root.findByProps({ 'aria-label': '打开本地参考图选择' }).props.disabled).toBe(true)
   })
 })

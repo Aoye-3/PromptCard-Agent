@@ -61,6 +61,17 @@ describe('image region coordinates', () => {
     expect(displayToRegionPoint({ x: 200, y: 200 }, scaled)).toEqual({ x: 500, y: 500 })
   })
 
+  it('uses the same centered zoom transform for pointer mapping and overlays', () => {
+    const zoomed: ImageDisplayMetrics = {
+      ...landscape,
+      zoom: 2
+    }
+
+    expect(displayToRegionPoint({ x: 400, y: 400 }, zoomed)).toEqual({ x: 500, y: 500 })
+    expect(regionToDisplayPoint({ x: 0, y: 0 }, zoomed)).toEqual({ x: -400, y: -50 })
+    expect(regionToDisplayPoint({ x: 999, y: 999 }, zoomed)).toEqual({ x: 1200, y: 850 })
+  })
+
   it('round-trips grid coordinates with at most one grid-unit error', () => {
     const original = { x: 137, y: 862 }
     const display = regionToDisplayPoint(original, landscape)

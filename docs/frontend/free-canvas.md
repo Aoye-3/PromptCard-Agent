@@ -22,7 +22,7 @@ Text nodes store visible text as ordered segments:
 - `source: "preset"` segments are template text and default to red.
 - `source: "user"` segments are user-authored text and default to black.
 - The UI presents both as one editable-looking node; color is the only visible distinction.
-- Agent edits are restricted to user segments through `free_canvas_text_update`.
+- Agent edits are restricted to user segments through `free_canvas_text_update`. When no text node is selected, the Agent may instead propose `free_canvas_text_create`.
 
 Quick messages are Prompt Library presets in the dedicated `quick-message` category. Clicking a
 quick message creates a new text node with the preset content as a red `preset` segment; later
@@ -170,6 +170,13 @@ all bounded nodes, edges, and text fields split into:
 
 Builder chatboxes remain workspace scoped and do not grant Prompt Library write permissions.
 
+The current pi policy is selection-driven:
+
+- one selected text node permits only an update proposal for that exact node ID;
+- no selected text node permits only a new text-node proposal;
+- a selected non-text node does not grant mutation access to that node;
+- every proposal requires explicit Apply or Reject.
+
 ## Right Panel Prompt Library Preview
 
 The Free Canvas right panel has an `Agent` / `图片生成` / `Prompt库` segmented switcher.
@@ -186,7 +193,7 @@ The Free Canvas right panel has an `Agent` / `图片生成` / `Prompt库` segmen
 ## Verification
 
 ```powershell
-npm.cmd run test -- --run src/domain/free-canvas/free-canvas-project.test.ts src/utils/agent-workspace.test.ts src/services/agent-runtime-service.test.ts src/utils/storage.test.ts
+npm.cmd test -- --run src/domain/free-canvas/free-canvas-project.test.ts src/utils/agent-workspace.test.ts src/services/agent-runtime-service.test.ts src/utils/storage.test.ts
 npm.cmd run test:e2e -- free-canvas-image-crop.spec.ts
 npm.cmd run test:e2e -- free-canvas-text-node.spec.ts
 npx.cmd playwright test tests/e2e/model-management.spec.ts tests/e2e/image-generation-node.spec.ts --workers=1
@@ -199,10 +206,11 @@ node, adding images by toolbar/drag/paste, resizing a single selected image, ope
 annotation editor, verifying mode-filtered annotation editing, checking that modal `Delete` never
 deletes the image node, confirming arrow/freehand gestures stop on pointer release, cropping an
 image from each edge direction, connecting nodes, switching the side panel between Agent and
-Prompt library preview, and approving a `free_canvas_text_update` proposal.
+Prompt library preview, approving or rejecting a `free_canvas_text_update` proposal, and creating a
+`free_canvas_text_create` proposal when no text node is selected.
 
 Quick-message manual checks should confirm the drawer and lightweight dialog have no note field,
 and that clicking a quick message inserts only a red preset text node even when the preset has
 reference media in Prompt Library.
 
-Image-generation manual checks should confirm connection/assignment selection, stable multi-reference `@` binding after reorder, invalid-edge rejection, 1K/2K/custom validation, point/bbox save and undo, failed-run retry as a new row, generated-result placement from Media, reload recovery, and history retention after project deletion. Do not perform a live Ark smoke test unless the user has configured a keyring credential and explicitly enabled the server rollout flag.
+Image-generation manual checks should confirm connection/assignment selection, explicit canvas text/image injection, stable multi-reference `@` binding after reorder, source/reference role switching, 1K/2K/custom validation, point/bbox save and undo, visual-markup rasterization, failed-run retry as a new row, generated-result placement and Media reuse, reload recovery, and history retention after project deletion. Node selection, edge changes, project reload, and result-node continuation must not call the provider until the user presses Generate. Do not perform a live Ark smoke test unless the user has configured a keyring credential and explicitly enabled the server rollout flag.

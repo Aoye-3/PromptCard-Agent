@@ -27,14 +27,14 @@ if (!$env:PROMPTCARD_DESKTOP_PROFILE_ROOT) {
 
 $ProfileRoot = $env:PROMPTCARD_DESKTOP_PROFILE_ROOT
 $DataDir = Join-Path $ProfileRoot "data"
-$RuntimeStateDir = Join-Path $ProfileRoot "agent-runtime\.deer-flow"
+$RuntimeStateDir = Join-Path $ProfileRoot "agent-runtime\.promptcard-runtime"
 $LogsDir = Join-Path $ProfileRoot "logs"
 $BackupsDir = Join-Path $ProfileRoot "backups"
 $ConfigDir = Join-Path $ProfileRoot "config"
 $DesktopShellConfig = Join-Path $ConfigDir "desktop-shell.json"
 
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $RuntimeStateDir "data") | Out-Null
+New-Item -ItemType Directory -Force -Path $RuntimeStateDir | Out-Null
 New-Item -ItemType Directory -Force -Path $LogsDir | Out-Null
 New-Item -ItemType Directory -Force -Path $BackupsDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
@@ -43,11 +43,6 @@ $LegacyDataDir = Join-Path $RepoRoot "data"
 $ProfileDatabase = Join-Path $DataDir "promptcard.sqlite3"
 if (!(Test-Path -LiteralPath $ProfileDatabase) -and (Test-Path -LiteralPath $LegacyDataDir)) {
   Copy-MissingProfileFiles -SourceDir $LegacyDataDir -DestinationDir $DataDir
-}
-
-$LegacyRuntimeStateDir = Join-Path $RepoRoot "agent-runtime\.deer-flow"
-if ((Test-Path -LiteralPath $LegacyRuntimeStateDir) -and -not (Get-ChildItem -LiteralPath $RuntimeStateDir -Force -ErrorAction SilentlyContinue)) {
-  Copy-MissingProfileFiles -SourceDir $LegacyRuntimeStateDir -DestinationDir $RuntimeStateDir
 }
 
 if (!(Test-Path -LiteralPath $DesktopShellConfig)) {
@@ -62,7 +57,7 @@ if (!(Test-Path -LiteralPath $DesktopShellConfig)) {
 $env:PROMPTCARD_DESKTOP_PROFILE_ROOT = $ProfileRoot
 $env:PROMPTCARD_STORAGE_DATA_DIR = $DataDir
 $env:PROMPTCARD_LOGS_DIR = $LogsDir
-$env:DEER_FLOW_HOME = $RuntimeStateDir
+$env:PROMPTCARD_RUNTIME_STATE_DIR = $RuntimeStateDir
 $env:PROMPTCARD_LIBRARY_FILE = Join-Path $DataDir "prompt-library-presets.json"
 
 if ($InitializeOnly) { return }

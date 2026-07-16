@@ -3,6 +3,7 @@ from __future__ import annotations
 import traceback
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import ANY
 
 import pytest
 
@@ -54,6 +55,7 @@ def generation_request(**overrides: Any) -> ImageGenerationRequest:
         "height": None,
         "output_format": "png",
         "watermark": False,
+        "prompt_optimization": "standard",
     }
     values.update(overrides)
     return ImageGenerationRequest(**values)
@@ -96,8 +98,13 @@ def test_maps_provider_neutral_request_to_exact_ark_sdk_arguments() -> None:
             "output_format": "png",
             "response_format": "url",
             "watermark": False,
+            "optimize_prompt_options": ANY,
         }
     ]
+    assert images.calls[0]["optimize_prompt_options"].model_dump() == {
+        "thinking": None,
+        "mode": "standard",
+    }
     assert result.image.url == "https://example.invalid/result.png"
     assert result.image.size == "2048x2048"
     assert result.request_id == "req-success"
@@ -108,6 +115,131 @@ def test_maps_provider_neutral_request_to_exact_ark_sdk_arguments() -> None:
     assert "sequential_image_generation_options" not in sdk_arguments
     assert "mask" not in sdk_arguments
     assert sdk_arguments["size"] != "4K"
+
+
+@pytest.mark.parametrize("mode", ["standard", "fast"])
+def test_maps_official_prompt_optimization_modes_to_sdk(mode: str) -> None:
+    images = FakeImages(
+        response=SimpleNamespace(
+            data=[SimpleNamespace(url="https://example.invalid/result.png")],
+        )
+    )
+    provider = VolcengineSeedreamProvider(
+        api_key="secret-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    provider.generate(generation_request(prompt_optimization=mode))
+
+    assert images.calls[0]["optimize_prompt_options"].mode == mode
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "ملصق منتج عربي بخط واضح",
+        "日本語の商品ポスター、読みやすい文字",
+        "Deutsches Produktplakat mit klarer Typografie",
+    ],
+)
+def test_preserves_multilingual_prompts_sent_to_sdk(prompt: str) -> None:
+    images = FakeImages(
+        response=SimpleNamespace(
+            data=[SimpleNamespace(url="https://example.invalid/result.png")],
+        )
+    )
+    provider = VolcengineSeedreamProvider(
+        api_key="secret-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    provider.generate(
+        generation_request(
+            prompt_document=PromptDocument(segments=(PromptTextSegment(text=prompt),)),
+            inputs=(),
+        )
+    )
+
+    assert images.calls[0]["prompt"] == prompt
+
+
+def test_rejects_invalid_prompt_optimization_before_calling_sdk() -> None:
+    images = FakeImages(response=None)
+    provider = VolcengineSeedreamProvider(
+        api_key="secret-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.generate(generation_request(prompt_optimization="turbo"))
+
+    assert exc_info.value.code == "unsupported_prompt_optimization"
+    assert images.calls == []
+
+
+def test_accepts_base64_response_and_exposes_sanitized_usage() -> None:
+    images = FakeImages(
+        response=SimpleNamespace(
+            data=[SimpleNamespace(b64_json="aW1hZ2U=", size="1024x1024")],
+            request_id="req-base64",
+            usage=SimpleNamespace(
+                generated_images=1,
+                output_tokens=12,
+                total_tokens=15,
+                tool_usage=SimpleNamespace(web_search=0),
+            ),
+        )
+    )
+    provider = VolcengineSeedreamProvider(
+        api_key="secret-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        response_format="b64_json",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    result = provider.generate(generation_request())
+
+    assert images.calls[0]["response_format"] == "b64_json"
+    assert result.image.url is None
+    assert result.image.b64_json == "aW1hZ2U="
+    assert result.image.size == "1024x1024"
+    assert result.usage == {
+        "generatedImages": 1,
+        "outputTokens": 12,
+        "totalTokens": 15,
+    }
+
+
+@pytest.mark.parametrize("location", ["top", "item"])
+def test_normalizes_error_objects_returned_inside_successful_sdk_response(location: str) -> None:
+    provider_error = SimpleNamespace(
+        code="SensitiveVendorCode",
+        message="api_key=raw-secret vendor rejected request",
+    )
+    response = (
+        SimpleNamespace(data=[], error=provider_error, request_id="req-top-error")
+        if location == "top"
+        else SimpleNamespace(
+            data=[SimpleNamespace(error=provider_error)],
+            request_id="req-item-error",
+        )
+    )
+    images = FakeImages(response=response)
+    provider = VolcengineSeedreamProvider(
+        api_key="secret-key",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        client_factory=lambda **_kwargs: FakeArkClient(images),
+    )
+
+    with pytest.raises(ProviderError) as exc_info:
+        provider.generate(generation_request())
+
+    assert exc_info.value.code == "provider_request_failed"
+    assert exc_info.value.request_id == f"req-{location}-error"
+    assert "raw-secret" not in exc_info.value.message
 
 
 @pytest.mark.parametrize(

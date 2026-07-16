@@ -33,6 +33,7 @@ class FakeConnections:
             provider_id="volcengine-ark",
             api_base="https://ark.cn-beijing.volces.com/api/v3",
             enabled=True,
+            last_test_ok=True,
         )
 
     def get_credential(self, connection_id: str) -> str | None:

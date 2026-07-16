@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.gateway.model_management.connection_store import ModelManagementError
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.promptcard_runtime import (
+    PromptCardInternalChatRequest,
+    PromptCardMediaAnalysisRequest,
     PromptCardModelConfigRequest,
     PromptCardRuntimeMessageRequest,
     runtime_service,
@@ -71,6 +73,22 @@ async def test_model_config(body: PromptCardModelConfigRequest, request: Request
 async def messages(body: PromptCardRuntimeMessageRequest, request: Request) -> dict[str, Any]:
     try:
         return await runtime_service.send_message(body, request)
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
+        raise _model_http_error(exc) from None
+
+
+@router.post("/media-analysis", response_model=PromptCardRuntimeMessageResponse)
+async def media_analysis(
+    body: PromptCardMediaAnalysisRequest,
+    request: Request,
+) -> dict[str, Any]:
+    return await runtime_service.analyze_media(body, request)
+
+
+@router.post("/internal/chat")
+async def internal_chat(body: PromptCardInternalChatRequest) -> dict[str, Any]:
+    try:
+        return await runtime_service.internal_chat(body)
     except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _model_http_error(exc) from None
 

@@ -23,6 +23,7 @@ import {
   type ImageRegionCapabilities,
   type ImageRegionSource
 } from '@/domain/image-generation/regions'
+import { trapFocusWithinDialog } from './dialog-focus'
 
 type RegionTool = 'point' | 'bbox'
 
@@ -88,6 +89,7 @@ export const RegionEditorDialog = ({
   const imageRef = useRef<HTMLImageElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
   const dragStartRef = useRef<DisplayPoint | null>(null)
+  const restoreFocusRef = useRef<HTMLElement | null>(null)
   const initialRegionsKey = JSON.stringify(initialRegions)
   const initialRegionsSnapshot = useMemo<BoundImageRegion[]>(
     () => JSON.parse(initialRegionsKey) as BoundImageRegion[],
@@ -131,7 +133,13 @@ export const RegionEditorDialog = ({
   }, [measureImage])
 
   useEffect(() => {
+    restoreFocusRef.current = typeof document === 'undefined'
+      ? null
+      : document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
     dialogRef.current?.focus?.()
+    return () => restoreFocusRef.current?.focus()
   }, [scopeKey])
 
   useEffect(() => {
@@ -156,7 +164,10 @@ export const RegionEditorDialog = ({
     return { x: event.clientX - rect.left, y: event.clientY - rect.top }
   }
 
-  const metricsForEvent = (): ImageDisplayMetrics | null => measureImage() || displayMetrics
+  const metricsForEvent = (): ImageDisplayMetrics | null => {
+    const metrics = measureImage() || displayMetrics
+    return metrics ? { ...metrics, zoom } : null
+  }
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (mode !== 'region-edit' || !activeSource || !activeTool) return
@@ -206,7 +217,7 @@ export const RegionEditorDialog = ({
       canUndo={history.past.length > 0}
       canRedo={history.future.length > 0}
       validationErrors={validation.validationErrors}
-      displayMetrics={displayMetrics}
+      displayMetrics={displayMetrics ? { ...displayMetrics, zoom } : null}
       viewportRef={viewportRef}
       imageRef={imageRef}
       onSelectSource={setActiveSourceReferenceId}
@@ -282,6 +293,7 @@ export const RegionEditorDialogView = ({
       data-region-editor-dialog
       className="space-y-3 rounded-[8px] border border-gray-200 bg-white p-4 outline-none"
       onKeyDown={event => {
+        if (trapFocusWithinDialog(event, event.currentTarget)) return
         if (event.key === 'Escape') onClose?.()
       }}
     >

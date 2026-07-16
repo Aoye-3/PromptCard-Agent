@@ -3,16 +3,26 @@
 Run before merging broad implementation or documentation restructuring:
 
 ```powershell
-npm.cmd run test -- --run
+npm.cmd test -- --run
 npm.cmd run storage:test
 .\agent-runtime\backend\.venv\Scripts\python.exe -m unittest promptcard_storage.tests.test_app
 npx.cmd tsc --noEmit
 npm.cmd run lint
 npm.cmd run build
 npm.cmd run agent:check
+npm.cmd run text-agent:check
 cd agent-runtime/backend
 uv run pytest tests/test_promptcard_runtime_boundary.py -q
 ```
+
+For text-Agent boundary changes, also run:
+
+```powershell
+npm.cmd test -- --run text-agent-runtime/src/proposal-policy.test.ts src/services/agent-runtime-service.test.ts src/stores/agent.store.test.ts
+.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest agent-runtime\backend\tests\test_promptcard_runtime_boundary.py -q -p no:cacheprovider
+```
+
+Verify selected-text update, no-selection create, Prompt Library create-only approval, one-image media analysis, incompatible pi thread rejection, and continued Canvas/image-generation use while the pi service is unavailable. A live Ark call is optional and must use an explicitly configured keyring credential.
 
 For browser-facing changes, also smoke test the local app at:
 
@@ -30,16 +40,20 @@ For model-management or image-generation changes, additionally run from the repo
 npm.cmd test -- --run
 npm.cmd run build
 npm.cmd run agent:check
+$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
 npx.cmd playwright test tests/e2e/model-management.spec.ts tests/e2e/image-generation-node.spec.ts --workers=1
-.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests/test_image_runs.py -q
-Push-Location agent-runtime\backend
-.\.venv\Scripts\python.exe -m pytest tests\test_image_generation_service.py tests\test_image_generation_storage_integration.py tests\test_seedream_prompt_compiler.py tests\test_seedream_provider.py tests\test_model_connections.py tests\test_credential_store.py -q
-.\.venv\Scripts\python.exe -m ruff check app tests
-Pop-Location
+.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests -q -p no:cacheprovider
+.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest agent-runtime\backend\tests\test_image_generation_service.py agent-runtime\backend\tests\test_image_generation_storage_integration.py agent-runtime\backend\tests\test_image_result_fetcher.py agent-runtime\backend\tests\test_seedream_prompt_compiler.py agent-runtime\backend\tests\test_seedream_provider.py agent-runtime\backend\tests\test_model_connections.py agent-runtime\backend\tests\test_credential_store.py agent-runtime\backend\tests\test_csrf_middleware.py -q -p no:cacheprovider
+.\agent-runtime\backend\.venv\Scripts\python.exe -m ruff check agent-runtime\backend\app agent-runtime\backend\tests
+cargo test --manifest-path src-tauri/Cargo.toml
 git diff --check
 ```
 
-Keep `TEMP`, `TMP`, Python/uv caches, `PLAYWRIGHT_BROWSERS_PATH`, and `CARGO_TARGET_DIR` on the current F: workspace when these commands need to provision caches. A live Ark smoke test is optional and must never be attempted without a user-configured keyring credential and explicit rollout enablement. Record full-suite baseline failures separately from feature-focused failures.
+The two Playwright specs start their own frontend, real SQLite Storage service, and Runtime with a Provider DI fake on ports `38100–38102`; those ports must be free. This verifies HTTP/CSRF/Storage/UI integration without spending Ark quota or requiring a real credential.
+
+Keep `TEMP`, `TMP`, Python/uv caches, `PLAYWRIGHT_BROWSERS_PATH`, and `CARGO_TARGET_DIR` on the current F: workspace when these commands need to provision caches. A live Ark smoke test must never be attempted without a user-configured keyring credential and explicit rollout enablement. Before production rollout, record Windows results for text-to-image, 2–10 reference images, smart edit, point, bbox, and visual-markup raster derivatives. Also verify standard/fast, 1K/2K, preset/custom size, PNG/JPEG, watermark, and Arabic/Japanese/German prompts. Record full-suite baseline failures separately from feature-focused failures.
+
+Current known non-feature gates are tracked in the [Seedream implementation status](../Plan/005-seedream-image-node-frontend-implementation-status.md): the Runtime full suite includes Windows/POSIX/live-credential environment failures, and repository ESLint has zero errors but exceeds its warning budget. Do not report either as an image-generation regression without reproducing it in the focused commands above.
 
 Manual browser smoke testing is still useful when validating layout or copy. Start the local stack and use the `frontendUrl` in `logs/dev-runtime.json`.
 

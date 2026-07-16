@@ -25,6 +25,12 @@ def _png_bytes() -> bytes:
     return output.getvalue()
 
 
+def _input_png_bytes() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (16, 16), "white").save(output, format="PNG")
+    return output.getvalue()
+
+
 class _Connections:
     def resolve_metadata(self, connection_id: str) -> Any:
         return SimpleNamespace(
@@ -32,6 +38,7 @@ class _Connections:
             provider_id="volcengine-ark",
             api_base="https://ark.cn-beijing.volces.com/api/v3",
             enabled=True,
+            last_test_ok=True,
         )
 
     def get_credential(self, _connection_id: str) -> str:
@@ -141,7 +148,7 @@ def test_runtime_generation_survives_storage_restart_and_project_deletion(tmp_pa
         assert storage_client.post("/api/projects", json=_project_payload()).status_code == 200
         input_response = storage_client.post(
             "/api/assets",
-            content=_png_bytes(),
+            content=_input_png_bytes(),
             headers={"content-type": "image/png", "x-file-name": "input.png"},
         )
         assert input_response.status_code == 200
@@ -165,7 +172,10 @@ def test_runtime_generation_survives_storage_restart_and_project_deletion(tmp_pa
     assert data_dir.joinpath("promptcard.sqlite3").exists()
     with make_storage_client() as restarted_storage:
         run_id = result["runId"]
-        persisted_run = restarted_storage.get(f"/api/image-generation-runs/{run_id}").json()
+        persisted_run = restarted_storage.get(
+            f"/api/image-generation-runs/{run_id}",
+            params={"projectId": "project-1"},
+        ).json()
         assert persisted_run["state"] == "succeeded"
         assert persisted_run["outputAssetIds"] == [result["assetId"]]
         assert restarted_storage.get(f"/api/assets/{result['assetId']}").content == _png_bytes()
@@ -193,7 +203,7 @@ def test_failed_generation_terminal_state_survives_storage_restart(tmp_path, mon
     with make_storage_client() as storage_client:
         input_response = storage_client.post(
             "/api/assets",
-            content=_png_bytes(),
+            content=_input_png_bytes(),
             headers={"content-type": "image/png", "x-file-name": "input.png"},
         )
         provider = _Provider(ProviderError("rate_limited", "Authorization: Bearer provider-secret", True))
@@ -211,7 +221,10 @@ def test_failed_generation_terminal_state_survives_storage_restart(tmp_path, mon
         assert "provider-secret" not in repr(error)
 
     with make_storage_client() as restarted_storage:
-        persisted_run = restarted_storage.get(f"/api/image-generation-runs/{error['runId']}").json()
+        persisted_run = restarted_storage.get(
+            f"/api/image-generation-runs/{error['runId']}",
+            params={"projectId": "project-1"},
+        ).json()
         assert persisted_run["state"] == "failed"
         assert persisted_run["error"]["code"] == "rate_limited"
         assert "provider-secret" not in repr(persisted_run)

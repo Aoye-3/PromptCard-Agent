@@ -36,10 +36,19 @@ describe('project image generation conversations', () => {
   it('builds an independent conversation request without a canvas node or prior turns', () => {
     const draft = {
       ...createEmptyConversationDraft(),
-      prompt: 'Create a quiet observatory',
+      promptDocument: {
+        version: 1 as const,
+        segments: [{ type: 'text' as const, text: 'Create a quiet observatory' }]
+      },
       connectionId: 'ark-primary',
       modelId: 'seedream',
-      inputs: [{ referenceId: 'reference-1', assetId: 'asset-1', order: 0, role: 'reference' as const }]
+      inputs: [{
+        referenceId: 'reference-1',
+        role: 'reference-image' as const,
+        assetId: 'asset-derived',
+        sourceAssetId: 'asset-original',
+        order: 0
+      }]
     }
 
     expect(buildConversationGenerationRequest('project-1', 'conversation-1', draft)).toEqual({
@@ -49,12 +58,19 @@ describe('project image generation conversations', () => {
       modelId: 'seedream',
       mode: 'generate',
       promptDocument: { version: 1, segments: [{ type: 'text', text: 'Create a quiet observatory' }] },
-      inputs: [{ referenceId: 'reference-1', assetId: 'asset-1', order: 0 }],
+      inputs: [{
+        referenceId: 'reference-1',
+        role: 'reference-image',
+        assetId: 'asset-derived',
+        sourceAssetId: 'asset-original',
+        order: 0
+      }],
       regions: [],
-      resolution: '1K',
+      resolution: '2K',
       aspectRatio: '1:1',
       outputFormat: 'png',
-      watermark: false
+      watermark: false,
+      promptOptimization: 'standard'
     })
   })
 
@@ -65,8 +81,15 @@ describe('project image generation conversations', () => {
       imageNode('image-missing')
     ])
 
-    expect(result.draft.prompt).toBe('First prompt')
-    expect(result.draft.inputs).toMatchObject([{ assetId: 'asset-local', order: 0, role: 'reference' }])
+    expect(result.draft.promptDocument).toEqual({
+      version: 1,
+      segments: [{ type: 'text', text: 'First prompt' }]
+    })
+    expect(result.draft.inputs).toMatchObject([{
+      assetId: 'asset-local',
+      order: 0,
+      role: 'reference-image'
+    }])
     expect(result.rejected).toEqual([{ nodeId: 'image-missing', reason: '图片节点没有可用的本地资产。' }])
   })
 
@@ -76,6 +99,7 @@ describe('project image generation conversations', () => {
       connectionId: 'ark-primary', providerId: 'volcengine-ark', modelId: 'seedream', state: 'succeeded',
       requestSnapshot: {
         mode: 'edit',
+        promptOptimization: 'standard',
         promptDocument: { version: 1, segments: [{ type: 'text', text: 'Make it warmer' }] },
         inputAssets: [], regions: [], resolution: '2K', aspectRatio: '16:9', outputFormat: 'png', watermark: false
       },

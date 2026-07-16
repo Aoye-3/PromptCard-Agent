@@ -1,55 +1,67 @@
 # Agent Runtime Backend
 
-The Agent Runtime is a Python service under `agent-runtime/`. It is DeerFlow-derived, but PromptCard-Manager integrates through a PromptCard-owned boundary.
+The maintained Agent backend consists of two small local services.
 
-## Main Modules
+## Python Gateway
 
-- `app/gateway/app.py`: FastAPI app composition and router mounting.
-- `app/gateway/routers/promptcard_runtime.py`: HTTP boundary under `/api/promptcard/runtime/*`.
-- `app/gateway/promptcard_runtime.py`: PromptCard adapter service, DeepSeek model configuration persistence, prompt construction, DeerFlow orchestration, text extraction, proposal parsing, and workspace-id validation.
-- `app/gateway/routers/*`: DeerFlow-native routes retained for internal use and compatibility.
-- `packages/harness/deerflow/tools/promptcard_library.py`: PromptCard tools exposed to the model for reading/proposing Prompt Library and project changes.
+Location: `agent-runtime/backend/app/gateway/`
 
-## Runtime Flow
+Responsibilities:
 
-1. Frontend posts a message to `/agent-api/promptcard/runtime/messages`.
-2. Vite proxies to `${PROMPTCARD_AGENT_URL}/api/promptcard/runtime/messages`.
-3. The PromptCard adapter creates or reuses a DeerFlow thread.
-4. The adapter builds the PMAgent prompt with workspace context and a bounded Prompt Library snapshot.
-5. DeerFlow runs `lead_agent` with the configured DeepSeek default model, which defaults to `deepseek-chat`.
-6. The adapter extracts assistant text and normalizes safe PromptCard proposals.
-7. The frontend receives text plus proposals and applies UI rules.
+- FastAPI browser boundary under `/api/promptcard/runtime/*`
+- process-local browser session cookie and CSRF protection
+- model catalog, connections, assignments, and OS-keyring credentials
+- Volcengine Ark Python SDK calls
+- Media Library image loading
+- existing image-generation routing and lifecycle
+- internal authentication between local services
 
-## Startup
+The app mounts only PromptCard Runtime, Model Management, and Image Generation routers. DeerFlow-native auth, thread, run, tool, skill, sandbox, channel, and memory routes have been removed.
 
-Use these commands from the repository root:
+## pi Text Runtime
+
+Location: `text-agent-runtime/`
+
+Responsibilities:
+
+- pi agent loop using `@earendil-works/pi-agent-core`
+- short in-memory session history
+- Prompt Library snapshot search
+- proposal-only tools for Canvas text and Prompt Library creation
+- multimodal message forwarding through the Gateway's Ark adapter
+
+The pi service does not hold model credentials and cannot write to Canvas, Storage, or the filesystem.
+
+## Request Flow
+
+1. The frontend posts to the Python Gateway.
+2. The Gateway validates browser session and CSRF state.
+3. The Gateway forwards a bounded request to pi with an internal token.
+4. pi decides whether to search the provided Prompt Library snapshot or emit one allowed proposal.
+5. pi sends the model context back to the Gateway's internal Ark endpoint.
+6. The Gateway resolves `chat.primary`, reads its keyring credential, and calls Ark.
+7. The Gateway validates returned proposals again before returning them to the frontend.
+8. The user explicitly applies or rejects each proposal.
+
+## Commands
 
 ```powershell
-npm.cmd run agent:dev
-npm.cmd run dev:with-agent
 npm.cmd run agent:check
+npm.cmd run agent:dev
+npm.cmd run text-agent:dev
+npm.cmd run dev:with-agent
 ```
 
-`dev:with-agent` treats storage and Agent Runtime as idempotent background services: if manifest-backed health checks pass, the existing service is reused. The active local URLs are written to `logs/dev-runtime.json`.
+`agent:dev` starts the Python Gateway. `text-agent:dev` starts only pi. `dev:with-agent` starts Storage, pi, Gateway, and the frontend with one shared internal token.
 
 ## Configuration
 
-`agent-runtime/config.yaml` configures the initial local model, tool surface, skills path, SQLite runtime state, and enabled DeerFlow features. Secrets are read by scripts and exported as environment variables; never commit keys or copy them into docs.
+- `PROMPTCARD_RUNTIME_STATE_DIR`: model connection metadata root.
+- `PROMPTCARD_TEXT_AGENT_URL`: Python Gateway to pi base URL.
+- `PROMPTCARD_GATEWAY_INTERNAL_URL`: pi to Python internal Ark endpoint base.
+- `PROMPTCARD_INTERNAL_TOKEN`: shared local-service token.
+- `PROMPTCARD_TEXT_MODEL`: optional Ark chat model ID; defaults to `doubao-seed-2-0-lite-260215`.
+- `PROMPTCARD_STORAGE_HEALTH_URL`: Storage health endpoint.
+- `PROMPTCARD_LIBRARY_FILE`: development Prompt Library compatibility snapshot.
 
-The Agent panel model service writes the unified DeepSeek configuration to the runtime local config file, normally:
-
-```text
-agent-runtime/.deer-flow/promptcard-model-config.json
-```
-
-The PromptCard boundary exposes:
-
-- `GET /api/promptcard/runtime/model-config`
-- `PUT /api/promptcard/runtime/model-config`
-- `POST /api/promptcard/runtime/model-config/test`
-
-The API key is stored only in the backend config file, merged into the active runtime model settings, and returned to the frontend only as `apiKeyConfigured` plus a masked preview. The test endpoint runs from the backend so the browser never calls DeepSeek directly.
-
-## Compatibility
-
-The DeerFlow-native Gateway API remains available. PromptCard frontend code should not couple to its thread/run/auth wire format directly; use `/api/promptcard/runtime/*` instead.
+Provider credentials are configured through Model Management and stored in the operating-system keyring.

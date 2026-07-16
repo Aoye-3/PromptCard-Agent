@@ -183,6 +183,20 @@ export interface AgentFreeCanvasTextUpdateProposal {
   createdAt: number
 }
 
+export interface AgentFreeCanvasTextCreateProposal {
+  kind: 'free_canvas_text_create'
+  contextId?: string
+  id: string
+  threadId?: string | null
+  runId?: string | null
+  agentName: string
+  title?: string
+  userText: string
+  rationale: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: number
+}
+
 export type AgentWorkspaceProposal =
   | PromptLibraryWriteProposal
   | AgentCardCreateProposal
@@ -190,6 +204,7 @@ export type AgentWorkspaceProposal =
   | AgentStoryboardUpdateProposal
   | AgentThreeStageFieldUpdateProposal
   | AgentFreeCanvasTextUpdateProposal
+  | AgentFreeCanvasTextCreateProposal
 
 export type PromptLibrarySnapshotPreset = Pick<
   IPreset,

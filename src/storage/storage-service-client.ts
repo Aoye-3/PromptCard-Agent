@@ -64,11 +64,18 @@ export type ImageGenerationRunState = 'queued' | 'running' | 'succeeded' | 'fail
 
 export interface ImageGenerationRunSnapshot {
   mode: string
+  promptOptimization: 'standard' | 'fast'
   promptDocument: {
     version: number
     segments: Array<{ type: 'text'; text: string } | { type: 'reference'; referenceId: string; label: string }>
   }
-  inputAssets: Array<{ referenceId: string; assetId: string; order: number }>
+  inputAssets: Array<{
+    referenceId: string
+    role: 'source-image' | 'reference-image'
+    assetId: string
+    sourceAssetId?: string
+    order: number
+  }>
   regions: Array<Record<string, string | number>>
   resolution: string
   aspectRatio?: string
@@ -103,7 +110,7 @@ export interface ImageGenerationRunPage {
 }
 
 export interface ImageGenerationRunQuery {
-  projectId?: string
+  projectId: string
   nodeId?: string
   conversationId?: string
   cursor?: string | null
@@ -149,6 +156,33 @@ export interface ImageGenerationCanvasPlacement {
   createdAt: number
   updatedAt: number
 }
+
+export interface ImageAssetRecord {
+  id: string
+  filename: string
+  contentType: string
+  size: number
+}
+
+export interface ImageAssetImportResult {
+  originalAsset: ImageAssetRecord
+  previewAsset: ImageAssetRecord
+  providerInputAsset: ImageAssetRecord
+  width: number
+  height: number
+}
+
+export interface ImageAssetDerivation {
+  id: string
+  sourceAssetId: string
+  derivedAssetId: string
+  kind: 'preview' | 'provider-input' | 'annotation-flattened'
+  transform: Record<string, unknown>
+  annotationDocument?: Record<string, unknown>
+  createdAt: number
+}
+
+export type CreateImageAssetDerivationRequest = Omit<ImageAssetDerivation, 'id' | 'createdAt'>
 
 export class StorageRevisionConflict<T> extends Error {
   current: T
@@ -314,10 +348,35 @@ export const storageServiceClient = {
       })
     }
   },
+  imageAssets: {
+    async import(file: File): Promise<ImageAssetImportResult> {
+      const contentType = inferImageImportContentType(file)
+      if (!contentType) {
+        throw new StorageHttpError(
+          400,
+          'invalid_asset',
+          '仅支持 JPEG、PNG、WebP、BMP、TIFF、GIF、HEIC 和 HEIF 图片。'
+        )
+      }
+      return request('/storage-api/image-assets/import', {
+        method: 'POST',
+        headers: {
+          'Content-Type': contentType,
+          'X-File-Name': encodeURIComponent(file.name)
+        },
+        body: file
+      }, 30_000)
+    },
+    createDerivation(payload: CreateImageAssetDerivationRequest): Promise<ImageAssetDerivation> {
+      return request('/storage-api/image-assets/derivations', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      })
+    }
+  },
   imageGenerationRuns: {
-    async getPage(query: ImageGenerationRunQuery = {}): Promise<ImageGenerationRunPage> {
-      const parameters = new URLSearchParams()
-      if (query.projectId) parameters.set('projectId', query.projectId)
+    async getPage(query: ImageGenerationRunQuery): Promise<ImageGenerationRunPage> {
+      const parameters = new URLSearchParams({ projectId: query.projectId })
       if (query.nodeId) parameters.set('nodeId', query.nodeId)
       if (query.conversationId) parameters.set('conversationId', query.conversationId)
       if (query.cursor) parameters.set('cursor', query.cursor)
@@ -332,10 +391,11 @@ export const storageServiceClient = {
         nextCursor: typeof page.nextCursor === 'string' ? page.nextCursor : null
       }
     },
-    async getById(id: string): Promise<ImageGenerationRun | null> {
+    async getById(id: string, projectId: string): Promise<ImageGenerationRun | null> {
       try {
+        const parameters = new URLSearchParams({ projectId })
         const payload = await request<unknown>(
-          `/storage-api/image-generation-runs/${encodeURIComponent(id)}`
+          `/storage-api/image-generation-runs/${encodeURIComponent(id)}?${parameters.toString()}`
         )
         return normalizeImageGenerationRun(payload)[0] || null
       } catch (error) {
@@ -518,6 +578,34 @@ const inferAssetContentType = (file: File): string | null => {
   return null
 }
 
+const inferImageImportContentType = (file: File): string | null => {
+  const supportedTypes = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/bmp',
+    'image/tiff',
+    'image/gif',
+    'image/heic',
+    'image/heif'
+  ])
+  if (supportedTypes.has(file.type.toLowerCase())) return file.type.toLowerCase()
+  const extension = file.name.split('.').pop()?.toLowerCase()
+  const byExtension: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    bmp: 'image/bmp',
+    tif: 'image/tiff',
+    tiff: 'image/tiff',
+    gif: 'image/gif',
+    heic: 'image/heic',
+    heif: 'image/heif'
+  }
+  return extension ? byExtension[extension] || null : null
+}
+
 const normalizeImageGenerationRun = (candidate: unknown): ImageGenerationRun[] => {
   if (!isRecord(candidate)) return []
   const state = candidate.state
@@ -617,17 +705,25 @@ const normalizeRunSnapshot = (candidate: unknown): ImageGenerationRunSnapshot | 
       segments.push({ type: 'reference', referenceId: segment.referenceId, label: segment.label })
     }
   })
-  const inputAssets = Array.isArray(candidate.inputAssets) ? candidate.inputAssets.flatMap(item => (
-    isRecord(item)
-    && typeof item.referenceId === 'string'
-    && typeof item.assetId === 'string'
-    && Number.isInteger(item.order)
-      ? [{ referenceId: item.referenceId, assetId: item.assetId, order: item.order as number }]
-      : []
-  )) : []
+  const inputAssets = Array.isArray(candidate.inputAssets) ? candidate.inputAssets.flatMap(item => {
+    if (
+      !isRecord(item)
+      || typeof item.referenceId !== 'string'
+      || typeof item.assetId !== 'string'
+      || !Number.isInteger(item.order)
+    ) return []
+    return [{
+      referenceId: item.referenceId,
+      role: item.role === 'source-image' ? 'source-image' as const : 'reference-image' as const,
+      assetId: item.assetId,
+      ...(typeof item.sourceAssetId === 'string' ? { sourceAssetId: item.sourceAssetId } : {}),
+      order: item.order as number
+    }]
+  }) : []
   const regions = Array.isArray(candidate.regions) ? candidate.regions.flatMap(normalizeRunRegion) : []
   return {
     mode: typeof candidate.mode === 'string' ? candidate.mode : 'generate',
+    promptOptimization: candidate.promptOptimization === 'fast' ? 'fast' : 'standard',
     promptDocument: {
       version: Number.isInteger(promptDocument.version) ? promptDocument.version as number : 1,
       segments

@@ -43,7 +43,7 @@ def model_api(tmp_path, monkeypatch):
     return TestClient(app), store, credentials
 
 
-def test_catalog_contains_deepseek_chat_and_ark_seedream_manifests(model_api):
+def test_catalog_contains_chat_and_image_manifests(model_api):
     client, _, _ = model_api
 
     response = client.get("/api/promptcard/runtime/model-catalog")
@@ -56,6 +56,7 @@ def test_catalog_contains_deepseek_chat_and_ark_seedream_manifests(model_api):
         for model in payload["models"]
     } == {
         ("deepseek-chat", "deepseek", "chat"),
+        ("doubao-seed-2-0-lite-260215", "volcengine-ark", "chat"),
         ("doubao-seedream-5-0-pro-260628", "volcengine-ark", "image"),
     }
     seedream = next(model for model in payload["models"] if model["modality"] == "image")
@@ -66,14 +67,29 @@ def test_catalog_contains_deepseek_chat_and_ark_seedream_manifests(model_api):
         "regionInputs": ["point", "bbox"],
         "resolutions": ["1K", "2K"],
         "aspectRatios": ["smart", "1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3", "21:9", "custom"],
-        "customSize": {
-            "minPixels": 921600,
-            "maxPixels": 4624220,
-            "minAspectRatio": 0.0625,
-            "maxAspectRatio": 16,
-        },
-        "outputFormats": ["png", "jpeg"],
-        "watermark": True,
+            "customSize": {
+                "minPixels": 921600,
+                "maxPixels": 4624220,
+                "minAspectRatio": 0.0625,
+                "maxAspectRatio": 16,
+            },
+            "promptOptimization": {
+                "modes": ["standard", "fast"],
+                "default": "standard",
+            },
+            "inputConstraints": {
+                "formats": ["jpeg", "png", "webp", "bmp", "tiff", "gif", "heic", "heif"],
+                "maxImages": 10,
+                "maxBytesPerImage": 31457280,
+                "maxPixelsPerImage": 36000000,
+                "minSideExclusive": 14,
+                "minAspectRatio": 0.0625,
+                "maxAspectRatio": 16,
+            },
+            "annotationInputs": ["raster-markup"],
+            "outputFormats": ["png", "jpeg"],
+            "responseTransports": ["url", "b64_json"],
+            "watermark": True,
         "outputCount": 1,
         "streaming": False,
     }

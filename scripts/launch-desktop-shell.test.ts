@@ -114,7 +114,7 @@ describe('launch-desktop-shell.ps1', () => {
     expect(profileScript).toContain('$env:PROMPTCARD_DESKTOP_PROFILE_ROOT = $ProfileRoot')
     expect(profileScript).toContain('$env:PROMPTCARD_STORAGE_DATA_DIR = $DataDir')
     expect(profileScript).toContain('$env:PROMPTCARD_LOGS_DIR = $LogsDir')
-    expect(profileScript).toContain('$env:DEER_FLOW_HOME = $RuntimeStateDir')
+    expect(profileScript).toContain('$env:PROMPTCARD_RUNTIME_STATE_DIR = $RuntimeStateDir')
 
     const initializeProfileAt = launchScript.indexOf('. $StartDesktopDevServicesScript -InitializeOnly')
     const startServicesAt = launchScript.indexOf('$servicesOutput = & powershell')

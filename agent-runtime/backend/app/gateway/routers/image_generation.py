@@ -42,6 +42,8 @@ class PromptDocumentBody(RequestModel):
 class AssetInputBody(RequestModel):
     reference_id: str = Field(alias="referenceId")
     asset_id: str = Field(alias="assetId")
+    source_asset_id: str | None = Field(default=None, alias="sourceAssetId")
+    role: Literal["source-image", "reference-image"] = "reference-image"
     order: int
 
 
@@ -80,6 +82,10 @@ class ImageGenerationBody(RequestModel):
     height: Annotated[int, Field(strict=True, gt=0)] | None = None
     output_format: str = Field(alias="outputFormat")
     watermark: bool = False
+    prompt_optimization: Literal["standard", "fast"] = Field(
+        default="standard",
+        alias="promptOptimization",
+    )
 
     @model_validator(mode="after")
     def require_generation_context(self) -> ImageGenerationBody:
@@ -156,7 +162,13 @@ def _command(body: ImageGenerationBody) -> GenerationCommand:
         mode=body.mode,
         prompt_document=PromptDocument(segments=segments, version=body.prompt_document.version),
         inputs=tuple(
-            GenerationAssetInput(reference_id=item.reference_id, asset_id=item.asset_id, order=item.order)
+            GenerationAssetInput(
+                reference_id=item.reference_id,
+                asset_id=item.asset_id,
+                order=item.order,
+                role=item.role,
+                source_asset_id=item.source_asset_id,
+            )
             for item in body.inputs
         ),
         regions=regions,
@@ -166,6 +178,7 @@ def _command(body: ImageGenerationBody) -> GenerationCommand:
         height=body.height,
         output_format=body.output_format,
         watermark=body.watermark,
+        prompt_optimization=body.prompt_optimization,
     )
 
 
@@ -207,12 +220,24 @@ def _safe_error_message(code: str) -> str:
         "image_generation_conversation_not_found": "The image generation conversation is unavailable",
         "credential_store_unavailable": "Model credential storage is unavailable",
         "credential_missing": "The selected model connection has no credential",
+        "connection_not_tested": "The selected model connection has not been tested",
+        "connection_test_failed": "The selected model connection test failed",
+        "image_generation_disabled": "Image generation is disabled by the server rollout gate",
+        "image_generation_status_unavailable": "Image generation readiness could not be checked",
+        "ark_sdk_missing": "The Ark SDK is not installed",
+        "ark_sdk_incompatible": "The Ark SDK version is incompatible",
+        "ark_sdk_check_failed": "The Ark SDK status could not be checked",
+        "ark_sdk_unavailable": "The Ark SDK is unavailable",
         "generation_busy": "This model connection already has two running generations",
         "generation_capacity_reached": "Image generation service capacity is reached",
         "input_images_too_large": "Reference images exceed the aggregate byte limit",
         "rate_limited": "Image provider rate limit reached",
         "timeout": "Image provider request timed out",
         "authentication_failed": "Image provider authentication failed",
+        "prompt_required": "Image generation requires a non-empty prompt",
+        "unsupported_prompt_optimization": "The selected prompt optimization mode is unsupported",
+        "invalid_image_role": "A reference image role is invalid",
+        "too_many_source_images": "Only one source image is allowed",
     }.get(code, "Image generation failed")
 
 

@@ -1,11 +1,11 @@
 # Seedream 项目级图片生成 Agent 实施状态
 
-更新时间：2026-07-15
-分支：`plan/seedream-image-node-integration`
+更新时间：2026-07-16
+分支：`feat/seedream-5-pro-full-capability`
 
 ## 文档优先级
 
-- 当前产品和技术基线是项目级图片生成 Agent、独立单轮请求和 schema v4 永久会话。
+- 当前产品和技术基线是项目级图片生成 Agent、独立单轮请求和 schema v5 永久会话/派生资产。
 - 早期[节点式前端交互 PRD](./005-seedream-image-node-frontend-interaction.md)已由 [ADR-010](../decisions/ADR-010-project-image-generation-conversations.md)取代，仅作为历史需求演进记录。
 - 新开发不得恢复可执行 `image-generator` 节点、节点属性自动生成或隐式历史上下文。
 
@@ -20,29 +20,34 @@
 - 生成状态与安全错误恢复、结果操作、媒体库跳转、成功结果 pending placement 与普通图片节点幂等落画布。
 - 旧 `image-generator` 节点只读预览，所有端口禁止新增连接，仅保留用户手动继续创作入口。
 - Storage schema v4：项目会话、conversation run、placement 状态机和 v3→v4 无损迁移。
+- Storage schema v5：JPEG/PNG/WebP/BMP/TIFF/GIF/HEIC/HEIF 原件导入、provider/preview/annotation 派生图、强引用与 v4→v5 无损迁移。
+- Ark SDK 原生 `standard/fast` Prompt 优化、URL/Base64 单图响应、安全结果本地化、请求 ID/usage/尺寸解析。
+- 2K 默认、八种预设比例、自定义尺寸、PNG/JPEG、水印、主图/参考图角色和 10 张总上限。
+- 视觉标记编辑：自由画笔、箭头、矩形、椭圆、文字、颜色/线宽、删除、撤销/重做、缩放和栅格化派生图。
+- 共享 Runtime HTTP 客户端统一 Cookie/CSRF 与安全错误 envelope；Storage/Runtime Python 依赖全部落在 F: 工作区。
 - 开发/测试双 Flag 默认开启；生产新建入口保持灰度；旧节点、结果与历史不受入口 Flag 影响。
 
 ## 自动化验证
 
-- Vitest：82 个文件，503 项通过。
+- Vitest：86 个文件，529 项通过。
 - 前端构建：通过。
-- PromptCard Storage：56 项及 15 个子测试通过。
-- Runtime 图片生成、模型管理、迁移和边界测试：120 项通过；`app`、`tests` 与 E2E Runtime fixture 的 Ruff 通过。
-- 项目会话/侧栏/旧节点/区域编辑/客户端聚焦回归：58 项通过；前端构建通过。
-- Rust：10 项通过。
-- Agent 安全检查：通过。
-- Playwright 图片生成闭环：1 项通过，使用真实 Runtime、真实 SQLite 和 Provider DI fake；生成与 Storage 不再由 `page.route()` 替代。
-- `git diff --check`、密钥模式和供应商临时 URL 扫描：通过。
+- PromptCard Storage：68 项及 17 个子测试通过，含真实 HEIC 编解码。
+- Runtime 图片生成、模型管理、CSRF、结果下载和 Storage 集成：168 项通过；阿拉伯语、日语和德语 Prompt 保真映射已覆盖。
+- 启动链路：schema v5 健康门禁与桌面启动脚本 26 项通过。
+- Rust：10 项通过；Agent Check、Ruff、`git diff --check` 和高置信度 secret 扫描通过。
+- Playwright：模型管理和项目级图片生成闭环 2 项通过，使用真实 Runtime HTTP、真实 SQLite Storage 和 Provider DI fake。
+- Runtime 全仓测试：3378 项通过、32 项跳过、49 项失败；失败集中在 Windows 无符号链接权限、缺少 DeepSeek 实时凭据、POSIX/Docker 脚本假设及既有跨平台路径测试，不属于本次图片链路。
 - ESLint：0 个错误；全仓当前有 41 个警告，超过 `max-warnings=30` 门槛，因此 `npm.cmd run lint` 仍返回失败。应单独降低警告预算，不应在图片功能改动中顺带重构无关文件。
 
 ## 发布前仍需完成
 
-- 使用真实 Windows Credential Locker 与真实 Ark 账号完成人工冒烟：文生图、多参考图、智能改图、point、bbox。
-- Runtime 全量套件在本机 124 秒门限内未完成且未输出失败；发布 CI 仍需运行无超时的全量套件。本轮相关 120 项测试已通过。
+- 使用真实 Windows Credential Locker 与真实 Ark 账号完成人工冒烟：文生图、2–10 图、多参考 `@`、智能改图、point、bbox、视觉标记派生图。
+- 覆盖真实 Ark 的 standard/fast、1K/2K、预设/自定义尺寸、PNG/JPEG、水印以及阿拉伯语、日语、德语文字系统。
+- 单独治理全仓 ESLint 41 个既有警告，以及 Runtime 全仓测试的 Windows/POSIX/实时凭据环境基线。
 
 ## 维护约束
 
-- 永久历史无普通删除入口，Storage schema v4 不回滚。
+- 永久历史和派生资产无普通删除入口，Storage schema v5 不回滚。
 - API Key 只进入操作系统凭据库，不写入前端、项目、SQLite 或日志。
 - SDK HTTP 接口只做状态检测和重新检测，不执行安装或修复命令。
 - 连接的画布依赖数量不可确认时，删除操作必须 fail closed。
@@ -54,3 +59,4 @@
 - [Agent Runtime API](../api/agent-runtime-api.md)
 - [ADR-009：能力目录与就绪门禁](../decisions/ADR-009-capability-driven-image-model-readiness.md)
 - [ADR-010：项目级图片会话与画布 placement](../decisions/ADR-010-project-image-generation-conversations.md)
+- [ADR-011：原件与派生图片资产](../decisions/ADR-011-original-and-derived-image-assets.md)

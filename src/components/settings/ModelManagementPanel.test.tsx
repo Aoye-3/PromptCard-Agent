@@ -6,6 +6,7 @@ import {
   INITIAL_MODEL_CREDENTIAL_DRAFT,
   ModelManagementPanel,
   ModelManagementPanelContent,
+  type ModelManagementSnapshot,
   assignmentDisabledReason,
   recordModelConnectionTestResult
 } from './ModelManagementPanel'
@@ -64,7 +65,7 @@ const snapshot = {
     { slot: 'chat.primary' as const, connectionId: 'connection-chat', modelId: 'deepseek-chat' },
     { slot: 'image.primary' as const, connectionId: 'connection-image', modelId: 'seedream' }
   ]
-}
+} satisfies ModelManagementSnapshot
 
 const imageStatus = {
   serverEnabled: true,

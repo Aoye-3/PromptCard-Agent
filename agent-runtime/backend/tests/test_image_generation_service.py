@@ -48,10 +48,16 @@ def png_bytes() -> bytes:
     return output.getvalue()
 
 
+def input_png_bytes() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (16, 16), "white").save(output, format="PNG")
+    return output.getvalue()
+
+
 class FakeStorage:
     def __init__(self) -> None:
         self.operations: list[tuple[str, Any]] = []
-        self.asset = StorageAsset(content=png_bytes(), content_type="image/png")
+        self.asset = StorageAsset(content=input_png_bytes(), content_type="image/png")
         self.fail_upload = False
         self._lock = threading.Lock()
         self.runs: dict[str, dict[str, Any]] = {}
@@ -72,7 +78,7 @@ class FakeStorage:
         self.runs[run_id] = updated
         return updated
 
-    def get_run(self, run_id: str) -> dict[str, Any]:
+    def get_run(self, run_id: str, _project_id: str) -> dict[str, Any]:
         self._record("get_run", run_id)
         return dict(self.runs[run_id])
 
@@ -92,9 +98,18 @@ class FakeStorage:
 
 
 class FakeConnections:
-    def __init__(self, credential: str | None = "ark-secret", credential_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        credential: str | None = "ark-secret",
+        credential_error: Exception | None = None,
+        *,
+        enabled: bool = True,
+        last_test_ok: bool | None = True,
+    ) -> None:
         self.credential = credential
         self.credential_error = credential_error
+        self.enabled = enabled
+        self.last_test_ok = last_test_ok
         self.metadata_reads = 0
         self.credential_reads = 0
 
@@ -104,7 +119,8 @@ class FakeConnections:
             connection_id=connection_id,
             provider_id="volcengine-ark",
             api_base="https://ark.cn-beijing.volces.com/api/v3",
-            enabled=True,
+            enabled=self.enabled,
+            last_test_ok=self.last_test_ok,
         )
 
     def get_credential(self, _connection_id: str) -> str | None:
@@ -162,6 +178,7 @@ def command(run_id: str = "run-1") -> GenerationCommand:
         height=None,
         output_format="png",
         watermark=False,
+        prompt_optimization="standard",
     )
 
 
@@ -177,6 +194,7 @@ def make_service(
     fetcher: FakeFetcher | None = None,
     max_input_bytes_total: int | None = None,
     max_running_total: int | None = None,
+    readiness_probe=None,
 ) -> tuple[ImageGenerationService, FakeStorage, FakeProvider, FakeFetcher]:
     storage = storage or FakeStorage()
     provider = provider or FakeProvider()
@@ -190,6 +208,7 @@ def make_service(
         connections=connections or FakeConnections(),
         provider_factory=lambda _connection: provider,
         result_fetcher=fetcher,
+        readiness_probe=readiness_probe,
         **limits,
     )
     return service, storage, provider, fetcher
@@ -210,9 +229,17 @@ def test_success_persists_state_localizes_result_and_returns_no_remote_url() -> 
     ]
     queued = storage.operations[0][1]
     assert queued["state"] == "queued"
-    assert queued["requestSnapshot"]["inputAssets"] == [{"referenceId": "subject", "assetId": "asset-input.png", "order": 0}]
+    assert queued["requestSnapshot"]["inputAssets"] == [
+        {
+            "referenceId": "subject",
+            "assetId": "asset-input.png",
+            "role": "reference-image",
+            "order": 0,
+        }
+    ]
     assert queued["requestSnapshot"]["resolution"] == "2K"
     assert queued["requestSnapshot"]["aspectRatio"] == "smart"
+    assert queued["requestSnapshot"]["promptOptimization"] == "standard"
     assert "width" not in queued["requestSnapshot"]
     assert "height" not in queued["requestSnapshot"]
     assert REMOTE_URL not in repr(queued)
@@ -236,7 +263,9 @@ def test_success_persists_state_localizes_result_and_returns_no_remote_url() -> 
     assert len(provider.requests) == 1
     provider_input = provider.requests[0].inputs[0]
     assert provider_input.image.startswith("data:image/png;base64,")
-    assert base64.b64decode(provider_input.image.split(",", 1)[1]) == png_bytes()
+    assert base64.b64decode(provider_input.image.split(",", 1)[1]) == input_png_bytes()
+    assert provider_input.role == "reference-image"
+    assert provider_input.source_asset_id is None
     assert fetcher.urls == [REMOTE_URL]
 
     assert result.state == "succeeded"
@@ -244,6 +273,146 @@ def test_success_persists_state_localizes_result_and_returns_no_remote_url() -> 
     assert result.capture_id == "capture-generated"
     assert REMOTE_URL not in repr(result)
     assert "remote_url" not in result.__dataclass_fields__
+
+
+@pytest.mark.parametrize(
+    ("readiness", "expected_code"),
+    [
+        ({"serverEnabled": False, "credentialStore": {"available": True}, "providers": []}, "image_generation_disabled"),
+        (
+            {
+                "serverEnabled": True,
+                "credentialStore": {"available": False},
+                "providers": [{"providerId": "volcengine-ark", "status": "ready"}],
+            },
+            "credential_store_unavailable",
+        ),
+        (
+            {
+                "serverEnabled": True,
+                "credentialStore": {"available": True},
+                "providers": [{"providerId": "volcengine-ark", "status": "incompatible"}],
+            },
+            "ark_sdk_incompatible",
+        ),
+    ],
+)
+def test_runtime_readiness_gate_fails_before_connection_or_credential_access(
+    readiness: dict[str, Any],
+    expected_code: str,
+) -> None:
+    connections = FakeConnections()
+    service, storage, provider, _fetcher = make_service(
+        connections=connections,
+        readiness_probe=lambda: readiness,
+    )
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(command(f"run-ready-{expected_code}"))
+
+    assert exc_info.value.code == expected_code
+    assert connections.metadata_reads == 0
+    assert connections.credential_reads == 0
+    assert provider.requests == []
+    assert storage.runs[f"run-ready-{expected_code}"]["state"] == "failed"
+
+
+@pytest.mark.parametrize(
+    ("last_test_ok", "expected_code"),
+    [(None, "connection_not_tested"), (False, "connection_test_failed")],
+)
+def test_connection_must_have_latest_successful_test_before_credential_access(
+    last_test_ok: bool | None,
+    expected_code: str,
+) -> None:
+    connections = FakeConnections(last_test_ok=last_test_ok)
+    service, storage, provider, _fetcher = make_service(connections=connections)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(command(f"run-{expected_code}"))
+
+    assert exc_info.value.code == expected_code
+    assert connections.credential_reads == 0
+    assert provider.requests == []
+    assert storage.runs[f"run-{expected_code}"]["state"] == "failed"
+
+
+def test_input_role_and_source_asset_are_preserved_in_history_and_provider_request() -> None:
+    service, storage, provider, _fetcher = make_service()
+    request = replace(
+        command("run-input-role"),
+        inputs=(
+            GenerationAssetInput(
+                reference_id="subject",
+                asset_id="asset-derived.png",
+                order=0,
+                role="source-image",
+                source_asset_id="asset-original.heic",
+            ),
+        ),
+    )
+
+    service.generate(request)
+
+    assert storage.operations[0][1]["requestSnapshot"]["inputAssets"] == [
+        {
+            "referenceId": "subject",
+            "assetId": "asset-derived.png",
+            "sourceAssetId": "asset-original.heic",
+            "role": "source-image",
+            "order": 0,
+        }
+    ]
+    assert provider.requests[0].inputs[0].role == "source-image"
+    assert provider.requests[0].inputs[0].source_asset_id == "asset-original.heic"
+
+
+def test_base64_provider_result_is_validated_and_saved_without_remote_fetch() -> None:
+    class Base64Provider(FakeProvider):
+        def generate(self, request):
+            self.requests.append(request)
+            return ImageGenerationResult(
+                image=ProviderImage(
+                    b64_json=base64.b64encode(png_bytes()).decode("ascii"),
+                    size="4x3",
+                ),
+                request_id="provider-base64",
+                usage={"generatedImages": 1, "outputTokens": 4, "totalTokens": 4},
+            )
+
+    provider = Base64Provider()
+    service, storage, _provider, fetcher = make_service(provider=provider)
+
+    result = service.generate(command("run-base64"))
+
+    assert fetcher.urls == []
+    upload = next(payload for operation, payload in storage.operations if operation == "upload_asset")
+    assert upload[1] == "image/png"
+    assert upload[2] == png_bytes()
+    succeeded = storage.operations[-1][1][1]
+    assert succeeded["providerUsage"] == {
+        "generatedImages": 1,
+        "outputTokens": 4,
+        "totalTokens": 4,
+    }
+    assert result.width == 4
+    assert result.height == 3
+
+
+def test_seedream_input_constraints_are_enforced_before_credential_access() -> None:
+    storage = FakeStorage()
+    output = BytesIO()
+    Image.new("RGB", (14, 100), "white").save(output, format="PNG")
+    storage.asset = StorageAsset(content=output.getvalue(), content_type="image/png")
+    connections = FakeConnections()
+    service, _, provider, _fetcher = make_service(storage=storage, connections=connections)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(command("run-small-side"))
+
+    assert exc_info.value.code == "invalid_input_asset"
+    assert connections.credential_reads == 0
+    assert provider.requests == []
 
 
 def test_conversation_generation_persists_conversation_without_fabricating_canvas_node() -> None:
@@ -494,6 +663,22 @@ def test_create_run_failure_does_not_retain_raw_storage_exception() -> None:
     assert error.__context__ is None
     assert raw_secret not in formatted
     assert raw_secret not in repr(response)
+
+
+def test_malformed_storage_asset_response_persists_safe_failed_state() -> None:
+    class MissingAssetIdStorage(FakeStorage):
+        def upload_asset(self, filename: str, content_type: str, content: bytes) -> dict[str, Any]:
+            self._record("upload_asset", (filename, content_type, content))
+            return {"filename": filename, "contentType": content_type, "size": len(content)}
+
+    storage = MissingAssetIdStorage()
+    service, _, _, _ = make_service(storage=storage)
+
+    with pytest.raises(GenerationError) as exc_info:
+        service.generate(command("run-missing-asset-id"))
+
+    assert exc_info.value.code == "storage_write_failed"
+    assert storage.runs["run-missing-asset-id"]["state"] == "failed"
 
 
 def test_failed_terminal_patch_failure_does_not_retain_raw_storage_exception() -> None:
@@ -809,7 +994,6 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
                     {"type": "reference", "referenceId": "subject", "label": "主体"},
                 ],
             },
-            "inputs": [{"referenceId": "subject", "assetId": "asset-input.png", "order": 0}],
             "regions": [{"type": "point", "referenceId": "subject", "x": 20, "y": 30}],
             "resolution": "2K",
             "aspectRatio": "custom",
@@ -817,6 +1001,16 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
             "height": 1024,
             "outputFormat": "png",
             "watermark": False,
+            "promptOptimization": "fast",
+            "inputs": [
+                {
+                    "referenceId": "subject",
+                    "assetId": "asset-input.png",
+                    "sourceAssetId": "asset-original.heic",
+                    "role": "source-image",
+                    "order": 0,
+                }
+            ],
         },
     )
 
@@ -835,6 +1029,9 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
     assert received[0].regions == (PointRegion(reference_id="subject", x=20, y=30),)
     assert received[0].aspect_ratio == "custom"
     assert (received[0].width, received[0].height) == (2048, 1024)
+    assert received[0].prompt_optimization == "fast"
+    assert received[0].inputs[0].role == "source-image"
+    assert received[0].inputs[0].source_asset_id == "asset-original.heic"
 
 
 def test_router_accepts_project_conversation_without_node_and_preserves_legacy_node_request(monkeypatch) -> None:

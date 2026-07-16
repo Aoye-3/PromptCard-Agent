@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .assets import MAX_IMAGE_IMPORT_BYTES
 from .store import AssetValidationError, DuplicateItem, MissingItem, RevisionConflict, SqliteStore
 
 
@@ -101,13 +102,37 @@ def create_app(storage: SqliteStore) -> FastAPI:
         except MissingItem as exc:
             raise _http_error(404, "not_found", "Asset not found") from exc
 
+    @application.post("/api/image-assets/import")
+    async def import_image_asset(request: Request) -> dict[str, Any]:
+        try:
+            chunks = bytearray()
+            async for chunk in request.stream():
+                chunks.extend(chunk)
+                if len(chunks) > MAX_IMAGE_IMPORT_BYTES:
+                    raise AssetValidationError("Image asset must be between 1 byte and 30 MB")
+            return storage.import_image_asset(
+                unquote(request.headers.get("x-file-name", "image")),
+                request.headers.get("content-type", ""),
+                bytes(chunks),
+            )
+        except AssetValidationError as exc:
+            raise _http_error(400, "invalid_asset", str(exc)) from exc
+
+    @application.post("/api/image-assets/derivations")
+    def create_image_asset_derivation(item: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.create_image_asset_derivation(item))
+
+    @application.get("/api/image-assets/derivations/{source_asset_id}")
+    def list_image_asset_derivations(source_asset_id: str) -> dict[str, Any]:
+        return {"derivations": storage.list_image_asset_derivations(source_asset_id)}
+
     @application.post("/api/image-generation-runs")
     def create_image_generation_run(item: dict[str, Any]) -> dict[str, Any]:
         return _handle(lambda: storage.create_image_generation_run(item))
 
     @application.get("/api/image-generation-runs")
     def list_image_generation_runs(
-        projectId: str | None = None,
+        projectId: str,
         nodeId: str | None = None,
         conversationId: str | None = None,
         cursor: str | None = None,
@@ -123,8 +148,8 @@ def create_app(storage: SqliteStore) -> FastAPI:
         return _handle(lambda: storage.update_image_generation_run_state(run_id, patch))
 
     @application.get("/api/image-generation-runs/{run_id}")
-    def get_image_generation_run(run_id: str) -> dict[str, Any]:
-        return _handle(lambda: storage.get_image_generation_run(run_id))
+    def get_image_generation_run(run_id: str, projectId: str) -> dict[str, Any]:
+        return _handle(lambda: storage.get_image_generation_run(run_id, project_id=projectId))
 
     @application.get("/api/image-generation-conversations")
     def list_image_generation_conversations(

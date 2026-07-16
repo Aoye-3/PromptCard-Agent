@@ -1,6 +1,6 @@
 import type { ImageGenerationRequest, ImageGenerationRegion } from '@/services/image-generation-client'
 import type { ImageGenerationRun } from '@/storage/storage-service-client'
-import type { IFreeCanvasNode } from '@/models/PromptHistory.model'
+import type { IFreeCanvasNode, PromptDocument } from '@/models/PromptHistory.model'
 import { freeCanvasTextSegmentsToPlainText } from '@/domain/free-canvas/free-canvas-project'
 
 export type ProjectImageGenerationWorkflow =
@@ -12,19 +12,22 @@ export type ProjectImageGenerationWorkflow =
 export interface ProjectImageGenerationInput {
   referenceId: string
   assetId: string
+  sourceAssetId?: string
   order: number
-  role: 'source' | 'reference'
+  role: 'source-image' | 'reference-image'
   label?: string
 }
 
 export interface ImageGenerationComposerDraft {
-  prompt: string
-  mentions: Array<{ referenceId: string; label: string }>
+  promptDocument: PromptDocument
   workflow: ProjectImageGenerationWorkflow
   connectionId: string
   modelId: string
   resolution: string
   aspectRatio: string
+  width?: number
+  height?: number
+  promptOptimization: 'standard' | 'fast'
   outputFormat: 'png' | 'jpeg'
   watermark: boolean
   inputs: ProjectImageGenerationInput[]
@@ -38,15 +41,18 @@ export interface CanvasInjectionResult {
 
 export const createEmptyConversationDraft = (
   preferences: Partial<Pick<ImageGenerationComposerDraft,
-    'connectionId' | 'modelId' | 'resolution' | 'aspectRatio' | 'outputFormat' | 'watermark'>> = {}
+    'connectionId' | 'modelId' | 'resolution' | 'aspectRatio' | 'width' | 'height'
+    | 'promptOptimization' | 'outputFormat' | 'watermark'>> = {}
 ): ImageGenerationComposerDraft => ({
-  prompt: '',
-  mentions: [],
+  promptDocument: { version: 1, segments: [{ type: 'text', text: '' }] },
   workflow: 'text-to-image',
   connectionId: preferences.connectionId || '',
   modelId: preferences.modelId || '',
-  resolution: preferences.resolution || '1K',
+  resolution: preferences.resolution || '2K',
   aspectRatio: preferences.aspectRatio || '1:1',
+  ...(preferences.width ? { width: preferences.width } : {}),
+  ...(preferences.height ? { height: preferences.height } : {}),
+  promptOptimization: preferences.promptOptimization || 'standard',
   outputFormat: preferences.outputFormat || 'png',
   watermark: preferences.watermark === true,
   inputs: [],
@@ -65,30 +71,35 @@ export const buildConversationGenerationRequest = (
   mode: workflowMode(draft.workflow),
   promptDocument: {
     version: 1,
-    segments: [
-      { type: 'text', text: draft.prompt },
-      ...draft.mentions.map(mention => ({
-        type: 'reference' as const,
-        referenceId: mention.referenceId,
-        label: mention.label
-      }))
-    ]
+    segments: draft.promptDocument.segments.map(segment => segment.type === 'text'
+      ? { type: 'text', text: segment.text }
+      : { type: 'reference', referenceId: segment.referenceId, label: segment.label })
   },
   inputs: [...draft.inputs]
     .sort((left, right) => left.order - right.order)
-    .map(({ referenceId, assetId, order }) => ({ referenceId, assetId, order })),
+    .map(({ referenceId, role, assetId, sourceAssetId, order }) => ({
+      referenceId,
+      role,
+      assetId,
+      ...(sourceAssetId ? { sourceAssetId } : {}),
+      order
+    })),
   regions: draft.regions.map(region => ({ ...region })),
   resolution: draft.resolution,
   aspectRatio: draft.aspectRatio,
+  ...(draft.aspectRatio === 'custom' && draft.width && draft.height
+    ? { width: draft.width, height: draft.height }
+    : {}),
   outputFormat: draft.outputFormat,
-  watermark: draft.watermark
+  watermark: draft.watermark,
+  promptOptimization: draft.promptOptimization
 })
 
 export const injectCanvasNodesIntoDraft = (
   current: ImageGenerationComposerDraft,
   nodes: readonly IFreeCanvasNode[]
 ): CanvasInjectionResult => {
-  let prompt = current.prompt
+  let promptDocument = clonePromptDocument(current.promptDocument)
   const inputs = [...current.inputs]
   const rejected: CanvasInjectionResult['rejected'] = []
 
@@ -98,7 +109,7 @@ export const injectCanvasNodesIntoDraft = (
       if (!text) {
         rejected.push({ nodeId: node.id, reason: '文字节点没有可见文本。' })
       } else {
-        prompt = [prompt.trim(), text].filter(Boolean).join('\n')
+        promptDocument = appendPromptText(promptDocument, text)
       }
       continue
     }
@@ -112,7 +123,7 @@ export const injectCanvasNodesIntoDraft = (
           referenceId: `canvas-${node.id}-${inputs.length + 1}`,
           assetId: node.assetId,
           order: inputs.length,
-          role: 'reference',
+          role: 'reference-image',
           label: node.title
         })
       }
@@ -124,7 +135,7 @@ export const injectCanvasNodesIntoDraft = (
   return {
     draft: {
       ...current,
-      prompt,
+      promptDocument,
       inputs,
       workflow: current.workflow === 'text-to-image' && inputs.length > 0
         ? 'reference-generate'
@@ -172,6 +183,28 @@ export const projectRunToTurn = (
     } : {}),
     ...(run.error ? { error: { message: run.error.message, action: run.error.retryable ? '再次生成' : undefined } } : {})
   }
+}
+
+export const promptDocumentPlainText = (document: PromptDocument): string => (
+  document.segments.map(segment => segment.type === 'text' ? segment.text : `@${segment.label}`).join('')
+)
+
+const clonePromptDocument = (document: PromptDocument): PromptDocument => ({
+  version: 1,
+  segments: document.segments.map(segment => segment.type === 'text'
+    ? { type: 'text', text: segment.text }
+    : { type: 'reference', referenceId: segment.referenceId, label: segment.label })
+})
+
+const appendPromptText = (document: PromptDocument, text: string): PromptDocument => {
+  const next = clonePromptDocument(document)
+  const last = next.segments[next.segments.length - 1]
+  if (last?.type === 'text') {
+    last.text = [last.text.trim(), text].filter(Boolean).join('\n')
+  } else {
+    next.segments.push({ type: 'text', text })
+  }
+  return next
 }
 
 const workflowMode = (workflow: ProjectImageGenerationWorkflow): ImageGenerationRequest['mode'] => (

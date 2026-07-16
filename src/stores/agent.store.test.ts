@@ -87,7 +87,7 @@ describe('agent store', () => {
     })
   })
 
-  it('returns workspace proposals from sendMessage for auto-apply UI', async () => {
+  it('returns workspace proposals from sendMessage for approval UI', async () => {
     const workspaceContext: AgentWorkspaceContext = {
       contextId: 'card:project-1:0',
       mode: 'card-workspace',
@@ -116,6 +116,7 @@ describe('agent store', () => {
       permissionScope: 'workspace-chatbot-agent',
       sessionKey: 'workspace:card:project-1',
       projectId: 'project-1',
+      promptLibrary: [],
       workspaceContext
     })
   })

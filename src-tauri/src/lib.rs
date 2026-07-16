@@ -941,8 +941,8 @@ fn is_protected_update_path(path: &str) -> bool {
         || path.starts_with("backups/")
         || path == "logs/desktop-profile"
         || path.starts_with("logs/desktop-profile/")
-        || path == "agent-runtime/.deer-flow"
-        || path.starts_with("agent-runtime/.deer-flow/")
+        || path == "agent-runtime/.promptcard-runtime"
+        || path.starts_with("agent-runtime/.promptcard-runtime/")
         || path == "agent-runtime/.agent"
         || path.starts_with("agent-runtime/.agent/")
         || path.starts_with(".env")
@@ -960,9 +960,7 @@ fn is_source_update_path(path: &str) -> bool {
         "public/",
         "vite/",
         "agent-runtime/backend/",
-        "agent-runtime/scripts/",
-        "agent-runtime/docker/",
-        "agent-runtime/skills/public/",
+        "text-agent-runtime/",
     ];
     let source_files = [
         ".gitignore",
@@ -1202,7 +1200,7 @@ mod tests {
         for path in [
             "data/promptcard.sqlite3",
             "logs/desktop-profile/data/assets/image.png",
-            "agent-runtime/.deer-flow/data/thread.json",
+            "agent-runtime/.promptcard-runtime/promptcard-model-connections.json",
             "agent-runtime/.agent/local-agent/config.yaml",
             "agent-runtime/backend/.env.local",
             ".env.local",
@@ -1223,10 +1221,7 @@ mod tests {
             "docs/architecture/data-storage-and-update-system.md",
             "package.json",
             "agent-runtime/backend/app/gateway/app.py",
-            "agent-runtime/backend/packages/harness/deerflow/agents/factory.py",
-            "agent-runtime/scripts/check.py",
-            "agent-runtime/docker/dev-entrypoint.sh",
-            "agent-runtime/skills/public/bootstrap/SKILL.md",
+            "text-agent-runtime/src/server.ts",
         ] {
             let change = classify_update_path(path);
             assert_eq!(change.classification, "source", "{path}");
@@ -1237,8 +1232,7 @@ mod tests {
     fn classifies_unknown_paths_for_manual_review() {
         for path in [
             "private-notes/local-plan.md",
-            "agent-runtime/config.yaml",
-            "agent-runtime/skills/local/custom/SKILL.md",
+            "agent-runtime/local-overrides.json",
         ] {
             let change = classify_update_path(path);
             assert_eq!(change.classification, "manual-review", "{path}");

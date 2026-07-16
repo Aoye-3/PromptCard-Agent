@@ -6,10 +6,14 @@ import httpx
 import pytest
 from PIL import Image
 
-from app.gateway.image_generation.result_fetcher import ImageFetchError, ImageResultFetcher
+from app.gateway.image_generation.result_fetcher import MAX_IMAGE_BYTES, ImageFetchError, ImageResultFetcher
 
 OFFICIAL_CDN = "ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com"
 PUBLIC_IP = "93.184.216.34"
+
+
+def test_generated_output_limit_matches_storage_asset_limit() -> None:
+    assert MAX_IMAGE_BYTES == 200 * 1024 * 1024
 
 
 def png_bytes(width: int = 4, height: int = 3) -> bytes:

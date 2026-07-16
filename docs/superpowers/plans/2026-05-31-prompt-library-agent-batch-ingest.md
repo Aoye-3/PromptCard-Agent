@@ -1,5 +1,7 @@
 # Prompt Library Agent Batch Ingest Implementation Plan
 
+> Historical implementation record. The additive approval rule remains valid, but the DeerFlow tool description was superseded by the focused pi tools in [ADR-012](../../decisions/ADR-012-pi-text-agent-and-ark-runtime.md) and [Text Agent Tools](../../backend/skills-and-tools.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the Prompt Library two-column PMAgent workflow for decomposing long prompts into multiple additive, user-approved library entries.

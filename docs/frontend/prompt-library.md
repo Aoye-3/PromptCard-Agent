@@ -110,12 +110,12 @@ The legacy endpoint exists only to inspect migration source data. Prompt Library
 
 ## Agent Write Safety
 
-Agents may read a bounded Prompt library snapshot through the storage service and may propose changes. Direct write tools exist for approved workflows and require the current `revision`; normal model output should still use proposals.
+The pi text Agent may read a bounded Prompt Library snapshot supplied by the frontend and may emit only additive create proposals. It has no direct Prompt Library write tool and no access to Storage.
 
 The current safe write flow is:
 
 1. Frontend sends the user request plus a Prompt library snapshot to the Agent Runtime.
-2. Agent response may include `prompt_library_write_proposal` JSON.
+2. pi may search that bounded snapshot and emit one `prompt_library_write_proposal` with `operation: "create"`.
 3. Frontend parses proposals into `PromptLibraryWriteProposal`.
 4. User approves or rejects each proposal.
 5. Approval applies changes through existing preset store methods.
@@ -125,7 +125,7 @@ This keeps human confirmation between model output and durable Prompt library mu
 
 ## Proposal Draft Shape
 
-Proposal drafts contain the preset fields needed to create or update an `IPreset`:
+Proposal drafts contain the preset fields needed to create an `IPreset`:
 
 - `type`
 - `category`
@@ -137,7 +137,7 @@ When approved, generated preset metadata should retain source information such a
 
 ## Roadmap / Not Yet Implemented
 
-- Direct Agent archive/update behavior depends on UI approval and preset store support; model output alone is not a write.
+- Agent archive/update behavior is intentionally outside the current pi tool surface.
 - Skill-generated Prompt library changes should use the same proposal pattern before becoming durable.
 - A durable proposal audit log is not implemented yet.
 

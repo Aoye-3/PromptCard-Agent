@@ -55,7 +55,7 @@ function isProcessRunning(pid: number) {
 function startHealthyServer() {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'application/json' })
-    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":4,"capabilities":{"assets":true,"sqlite":true}}')
+    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":5,"capabilities":{"assets":true,"sqlite":true}}')
   })
 
   return new Promise<string>((resolve) => {
@@ -147,6 +147,22 @@ async function makeMarkerCommand(markerName: string) {
   }
 }
 
+function startHealthyTextAgentServer() {
+  const server = createServer((_, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' })
+    response.end('{"status":"healthy","service":"promptcard-pi-text-agent","orchestrator":"pi"}')
+  })
+
+  return new Promise<string>((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      servers.push(server)
+      const address = server.address()
+      if (!address || typeof address === 'string') throw new Error('Expected a TCP server address')
+      resolve(`http://127.0.0.1:${address.port}/health`)
+    })
+  })
+}
+
 async function getAvailablePort() {
   const server = createServer()
   await new Promise<void>((resolve, reject) => {
@@ -190,9 +206,7 @@ async function makeFakeUv(name: string) {
     `>> "${logPath}" echo UV_CACHE_DIR=%UV_CACHE_DIR%`,
     `>> "${logPath}" echo UV_PYTHON_INSTALL_DIR=%UV_PYTHON_INSTALL_DIR%`,
     `>> "${logPath}" echo UV_PROJECT_ENVIRONMENT=%UV_PROJECT_ENVIRONMENT%`,
-    `>> "${logPath}" echo DEER_FLOW_HOME=%DEER_FLOW_HOME%`,
-    `>> "${logPath}" echo DEER_FLOW_CONFIG_PATH=%DEER_FLOW_CONFIG_PATH%`,
-    `>> "${logPath}" echo DEER_FLOW_EXTENSIONS_CONFIG_PATH=%DEER_FLOW_EXTENSIONS_CONFIG_PATH%`,
+    `>> "${logPath}" echo PROMPTCARD_RUNTIME_STATE_DIR=%PROMPTCARD_RUNTIME_STATE_DIR%`,
     `>> "${logPath}" echo PROMPTCARD_LIBRARY_FILE=%PROMPTCARD_LIBRARY_FILE%`,
     `>> "${logPath}" echo PYTHONPATH=%PYTHONPATH%`,
     'if "%1 %2"=="python install" (',
@@ -229,6 +243,7 @@ async function expectScriptSupportsTestParameters() {
   expect(script).toContain('param(')
   expect(script).toContain('$StorageHealthUrl')
   expect(script).toContain('$AgentHealthUrl')
+  expect(script).toContain('$TextAgentHealthUrl')
   expect(script).toContain('$FrontendUrl')
   expect(script).toContain('$RuntimeManifestPath')
   expect(script).toContain('$FrontendCommand')
@@ -281,10 +296,7 @@ describe('start-dev-with-agent.ps1', () => {
   }, 45_000)
 
   test('overrides hostile uv paths and provisions only the workspace-local Python', async () => {
-    for (const [name, runtimeScript] of [
-      ['check', agentCheckScriptPath],
-      ['start', agentStartScriptPath]
-    ] as const) {
+    for (const [name, runtimeScript] of [['start', agentStartScriptPath]] as const) {
       const fakeUv = await makeFakeUv(`fake-uv-${name}`)
       const fixtureScripts = path.join(fakeUv.dir, 'scripts')
       const fixtureScript = path.join(fixtureScripts, path.basename(runtimeScript))
@@ -297,10 +309,9 @@ describe('start-dev-with-agent.ps1', () => {
       const expectedCache = path.join(fakeUv.dir, '.uv-cache')
       const expectedPythonInstall = path.join(fakeUv.dir, 'agent-runtime', 'backend', '.python')
       const expectedEnvironment = path.join(fakeUv.dir, 'agent-runtime', 'backend', '.venv')
-      const expectedRuntime = path.join(fakeUv.dir, 'agent-runtime')
       const expectedBackend = path.join(fakeUv.dir, 'agent-runtime', 'backend')
       const expectedPython = path.join(expectedPythonInstall, 'cpython-3.12.12-windows-x86_64-none', 'python.exe')
-      const expectedHarness = path.join(expectedBackend, 'packages', 'harness')
+      const expectedRuntimeState = path.join(fakeUv.dir, 'logs', 'agent-runtime-state')
       const result = await runPowerShell([
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixtureScript
       ], {
@@ -308,9 +319,7 @@ describe('start-dev-with-agent.ps1', () => {
         UV_CACHE_DIR: 'C:\\hostile\\cache',
         UV_PYTHON_INSTALL_DIR: 'C:\\hostile\\python',
         UV_PROJECT_ENVIRONMENT: 'C:\\hostile\\venv',
-        DEER_FLOW_HOME: 'C:\\',
-        DEER_FLOW_CONFIG_PATH: 'C:\\hostile\\config.yaml',
-        DEER_FLOW_EXTENSIONS_CONFIG_PATH: 'C:\\hostile\\extensions.json',
+        PROMPTCARD_RUNTIME_STATE_DIR: 'C:\\',
         PROMPTCARD_LIBRARY_FILE: 'C:\\hostile\\prompt-library.json',
         PYTHONPATH: 'C:\\hostile\\pythonpath'
       })
@@ -322,11 +331,9 @@ describe('start-dev-with-agent.ps1', () => {
       expect(log).toContain(`UV_CACHE_DIR=${expectedCache}`)
       expect(log).toContain(`UV_PYTHON_INSTALL_DIR=${expectedPythonInstall}`)
       expect(log).toContain(`UV_PROJECT_ENVIRONMENT=${expectedEnvironment}`)
-      expect(log).toContain(`DEER_FLOW_HOME=${path.join(expectedRuntime, '.deer-flow')}`)
-      expect(log).toContain(`DEER_FLOW_CONFIG_PATH=${path.join(expectedRuntime, 'config.yaml')}`)
-      expect(log).toContain(`DEER_FLOW_EXTENSIONS_CONFIG_PATH=${path.join(expectedRuntime, 'extensions_config.json')}`)
+      expect(log).toContain(`PROMPTCARD_RUNTIME_STATE_DIR=${expectedRuntimeState}`)
       expect(log).toContain(`PROMPTCARD_LIBRARY_FILE=${path.join(fakeUv.dir, 'data', 'prompt-library-presets.json')}`)
-      expect(log).toContain(`PYTHONPATH=${expectedBackend};${expectedHarness}`)
+      expect(log).toContain(`PYTHONPATH=${expectedBackend}`)
       expect(log).not.toContain('C:\\')
     }
   }, 45_000)
@@ -339,19 +346,19 @@ describe('start-dev-with-agent.ps1', () => {
     await copyFile(agentStartScriptPath, fixtureScript)
 
     const profileRoot = path.join(fakeUv.dir, 'logs', 'desktop-profile')
-    const expectedDeerFlowHome = path.join(profileRoot, 'agent-runtime', '.deer-flow')
+    const expectedRuntimeState = path.join(profileRoot, 'agent-runtime', '.promptcard-runtime')
     const expectedLibraryFile = path.join(profileRoot, 'data', 'prompt-library-presets.json')
     const result = await runPowerShell([
       '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', fixtureScript
     ], {
       PATH: `${fakeUv.dir}${path.delimiter}${process.env.PATH || process.env.Path || ''}`,
-      DEER_FLOW_HOME: expectedDeerFlowHome,
+      PROMPTCARD_RUNTIME_STATE_DIR: expectedRuntimeState,
       PROMPTCARD_LIBRARY_FILE: expectedLibraryFile
     })
 
     expect(result.code).not.toBe(0)
     const log = await readFile(fakeUv.logPath, 'utf8')
-    expect(log).toContain(`DEER_FLOW_HOME=${expectedDeerFlowHome}`)
+    expect(log).toContain(`PROMPTCARD_RUNTIME_STATE_DIR=${expectedRuntimeState}`)
     expect(log).toContain(`PROMPTCARD_LIBRARY_FILE=${expectedLibraryFile}`)
   }, 45_000)
 
@@ -390,15 +397,16 @@ describe('start-dev-with-agent.ps1', () => {
 
     const result = await runPowerShell(['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', command])
 
-    expect(result.code).toBe(0)
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0)
     expect(result.stderr).toBe('')
   })
 
   test('exits without running frontend command when all services are healthy', async () => {
     await expectScriptSupportsTestParameters()
-    const [storageUrl, agentUrl, frontendUrl] = await Promise.all([
+    const [storageUrl, agentUrl, textAgentUrl, frontendUrl] = await Promise.all([
       startHealthyServer(),
       startHealthyServer(),
+      startHealthyTextAgentServer(),
       startHealthyFrontendServer()
     ])
     const marker = await makeMarkerCommand('frontend-started.txt')
@@ -414,6 +422,8 @@ describe('start-dev-with-agent.ps1', () => {
       storageUrl,
       '-AgentHealthUrl',
       agentUrl,
+      '-TextAgentHealthUrl',
+      textAgentUrl,
       '-FrontendUrl',
       frontendUrl,
       '-RuntimeManifestPath',
@@ -425,13 +435,13 @@ describe('start-dev-with-agent.ps1', () => {
     ])
 
     await expect(readFile(marker.markerPath, 'utf8')).rejects.toThrow()
-    expect(result.code).toBe(0)
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0)
     expect(result.stdout).toContain('Vite frontend is already healthy')
   })
 
   test('runs frontend command when storage and agent are healthy but frontend is unavailable', async () => {
     await expectScriptSupportsTestParameters()
-    const [storageUrl, agentUrl] = await Promise.all([startHealthyServer(), startHealthyServer()])
+    const [storageUrl, agentUrl, textAgentUrl] = await Promise.all([startHealthyServer(), startHealthyServer(), startHealthyTextAgentServer()])
     const marker = await makeMarkerCommand('frontend-started.txt')
     const runtimeManifestPath = await makeRuntimeManifestPath('frontend-missing-runtime.json')
 
@@ -445,6 +455,8 @@ describe('start-dev-with-agent.ps1', () => {
       storageUrl,
       '-AgentHealthUrl',
       agentUrl,
+      '-TextAgentHealthUrl',
+      textAgentUrl,
       '-FrontendUrl',
       'http://127.0.0.1:1/',
       '-RuntimeManifestPath',
@@ -455,15 +467,16 @@ describe('start-dev-with-agent.ps1', () => {
       '2'
     ])
 
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0)
     await expect(readFile(marker.markerPath, 'utf8')).resolves.toBe('started\r\n')
-    expect(result.code).toBe(0)
   }, 15_000)
 
   test('does not treat another Vite app as a healthy frontend', async () => {
     await expectScriptSupportsTestParameters()
-    const [storageUrl, agentUrl, frontendUrl] = await Promise.all([
+    const [storageUrl, agentUrl, textAgentUrl, frontendUrl] = await Promise.all([
       startHealthyServer(),
       startHealthyServer(),
+      startHealthyTextAgentServer(),
       startForeignFrontendServer()
     ])
     const marker = await makeMarkerCommand('foreign-frontend-started.txt')
@@ -479,6 +492,8 @@ describe('start-dev-with-agent.ps1', () => {
       storageUrl,
       '-AgentHealthUrl',
       agentUrl,
+      '-TextAgentHealthUrl',
+      textAgentUrl,
       '-FrontendUrl',
       frontendUrl,
       '-RuntimeManifestPath',
@@ -489,13 +504,13 @@ describe('start-dev-with-agent.ps1', () => {
       '2'
     ])
 
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0)
     await expect(readFile(marker.markerPath, 'utf8')).resolves.toBe('started\r\n')
-    expect(result.code).toBe(0)
   }, 15_000)
 
   test('falls forward from the preferred frontend port when it is already occupied', async () => {
     await startPortBlocker(3000)
-    const [storageUrl, agentUrl] = await Promise.all([startHealthyServer(), startHealthyServer()])
+    const [storageUrl, agentUrl, textAgentUrl] = await Promise.all([startHealthyServer(), startHealthyServer(), startHealthyTextAgentServer()])
     const marker = await makeMarkerCommand('frontend-started.txt')
     const runtimeManifestPath = await makeRuntimeManifestPath('frontend-fallback-runtime.json')
 
@@ -509,6 +524,8 @@ describe('start-dev-with-agent.ps1', () => {
       storageUrl,
       '-AgentHealthUrl',
       agentUrl,
+      '-TextAgentHealthUrl',
+      textAgentUrl,
       '-RuntimeManifestPath',
       runtimeManifestPath,
       '-FrontendCommand',
@@ -517,8 +534,8 @@ describe('start-dev-with-agent.ps1', () => {
       '2'
     ])
 
+    expect(result.code, `${result.stdout}\n${result.stderr}`).toBe(0)
     const runtime = JSON.parse(await readFile(runtimeManifestPath, 'utf8'))
-    expect(result.code).toBe(0)
     expect(runtime.frontendUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/)
     expect(runtime.ports.frontend).not.toBe(3000)
     await expect(readFile(marker.markerPath, 'utf8')).resolves.toBe('started\r\n')
@@ -527,7 +544,7 @@ describe('start-dev-with-agent.ps1', () => {
   test('fails clearly when an explicit frontend port is occupied', async () => {
     const occupiedFrontendUrl = await startHealthyFrontendServer()
     const occupiedPort = new URL(occupiedFrontendUrl).port
-    const [storageUrl, agentUrl] = await Promise.all([startHealthyServer(), startHealthyServer()])
+    const [storageUrl, agentUrl, textAgentUrl] = await Promise.all([startHealthyServer(), startHealthyServer(), startHealthyTextAgentServer()])
     const marker = await makeMarkerCommand('frontend-started.txt')
     const runtimeManifestPath = await makeRuntimeManifestPath('explicit-occupied-runtime.json')
 
@@ -541,6 +558,8 @@ describe('start-dev-with-agent.ps1', () => {
       storageUrl,
       '-AgentHealthUrl',
       agentUrl,
+      '-TextAgentHealthUrl',
+      textAgentUrl,
       '-RuntimeManifestPath',
       runtimeManifestPath,
       '-FrontendCommand',

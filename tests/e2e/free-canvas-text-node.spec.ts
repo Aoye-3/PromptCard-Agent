@@ -85,6 +85,26 @@ test('quick message text nodes start manageable and can be dragged and deleted',
   await expect(quickNode).toHaveCount(0)
 })
 
+test('quick message text nodes stay visible while the image generation panel tracks canvas selection', async ({ page }) => {
+  await routeStorage(page, [{
+    id: 'preset-visible-quick',
+    type: 'custom',
+    category: 'quick-message',
+    label: 'Visible quick',
+    content: 'Visible quick message body',
+    usageCount: 0,
+    meta: { quickMessage: { kind: 'quick-message' } }
+  }])
+  await openFreeCanvasProject(page)
+  await page.getByRole('button', { name: '图片生成', exact: true }).click()
+
+  await page.getByTitle('Quick messages').click()
+  await page.getByText('Visible quick', { exact: true }).click()
+
+  const quickNode = page.locator('[data-free-canvas-text-node]').filter({ hasText: 'Visible quick message body' })
+  await expect(quickNode).toBeVisible()
+})
+
 async function openFreeCanvasProject(page: Page) {
   await page.goto('/')
   await page.getByText('Create project').click()
@@ -97,7 +117,7 @@ async function createQuickMessage(page: Page, name: string, body: string) {
 
   const dialog = page.locator('[data-quick-message-dialog]')
   await dialog.locator('input').fill(name)
-  await dialog.locator('textarea').nth(1).fill(body)
+  await dialog.locator('textarea').fill(body)
   await dialog.locator('button').last().click()
   await expect(dialog).toBeHidden()
 }
@@ -161,8 +181,9 @@ async function viewportTransform(page: Page) {
   return page.locator('.react-flow__viewport').evaluate(element => window.getComputedStyle(element).transform)
 }
 
-async function routeStorage(page: Page) {
+async function routeStorage(page: Page, initialPresets: Record<string, unknown>[] = []) {
   let currentProject: Record<string, unknown> | null = null
+  let currentPresets = initialPresets
   await page.route('**/storage-api/projects', async route => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { projects: [] } })
@@ -175,7 +196,16 @@ async function routeStorage(page: Page) {
     currentProject = await projectFromWrite(route, currentProject)
     await route.fulfill({ json: currentProject })
   })
-  await page.route('**/storage-api/presets', route => route.fulfill({ json: { presets: [] } }))
+  await page.route('**/storage-api/presets/reorder', route => route.fulfill({ json: { presets: currentPresets } }))
+  await page.route('**/storage-api/presets', async route => {
+    if (route.request().method() === 'GET') {
+      await route.fulfill({ json: { presets: currentPresets } })
+      return
+    }
+    const preset = route.request().postDataJSON() as Record<string, unknown>
+    currentPresets = [preset, ...currentPresets.filter(item => item.id !== preset.id)]
+    await route.fulfill({ json: preset })
+  })
   await page.route('**/storage-api/presets/trash', route => route.fulfill({ json: { items: [] } }))
   await page.route('**/storage-api/projects/trash', route => route.fulfill({ json: { items: [] } }))
   await page.route('**/storage-api/migrations/browser-cache', route => route.fulfill({ json: { projects: 0, presets: 0 } }))

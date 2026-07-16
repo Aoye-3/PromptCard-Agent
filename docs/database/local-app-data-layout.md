@@ -29,9 +29,8 @@ logs/
   tauri.dev-runtime.conf.json
   desktop-profile/
     agent-runtime/
-      .deer-flow/
-        data/
-        promptcard-model-config.json
+      .promptcard-runtime/
+        promptcard-model-connections.json
     config/
       desktop-shell.json
       update-source.json
@@ -46,7 +45,7 @@ Maintained launchers own the runtime environment:
 - `PROMPTCARD_STORAGE_DATA_DIR`: repository `data/`.
 - `PROMPTCARD_DESKTOP_PROFILE_ROOT`: optional runtime configuration root under `logs/desktop-profile/`.
 - `PROMPTCARD_LOGS_DIR`: runtime log directory under `logs/`.
-- `DEER_FLOW_HOME`: Agent Runtime state selected by the launcher.
+- `PROMPTCARD_RUNTIME_STATE_DIR`: Agent Runtime state selected by the launcher.
 - `PROMPTCARD_LIBRARY_FILE`: legacy JSON compatibility path only; live presets are in SQLite.
 
 The storage service must treat `PROMPTCARD_STORAGE_DATA_DIR` as the durable data root. Startup must compare the health response with the expected repository path and reject mismatches.
@@ -67,7 +66,7 @@ They may initialize or migrate an empty SQLite database transactionally. They do
 - `data/promptcard.sqlite3`: active and deleted projects, Prompt Library presets, revisions, ordering, asset metadata, Recent Capture metadata, and migration records.
 - `data/assets/`: uploaded PNG, JPEG, WebP, MP4, and WebM assets referenced by `assetId`.
 - Legacy JSON files are preserved as read-only migration sources and are no longer runtime write targets.
-- Agent Runtime state: memory, thread data, uploads, outputs, and model config in the launcher-selected workspace path.
+- Agent Runtime state: model connection metadata in the launcher-selected workspace path. pi text sessions are process-local.
 - `logs/`: desktop-launched storage/Agent logs, runtime manifests, and generated Tauri configuration.
 - `backups/`: automatic JSON migration backups and SQLite-consistent manual or pre-update snapshots.
 - `logs/desktop-profile/config/desktop-shell.json`: desktop shell runtime metadata when the Profile config surface is used.
@@ -83,9 +82,7 @@ Source updates affect the Git worktree:
 src/
 promptcard_storage/
 agent-runtime/backend/
-agent-runtime/scripts/
-agent-runtime/docker/
-agent-runtime/skills/public/
+text-agent-runtime/
 scripts/
 docs/
 src-tauri/
@@ -96,13 +93,13 @@ package-lock.json
 
 Durable `data/`, `backups/`, and local runtime state are not part of a source update. The sidebar Update module stores its source configuration under `logs/`, previews remote changes with Git, blocks protected or manual-review paths, creates a storage backup, then applies source changes only with `git merge --ff-only FETCH_HEAD`.
 
-`agent-runtime/config.yaml` is not automatically applied yet. It remains a manual-review file until runtime configuration is split into a source template and a Profile-owned local override.
+The removed DeerFlow directories and `agent-runtime/config.yaml` are not part of the maintained update or runtime contract. Provider-neutral connection metadata lives under `PROMPTCARD_RUNTIME_STATE_DIR`; credentials live only in the operating-system keyring.
 
 The legacy desktop `git_pull_source` action remains only for compatibility with old desktop builds. Product UI should use the guarded Update screen.
 
 ## Schema Rule
 
-The SQLite store currently uses schema version `2`. Future schema changes should:
+The SQLite store currently uses schema version `5`. Future schema changes should:
 
 1. Detect the existing schema version at startup.
 2. Create a consistent backup under repository `backups/`.

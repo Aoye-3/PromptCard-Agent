@@ -16,7 +16,7 @@ The core rule is simple: source can be updated from GitHub; user data must not b
 | User media assets | User | `data/assets/` | No | PNG, JPEG, WebP, and future MP4 bytes. Projects and presets store references only. |
 | User backups | User | `backups/` | No | Migration, manual, and pre-update snapshots. |
 | Desktop logs | User/runtime | `logs/desktop-profile/logs/` | No | Runtime diagnostics for the editable desktop shell. |
-| Agent Runtime state | User/runtime | `logs/desktop-profile/agent-runtime/.deer-flow/` | No | Memory, threads, uploads, outputs, and local model configuration. |
+| Agent Runtime state | User/runtime | `logs/desktop-profile/agent-runtime/.promptcard-runtime/` | No | Model connection metadata; pi conversation state is process-local. |
 | Desktop profile metadata | User/runtime | `logs/desktop-profile/config/desktop-shell.json` | No | Profile identity and source-root metadata. |
 | Update source metadata | User/runtime | `logs/desktop-profile/config/update-source.json` | No | GitHub repository URL, remote name, branch, last checked commit, and check timestamp. |
 | Browser UI cache | User/browser profile | localforage `PromptCard/promptcard` | No | Settings, prompt history, templates, old migration markers, and UI-only cache. |
@@ -47,9 +47,8 @@ logs/
   desktop-profile/
     logs/
     agent-runtime/
-      .deer-flow/
-        data/
-        promptcard-model-config.json
+      .promptcard-runtime/
+        promptcard-model-connections.json
     config/
       desktop-shell.json
       update-source.json
@@ -62,7 +61,7 @@ Maintained editable-development launchers must derive storage and runtime paths 
 | `PROMPTCARD_STORAGE_DATA_DIR` | `<repository>/data`. |
 | `PROMPTCARD_LOGS_DIR` | Runtime log directory under `logs/`. |
 | `PROMPTCARD_DESKTOP_PROFILE_ROOT` | Optional runtime config/log root under `logs/desktop-profile`; it does not own Storage Service data. |
-| `DEER_FLOW_HOME` | Agent Runtime state directory selected by the launcher. |
+| `PROMPTCARD_RUNTIME_STATE_DIR` | Agent Runtime state directory selected by the launcher. |
 | `PROMPTCARD_LIBRARY_FILE` | Legacy JSON compatibility path only; live Prompt Library records are in SQLite. |
 
 Startup must verify that Storage Service health reports the expected repository `data/` path. A healthy service pointing to another directory is an error, not an alternate profile to reuse silently. Legacy JSON files and browser cache remain migration sources; the SQLite database and asset directory under `data/` are the live source of truth.
@@ -107,9 +106,8 @@ Automatic source updates may apply changes under these source-owned paths:
 - `src-tauri/` for the desktop shell.
 - `promptcard_storage/` for the local storage service.
 - `scripts/`, `docs/`, `public/`, and `vite/`.
-- `agent-runtime/backend/` for Agent Runtime backend and AgentHarness code.
-- `agent-runtime/scripts/` and `agent-runtime/docker/` for runtime operations code.
-- `agent-runtime/skills/public/` for bundled public skills.
+- `agent-runtime/backend/` for the Python PromptCard Gateway.
+- `text-agent-runtime/` for the pi text Agent.
 - Root package, TypeScript, Vite, Tailwind, ESLint, and desktop launcher metadata.
 
 Automatic source updates must not apply changes under protected or local-only runtime paths:
@@ -119,10 +117,9 @@ Automatic source updates must not apply changes under protected or local-only ru
 - `backups/`
 - `.env*` at any level
 - `API-Key.txt`
-- `agent-runtime/.deer-flow/`
+- `agent-runtime/.promptcard-runtime/`
 - `agent-runtime/.agent/`
 
-`agent-runtime/config.yaml` remains `manual-review` until it is split into a checked-in template plus Profile-owned local override.
 
 ## GitHub Source Update Mechanism
 

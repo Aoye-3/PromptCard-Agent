@@ -113,7 +113,22 @@ describe('model management domain', () => {
         watermark: true,
         maxReferenceImages: 10,
         mentionStrategy: 'ordered-image-labels',
+        promptOptimization: {
+          modes: ['standard', 'fast'],
+          default: 'standard'
+        },
+        inputConstraints: {
+          formats: ['jpeg', 'png', 'webp', 'bmp', 'tiff', 'gif', 'heic', 'heif'],
+          maxImages: 10,
+          maxBytesPerImage: 31457280,
+          maxPixelsPerImage: 36000000,
+          minSideExclusive: 14,
+          minAspectRatio: 0.0625,
+          maxAspectRatio: 16
+        },
+        annotationInputs: ['raster-markup'],
         regionInputs: ['point', 'bbox'],
+        responseTransports: ['url', 'b64_json'],
         outputCount: 1,
         streaming: false
       }
@@ -128,7 +143,19 @@ describe('model management domain', () => {
         maxAspectRatio: 16
       },
       outputFormats: ['png', 'jpeg'],
-      watermark: true
+      watermark: true,
+      promptOptimization: { modes: ['standard', 'fast'], default: 'standard' },
+      inputConstraints: {
+        formats: ['jpeg', 'png', 'webp', 'bmp', 'tiff', 'gif', 'heic', 'heif'],
+        maxImages: 10,
+        maxBytesPerImage: 31457280,
+        maxPixelsPerImage: 36000000,
+        minSideExclusive: 14,
+        minAspectRatio: 0.0625,
+        maxAspectRatio: 16
+      },
+      annotationInputs: ['raster-markup'],
+      responseTransports: ['url', 'b64_json']
     })
   })
 

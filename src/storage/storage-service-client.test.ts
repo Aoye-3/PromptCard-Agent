@@ -165,13 +165,64 @@ describe('storageServiceClient', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  test('rejects unsupported upload files before sending a request', async () => {
-    const fetchMock = vi.fn()
+  test('imports official Seedream image formats as original and provider-ready assets', async () => {
+    const payload = {
+      originalAsset: { id: 'asset-original', filename: 'board.gif', contentType: 'image/gif', size: 3 },
+      previewAsset: { id: 'asset-preview', filename: 'board.png', contentType: 'image/png', size: 4 },
+      providerInputAsset: { id: 'asset-provider', filename: 'board.png', contentType: 'image/png', size: 4 },
+      width: 64,
+      height: 64
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const file = new File(['gif'], 'board.gif', { type: 'image/gif' })
+
+    await expect(storageServiceClient.imageAssets.import(file)).resolves.toEqual(payload)
+    expect(fetchMock).toHaveBeenCalledWith('/storage-api/image-assets/import', expect.objectContaining({
+      method: 'POST',
+      body: file,
+      headers: expect.objectContaining({
+        'Content-Type': 'image/gif',
+        'X-File-Name': 'board.gif'
+      })
+    }))
+  })
+
+  test('records a permanent annotation-flattened asset derivation', async () => {
+    const payload = {
+      id: 'derivation-1',
+      sourceAssetId: 'asset-source',
+      derivedAssetId: 'asset-flattened',
+      kind: 'annotation-flattened',
+      transform: { format: 'png' },
+      annotationDocument: { version: 1, marks: [] },
+      createdAt: 1
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), {
+      status: 200, headers: { 'Content-Type': 'application/json' }
+    }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(storageServiceClient.assets.upload(new File(['gif'], 'board.gif', { type: 'image/gif' })))
-      .rejects.toMatchObject({ code: 'invalid_asset', status: 400 })
-    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(storageServiceClient.imageAssets.createDerivation({
+      sourceAssetId: 'asset-source',
+      derivedAssetId: 'asset-flattened',
+      kind: 'annotation-flattened',
+      transform: { format: 'png' },
+      annotationDocument: { version: 1, marks: [] }
+    })).resolves.toEqual(payload)
+    expect(fetchMock).toHaveBeenCalledWith('/storage-api/image-assets/derivations', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        sourceAssetId: 'asset-source',
+        derivedAssetId: 'asset-flattened',
+        kind: 'annotation-flattened',
+        transform: { format: 'png' },
+        annotationDocument: { version: 1, marks: [] }
+      })
+    }))
+    expect(Reflect.has(storageServiceClient.imageAssets, 'delete')).toBe(false)
   })
 
   test('sends one atomic Recent Capture registration request', async () => {
@@ -228,9 +279,17 @@ describe('storageServiceClient', () => {
         providerId: 'volcengine', modelId: 'seedream', state: 'failed', createdAt: 1,
         requestSnapshot: {
           mode: 'generate', resolution: '2K', aspectRatio: '16:9', width: 2048, height: 1152,
+          promptOptimization: 'fast',
           outputFormat: 'png', watermark: false,
           promptDocument: { version: 1, segments: [{ type: 'text', text: 'Prompt' }] },
-          inputAssets: [], regions: [], remoteUrl: 'https://provider.example/output'
+          inputAssets: [{
+            referenceId: 'reference-1',
+            role: 'source-image',
+            assetId: 'asset-derived',
+            sourceAssetId: 'asset-original',
+            order: 0
+          }],
+          regions: [], remoteUrl: 'https://provider.example/output'
         },
         outputAssetIds: [],
         error: { code: 'failed', message: 'Safe failure', retryable: false },
@@ -250,29 +309,39 @@ describe('storageServiceClient', () => {
     )
     expect(page.nextCursor).toBe('next-page')
     expect(page.runs[0].requestSnapshot).toMatchObject({
-      aspectRatio: '16:9', width: 2048, height: 1152
+      aspectRatio: '16:9',
+      width: 2048,
+      height: 1152,
+      promptOptimization: 'fast',
+      inputAssets: [{
+        referenceId: 'reference-1',
+        role: 'source-image',
+        assetId: 'asset-derived',
+        sourceAssetId: 'asset-original',
+        order: 0
+      }]
     })
     expect(JSON.stringify(page)).not.toContain('provider.example')
     expect(JSON.stringify(page)).not.toContain('raw-secret')
     expect(Reflect.has(storageServiceClient.imageGenerationRuns, 'delete')).toBe(false)
   })
 
-  test('supports unfiltered and singly filtered image generation history queries', async () => {
+  test('requires project scope for every image generation history query', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
       runs: [], nextCursor: null
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     vi.stubGlobal('fetch', fetchMock)
 
-    await storageServiceClient.imageGenerationRuns.getPage({ limit: 10 })
-    await storageServiceClient.imageGenerationRuns.getPage({ projectId: 'project/1' })
-    await storageServiceClient.imageGenerationRuns.getPage({ nodeId: 'node 1' })
-    await storageServiceClient.imageGenerationRuns.getPage({ conversationId: 'conversation 1' })
+    await storageServiceClient.imageGenerationRuns.getPage({ projectId: 'project/1', limit: 10 })
+    await storageServiceClient.imageGenerationRuns.getPage({ projectId: 'project/1', nodeId: 'node 1' })
+    await storageServiceClient.imageGenerationRuns.getPage({
+      projectId: 'project/1', conversationId: 'conversation 1'
+    })
 
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
-      '/storage-api/image-generation-runs?limit=10',
-      '/storage-api/image-generation-runs?projectId=project%2F1',
-      '/storage-api/image-generation-runs?nodeId=node+1',
-      '/storage-api/image-generation-runs?conversationId=conversation+1'
+      '/storage-api/image-generation-runs?projectId=project%2F1&limit=10',
+      '/storage-api/image-generation-runs?projectId=project%2F1&nodeId=node+1',
+      '/storage-api/image-generation-runs?projectId=project%2F1&conversationId=conversation+1'
     ])
   })
 
@@ -365,6 +434,7 @@ describe('storageServiceClient', () => {
       providerId: 'volcengine', modelId: 'seedream', state: 'succeeded', createdAt: 1,
       requestSnapshot: {
         mode: 'generate', resolution: '1K', aspectRatio: '1:1', outputFormat: 'png', watermark: false,
+        promptOptimization: 'standard',
         promptDocument: { version: 1, segments: [] }, inputAssets: [], regions: []
       },
       outputAssetIds: ['asset-1']
@@ -378,11 +448,12 @@ describe('storageServiceClient', () => {
       }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(storageServiceClient.imageGenerationRuns.getById('run/1')).resolves.toMatchObject({ id: 'run-1' })
-    await expect(storageServiceClient.imageGenerationRuns.getById('missing')).resolves.toBeNull()
+    await expect(storageServiceClient.imageGenerationRuns.getById('run/1', 'project/1'))
+      .resolves.toMatchObject({ id: 'run-1' })
+    await expect(storageServiceClient.imageGenerationRuns.getById('missing', 'project/1')).resolves.toBeNull()
     expect(fetchMock.mock.calls.map(call => call[0])).toEqual([
-      '/storage-api/image-generation-runs/run%2F1',
-      '/storage-api/image-generation-runs/missing'
+      '/storage-api/image-generation-runs/run%2F1?projectId=project%2F1',
+      '/storage-api/image-generation-runs/missing?projectId=project%2F1'
     ])
   })
 })

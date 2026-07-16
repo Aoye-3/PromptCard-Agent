@@ -5,6 +5,8 @@ from typing import Literal
 
 ImageResolution = Literal["1K", "2K"]
 ImageOutputFormat = Literal["png", "jpeg"]
+PromptOptimizationMode = Literal["standard", "fast"]
+ImageInputRole = Literal["source-image", "reference-image"]
 
 
 class PromptCompilationError(ValueError):
@@ -47,6 +49,8 @@ class ImageInput:
     reference_id: str
     image: str
     order: int
+    role: str = "reference-image"
+    source_asset_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,11 +90,13 @@ class ImageGenerationRequest:
     height: int | None
     output_format: str
     watermark: bool
+    prompt_optimization: str = "standard"
 
 
 @dataclass(frozen=True, slots=True)
 class ProviderImage:
-    url: str
+    url: str | None = None
+    b64_json: str | None = None
     size: str | None = None
 
 
@@ -98,3 +104,4 @@ class ProviderImage:
 class ImageGenerationResult:
     image: ProviderImage
     request_id: str | None = None
+    usage: dict[str, int] | None = None

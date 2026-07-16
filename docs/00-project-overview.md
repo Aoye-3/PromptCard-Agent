@@ -1,21 +1,45 @@
 # Project Overview
 
-PromptCard-Manager helps users build reusable prompt cards, manage Prompt Library presets, create storyboard-style prompts, and collaborate with an optional local Agent Runtime.
+PromptCard-Manager is a local-first prompt and visual-production workspace. It combines a Prompt media library, Free Canvas, provider-neutral image generation, and a focused text Agent.
+
+## Minimal Closed Loop
+
+The current delivery target is:
+
+1. Prompt media library construction.
+2. Image generation from Canvas prompts.
+3. Prompt analysis and prompt completion through the text Agent.
 
 ## Primary Capabilities
 
-- Card project editing with PromptCard pages and reusable card types.
 - Prompt Library preset management using the `IPreset` compatibility contract.
-- Storyboard and page-based three-stage structured prompt workflows, including bound storyboard/video prompt pairs.
-- Optional Agent dashboard and collaboration panel backed by a DeerFlow-derived runtime.
-- Provider-neutral project Image Generation Agent with Seedream 5.0 Pro, OS-keyring credentials, local generated assets, permanent schema v4 conversations/runs, and idempotent canvas placement.
-- Development-only file persistence for projects and Prompt Library presets.
+- Media Library capture, registration, reuse, and image style/prompt analysis.
+- Free Canvas text and image nodes.
+- Canvas Prompt image generation through the existing provider-neutral Image Generation module.
+- A pi-based text Agent that can:
+  - analyze and improve a selected Canvas text node;
+  - propose a new Canvas text node when none is selected;
+  - write from a bounded Prompt Library snapshot;
+  - propose new Prompt Library items;
+  - analyze one explicitly selected image through an Ark multimodal text model.
+- Storyboard and structured prompt workflows.
+
+All Agent mutations are proposals and require explicit user confirmation.
+
+## Runtime Shape
+
+- React/Vite frontend
+- PromptCard Storage service
+- Python PromptCard Gateway for model management, Ark SDK calls, media access, and image generation
+- Node pi text runtime for the focused Agent loop
+
+DeerFlow and LangGraph have been removed from the maintained runtime.
 
 ## Repository Boundary
 
-The repository root is `PromptCard-Manager`. The parent folder is a workspace container and may contain `_reference` materials and legacy local-only artifacts.
+The repository root is `PromptCard-Manager`. The parent folder is a workspace container and may contain reference materials or legacy local-only artifacts.
 
-Do not treat `_reference` content as active project code. Maintained PromptCard launchers do not consume `API-Key.txt`; model credentials belong in the operating-system keyring and must not be moved into the repository.
+Model credentials belong in the operating-system keyring. Maintained launchers do not consume `API-Key.txt`.
 
 ## Main Commands
 
@@ -23,7 +47,8 @@ Do not treat `_reference` content as active project code. Maintained PromptCard 
 npm.cmd run dev
 npm.cmd run dev:with-agent
 npm.cmd run agent:dev
+npm.cmd run text-agent:dev
 npm.cmd run agent:check
-npm.cmd run test -- --run
+npm.cmd test -- --run
 npm.cmd run build
 ```

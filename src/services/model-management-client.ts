@@ -3,6 +3,7 @@ import {
   type ImageGenerationProviderDiagnostic,
   type ImageGenerationProviderStatus,
   type ImageGenerationStatus,
+  type ConnectionModelCatalog,
   type ModelAssignment,
   type ModelAssignmentInput,
   type ModelCatalog,
@@ -10,6 +11,9 @@ import {
   type ModelConnectionDependencies,
   type ModelConnectionInput,
   type ModelConnectionTestResult,
+  type ModelCatalogEntry,
+  type ModelIntegrationGroup,
+  type ModelProvider,
   type ModelSlot
 } from '@/domain/models/model-management'
 import { createRuntimeHttpClient, RuntimeHttpError } from './runtime-http-client'
@@ -23,14 +27,19 @@ export type {
   ModelCapabilities,
   ModelCatalog,
   ModelCatalogEntry,
+  ModelCatalogSource,
   ModelConnection,
   ModelConnectionDependencies,
   ModelConnectionInput,
   ModelConnectionTestResult,
   ModelConnectionTestState,
   ModelModality,
+  ModelIntegrationGroup,
+  ModelIntegrationKind,
   ModelProvider,
-  ModelSlot
+  ModelSlot,
+  ConnectionModelCatalog,
+  GroupedModelCatalog
 } from '@/domain/models/model-management'
 
 const MODEL_MANAGEMENT_BASE = '/agent-api/promptcard/runtime'
@@ -73,8 +82,8 @@ export const createModelManagementClient = (
     getCatalog: async (): Promise<ModelCatalog> => {
       const payload = await request<Partial<ModelCatalog>>('/model-catalog')
       return {
-        providers: Array.isArray(payload.providers) ? payload.providers : [],
-        models: Array.isArray(payload.models) ? payload.models : []
+        providers: Array.isArray(payload.providers) ? payload.providers.flatMap(normalizeProvider) : [],
+        models: Array.isArray(payload.models) ? payload.models.flatMap(normalizeModel) : []
       }
     },
 
@@ -99,6 +108,17 @@ export const createModelManagementClient = (
 
     testConnection: (connectionId: string): Promise<ModelConnectionTestResult> =>
       request(`/model-connections/${encodeURIComponent(connectionId)}/test`, jsonRequest('POST', {})),
+
+    getConnectionModels: async (connectionId: string): Promise<ConnectionModelCatalog> => {
+      const payload = await request<Record<string, unknown>>(
+        `/model-connections/${encodeURIComponent(connectionId)}/models`
+      )
+      return {
+        connectionId: typeof payload.connectionId === 'string' ? payload.connectionId : connectionId,
+        providerId: typeof payload.providerId === 'string' ? payload.providerId : '',
+        models: Array.isArray(payload.models) ? payload.models.flatMap(normalizeModel) : []
+      }
+    },
 
     listAssignments: async (): Promise<ModelAssignment[]> => {
       const payload = await request<{ assignments?: ModelAssignment[] }>('/model-assignments')
@@ -181,6 +201,51 @@ const normalizeConnection = (value: unknown): ModelConnection => {
         }
       : {})
   }
+}
+
+const normalizeProvider = (value: unknown): ModelProvider[] => {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.displayName !== 'string' || typeof value.defaultApiBase !== 'string') return []
+  const groups = isRecord(value.integrationGroups)
+    ? Object.fromEntries(
+        Object.entries(value.integrationGroups).flatMap(([modality, group]) => {
+          const normalized = normalizeIntegrationGroup(group)
+          return (modality === 'chat' || modality === 'image') && normalized
+            ? [[modality, normalized]]
+            : []
+        })
+      )
+    : undefined
+  return [{
+    id: value.id,
+    displayName: value.displayName,
+    defaultApiBase: value.defaultApiBase,
+    ...(groups && Object.keys(groups).length ? { integrationGroups: groups } : {})
+  }]
+}
+
+const normalizeModel = (value: unknown): ModelCatalogEntry[] => {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.providerId !== 'string' || typeof value.displayName !== 'string') return []
+  if (value.modality !== 'chat' && value.modality !== 'image') return []
+  const integrationGroup = normalizeIntegrationGroup(value.integrationGroup)
+  const source = value.source === 'provider-catalog' || value.source === 'remote' || value.source === 'cached'
+    ? value.source
+    : undefined
+  return [{
+    id: value.id,
+    providerId: value.providerId,
+    displayName: value.displayName,
+    modality: value.modality,
+    ...(isRecord(value.capabilities) ? { capabilities: value.capabilities } : {}),
+    ...(integrationGroup ? { integrationGroup } : {}),
+    ...(source ? { source } : {}),
+    ...(typeof value.assignable === 'boolean' ? { assignable: value.assignable } : {})
+  }]
+}
+
+const normalizeIntegrationGroup = (value: unknown): ModelIntegrationGroup | undefined => {
+  if (!isRecord(value) || typeof value.id !== 'string' || typeof value.displayName !== 'string') return undefined
+  if (value.kind !== 'pi-native' && value.kind !== 'sdk') return undefined
+  return { id: value.id, displayName: value.displayName, kind: value.kind }
 }
 
 const normalizeProviderDiagnostic = (value: unknown): ImageGenerationProviderDiagnostic[] => {

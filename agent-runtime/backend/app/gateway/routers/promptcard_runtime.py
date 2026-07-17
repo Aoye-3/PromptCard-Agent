@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
+from starlette.responses import StreamingResponse
 
+from app.gateway.internal_auth import (
+    INTERNAL_AUTH_HEADER_NAME,
+    is_valid_internal_auth_token,
+)
 from app.gateway.model_management.connection_store import ModelManagementError
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.promptcard_runtime import (
@@ -14,6 +21,7 @@ from app.gateway.promptcard_runtime import (
     PromptCardRuntimeMessageRequest,
     runtime_service,
 )
+from app.gateway.text_generation.service import resolve_pi_native_proxy
 
 router = APIRouter(prefix="/api/promptcard/runtime", tags=["promptcard-runtime"])
 
@@ -86,11 +94,97 @@ async def media_analysis(
 
 
 @router.post("/internal/chat")
-async def internal_chat(body: PromptCardInternalChatRequest) -> dict[str, Any]:
+async def internal_chat(
+    body: PromptCardInternalChatRequest,
+    request: Request,
+) -> dict[str, Any]:
+    _require_internal_auth(request)
     try:
         return await runtime_service.internal_chat(body)
     except (ModelManagementError, CredentialStoreError, OSError) as exc:
         raise _model_http_error(exc) from None
+
+
+@router.get("/internal/text-model")
+async def internal_text_model(request: Request) -> dict[str, Any]:
+    _require_internal_auth(request)
+    try:
+        return await runtime_service.internal_text_model()
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
+        raise _model_http_error(exc) from None
+
+
+@router.post("/internal/pi-proxy/{connection_id}/{upstream_path:path}")
+async def pi_native_proxy(
+    connection_id: str,
+    upstream_path: str,
+    request: Request,
+) -> StreamingResponse:
+    try:
+        target = resolve_pi_native_proxy(connection_id)
+        normalized_path = upstream_path.strip("/")
+        _require_internal_auth(request)
+        if normalized_path != "chat/completions":
+            raise HTTPException(status_code=404, detail="pi_proxy_path_invalid")
+        body = await request.body()
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            raise HTTPException(status_code=422, detail="pi_proxy_payload_invalid") from None
+        if not isinstance(payload, dict) or payload.get("model") != target["modelId"]:
+            raise HTTPException(status_code=422, detail="pi_proxy_model_mismatch")
+        upstream_url = f'{target["apiBase"].rstrip("/")}/{normalized_path}'
+        client = httpx.AsyncClient(timeout=httpx.Timeout(120, read=None))
+        try:
+            upstream = await client.send(
+                client.build_request(
+                    "POST",
+                    upstream_url,
+                    content=body,
+                    headers={
+                        "Authorization": f'Bearer {target["credential"]}',
+                        "Content-Type": request.headers.get(
+                            "content-type",
+                            "application/json",
+                        ),
+                        "Accept": request.headers.get("accept", "text/event-stream"),
+                    },
+                ),
+                stream=True,
+            )
+        except httpx.HTTPError:
+            await client.aclose()
+            raise HTTPException(
+                status_code=502,
+                detail="pi_provider_unavailable",
+            ) from None
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
+        raise _model_http_error(exc) from None
+
+    async def response_body():
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    response_headers = {}
+    if content_encoding := upstream.headers.get("content-encoding"):
+        response_headers["Content-Encoding"] = content_encoding
+    return StreamingResponse(
+        response_body(),
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type"),
+        headers=response_headers,
+    )
+
+
+def _require_internal_auth(request: Request) -> None:
+    if not is_valid_internal_auth_token(
+        request.headers.get(INTERNAL_AUTH_HEADER_NAME)
+    ):
+        raise HTTPException(status_code=401, detail="internal_auth_required")
 
 
 def _model_http_error(exc: ModelManagementError | CredentialStoreError | OSError) -> HTTPException:

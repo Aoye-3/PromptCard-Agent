@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Agent, type AgentMessage, type AgentTool } from '@earendil-works/pi-agent-core'
-import { Type, type Model } from '@earendil-works/pi-ai'
-import { createArkProxyStream } from './ark-proxy-stream.ts'
+import { Type } from '@earendil-works/pi-ai'
+import { createTextProviderRuntime } from './provider-runtime.ts'
 import {
   buildInvocation,
   type InvocationInput,
@@ -24,19 +24,6 @@ export interface AgentRequest extends InvocationInput {
 
 const sessions = new Map<string, SessionRecord>()
 
-const MODEL: Model<'promptcard-ark-proxy'> = {
-  id: process.env.PROMPTCARD_TEXT_MODEL || 'doubao-seed-2-0-lite-260215',
-  name: 'PromptCard Ark Text Model',
-  api: 'promptcard-ark-proxy',
-  provider: 'promptcard-gateway',
-  baseUrl: 'http://127.0.0.1',
-  reasoning: false,
-  input: ['text', 'image'],
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: 128000,
-  maxTokens: 8192
-}
-
 export async function invokeAgent(request: AgentRequest) {
   const threadId = request.threadId || randomUUID()
   const previous = sessions.get(threadId)
@@ -44,14 +31,15 @@ export async function invokeAgent(request: AgentRequest) {
   const invocation = buildInvocation(request)
   const proposals: Record<string, unknown>[] = []
   const tools = buildTools(invocation.policy, invocation.promptLibrary, proposals)
+  const providerRuntime = await createTextProviderRuntime()
   const agent = new Agent({
     initialState: {
       systemPrompt: buildSystemPrompt(invocation),
-      model: MODEL,
+      model: providerRuntime.model,
       tools,
       messages: previous?.messages || []
     },
-    streamFn: createArkProxyStream,
+    streamFn: providerRuntime.stream,
     toolExecution: 'sequential',
     afterToolCall: async ({ toolCall }) => (
       toolCall.name.startsWith('emit_') ? { terminate: true } : undefined
@@ -82,6 +70,8 @@ export async function invokeAgent(request: AgentRequest) {
     proposals,
     diagnostics: {
       orchestrator: 'pi',
+      modelProvider: providerRuntime.model.provider,
+      integrationGroup: providerRuntime.integrationGroup?.id,
       attachmentCount: invocation.attachments.length,
       allowedProposalKinds: invocation.policy.allowedProposalKinds
     }

@@ -4,7 +4,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response, status
 
-from app.gateway.model_management.catalog import catalog_response
+from app.gateway.model_management.catalog import (
+    catalog_response,
+    connection_models_response,
+)
 from app.gateway.model_management.connection_store import (
     ModelManagementError,
     get_connection_store,
@@ -13,7 +16,10 @@ from app.gateway.model_management.connection_store import (
 from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.model_management.diagnostics import collect_image_generation_status
-from app.gateway.model_management.migration import migrate_legacy_model_config
+from app.gateway.model_management.migration import (
+    migrate_legacy_connection_state,
+    migrate_legacy_model_config,
+)
 from app.gateway.model_management.service import ConnectionProbeError, probe_connection
 
 router = APIRouter(prefix="/api/promptcard/runtime", tags=["model-management"])
@@ -78,7 +84,11 @@ async def test_model_connection(connection_id: str) -> dict[str, Any]:
         credential = store.credential_store.get(connection_id)
         if not credential:
             raise ModelManagementError("credential_missing")
-        probe_connection(str(connection["apiBase"]), credential)
+        probe_connection(
+            str(connection["providerId"]),
+            str(connection["apiBase"]),
+            credential,
+        )
     except ConnectionProbeError:
         success = False
     except (ModelManagementError, CredentialStoreError, OSError) as exc:
@@ -93,6 +103,18 @@ async def test_model_connection(connection_id: str) -> dict[str, Any]:
         "success": success,
         "message": "Connection ok." if success else "Connection failed.",
     }
+
+
+@router.get("/model-connections/{connection_id}/models")
+async def connection_models(connection_id: str) -> dict[str, Any]:
+    try:
+        connection = _store().get_connection_config(connection_id)
+        return connection_models_response(
+            connection_id,
+            str(connection["providerId"]),
+        )
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
+        raise _http_error(exc) from None
 
 
 @router.get("/model-connections/{connection_id}/dependencies")
@@ -134,6 +156,10 @@ async def delete_model_assignment(slot: str) -> Response:
 
 def _store():
     store = get_connection_store()
+    migrate_legacy_connection_state(
+        store.path.parent.parent / ".deer-flow" / store.path.name,
+        store,
+    )
     migrate_legacy_model_config(
         store.path.parent / "promptcard-model-config.json",
         store,

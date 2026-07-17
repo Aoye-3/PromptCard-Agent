@@ -125,6 +125,49 @@ describe('model management client', () => {
     )
   })
 
+  it('loads and normalizes models for one connection', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      connectionId: 'connection/ark',
+      providerId: 'volcengine-ark',
+      models: [
+        {
+          id: 'ark-chat',
+          providerId: 'volcengine-ark',
+          displayName: 'Ark Chat',
+          modality: 'chat',
+          integrationGroup: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' },
+          source: 'provider-catalog',
+          assignable: true
+        },
+        {
+          id: 'invalid-image',
+          providerId: 'volcengine-ark',
+          displayName: 'Invalid',
+          modality: 'video'
+        }
+      ]
+    }))
+    const client = createModelManagementClient(fetchMock as unknown as typeof fetch)
+
+    await expect(client.getConnectionModels('connection/ark')).resolves.toEqual({
+      connectionId: 'connection/ark',
+      providerId: 'volcengine-ark',
+      models: [{
+        id: 'ark-chat',
+        providerId: 'volcengine-ark',
+        displayName: 'Ark Chat',
+        modality: 'chat',
+        integrationGroup: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' },
+        source: 'provider-catalog',
+        assignable: true
+      }]
+    })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/agent-api/promptcard/runtime/model-connections/connection%2Fark/models',
+      expect.objectContaining({ credentials: 'include' })
+    )
+  })
+
   it('uses the generic connection and assignment routes for mutations', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

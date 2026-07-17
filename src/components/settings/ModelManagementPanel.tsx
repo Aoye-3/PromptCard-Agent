@@ -19,8 +19,10 @@ import {
   type ModelConnectionInput,
   type ModelConnectionTestResult,
   type ModelModality,
+  type ModelProvider,
   type ModelSlot
 } from '@/services/model-management-client'
+import { groupAssignableModels, type ModelCatalogEntry } from '@/domain/models/model-management'
 
 export const INITIAL_MODEL_CREDENTIAL_DRAFT = ''
 
@@ -28,6 +30,7 @@ export interface ModelManagementSnapshot {
   catalog: ModelCatalog
   connections: ModelConnection[]
   assignments: ModelAssignment[]
+  connectionModels?: Record<string, ModelCatalogEntry[]>
 }
 
 type ProviderStatus = ImageGenerationStatus['providers'][number]
@@ -75,9 +78,10 @@ const EMPTY_DRAFT: ModelConnectionInput = {
   enabled: true
 }
 
-export function ModelManagementPanel({ modality, onAssignmentSaved }: {
+export function ModelManagementPanel({ modality, onAssignmentSaved, ready = true }: {
   modality: ModelModality
   onAssignmentSaved?: (assignment: ModelAssignment) => void
+  ready?: boolean
 }) {
   const [snapshot, setSnapshot] = useState<ModelManagementSnapshot>(EMPTY_SNAPSHOT)
   const [imageStatus, setImageStatus] = useState<ImageGenerationStatus | null>(null)
@@ -116,7 +120,15 @@ export function ModelManagementPanel({ modality, onAssignmentSaved }: {
         modelManagementClient.listConnections(),
         modelManagementClient.listAssignments()
       ])
-      const nextSnapshot = { catalog, connections, assignments }
+      const discovered = await Promise.all(connections.map(connection => (
+        modelManagementClient.getConnectionModels(connection.id)
+      )))
+      const nextSnapshot = {
+        catalog,
+        connections,
+        assignments,
+        connectionModels: Object.fromEntries(discovered.map(result => [result.connectionId, result.models]))
+      }
       setSnapshot(nextSnapshot)
       selectDraft(nextSnapshot, preferredConnectionId)
     } catch (loadError) {
@@ -135,9 +147,10 @@ export function ModelManagementPanel({ modality, onAssignmentSaved }: {
   }
 
   useEffect(() => {
+    if (!ready) return
     void loadSnapshot()
     void loadImageStatus()
-  }, [])
+  }, [ready])
 
   useEffect(() => {
     selectDraft(snapshot, selectedConnectionId, modality)
@@ -267,6 +280,7 @@ export function ModelManagementPanelContent({
     .filter(model => model.modality === modality)
     .map(model => model.providerId))
   const providers = snapshot.catalog.providers.filter(provider => providerIds.has(provider.id))
+  const providerGroups = groupProviders(providers, modality)
   const connections = snapshot.connections.filter(connection => providerIds.has(connection.providerId))
   const selectedConnection = connections.find(connection => connection.id === selectedConnectionId) || null
   const selectedAssigned = selectedConnection
@@ -306,7 +320,8 @@ export function ModelManagementPanelContent({
               <div className="rounded-2xl bg-gray-50 p-5 text-sm font-semibold text-gray-500">尚未创建此类模型连接。</div>
             ) : connections.map(connection => {
               const connectionProvider = snapshot.catalog.providers.find(item => item.id === connection.providerId)
-              const models = snapshot.catalog.models.filter(model => model.providerId === connection.providerId && model.modality === modality)
+              const models = modelsForConnection(snapshot, connection)
+                .filter(model => model.modality === modality)
               const testResult = testResults[connection.id]
               return (
                 <div key={connection.id} className={`rounded-2xl border p-4 ${selectedConnectionId === connection.id ? 'border-gray-950 bg-gray-50' : 'border-gray-200'}`}>
@@ -356,7 +371,11 @@ export function ModelManagementPanelContent({
                 className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-gray-400"
               >
                 <option value="">选择提供商</option>
-                {providers.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
+                {providerGroups.map(group => (
+                  <optgroup key={group.id} label={group.displayName}>
+                    {group.providers.map(item => <option key={item.id} value={item.id}>{item.displayName}</option>)}
+                  </optgroup>
+                ))}
               </select>
             </Field>
             <Field label="连接名称">
@@ -480,22 +499,31 @@ function AssignmentSelect({
   const modality: ModelModality = slot === 'chat.primary' ? 'chat' : 'image'
   const assignment = snapshot.assignments.find(item => item.slot === slot)
   const value = assignment ? `${assignment.connectionId}::${assignment.modelId}` : ''
-  const candidates = snapshot.connections.flatMap(connection => snapshot.catalog.models
+  const candidates = snapshot.connections.flatMap(connection => modelsForConnection(snapshot, connection)
     .filter(model => model.providerId === connection.providerId && model.modality === modality)
     .map(model => ({
       connection,
       model,
       reason: assignmentDisabledReason(connection, modality === 'image' ? providerStatus : undefined, modality === 'image')
     })))
+  const groupedModels = groupAssignableModels(candidates.map(candidate => candidate.model), modality)
+  const groupedCandidates = groupedModels.map(group => ({
+    ...group,
+    candidates: candidates.filter(candidate => candidate.model.integrationGroup?.id === group.id)
+  }))
   const currentReason = candidates.find(candidate => `${candidate.connection.id}::${candidate.model.id}` === value)?.reason
   return (
     <Field label="选择默认模型" hint={modality === 'chat' ? '用于聊天 Agent' : '用于图片生成节点'}>
       <select value={value} onChange={event => onChange(event.target.value)} disabled={disabled} className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm outline-none focus:border-gray-400 disabled:opacity-50">
         <option value="">未设置默认模型</option>
-        {candidates.map(candidate => (
-          <option key={`${candidate.connection.id}::${candidate.model.id}`} value={`${candidate.connection.id}::${candidate.model.id}`} disabled={Boolean(candidate.reason)}>
-            {candidate.connection.displayName} · {candidate.model.displayName}{candidate.reason ? `（${candidate.reason}）` : ''}
-          </option>
+        {groupedCandidates.map(group => (
+          <optgroup key={group.id} label={group.displayName}>
+            {group.candidates.map(candidate => (
+              <option key={`${candidate.connection.id}::${candidate.model.id}`} value={`${candidate.connection.id}::${candidate.model.id}`} disabled={Boolean(candidate.reason)}>
+                {candidate.connection.displayName} · {candidate.model.displayName}{candidate.reason ? `（${candidate.reason}）` : ''}
+              </option>
+            ))}
+          </optgroup>
         ))}
       </select>
       {currentReason && <span className="mt-2 block text-xs font-bold text-amber-700">当前默认模型不可用：{currentReason}</span>}
@@ -555,6 +583,32 @@ const connectionDraft = (connection: ModelConnection): ModelConnectionInput => (
   apiBase: connection.apiBase,
   enabled: connection.enabled
 })
+
+const modelsForConnection = (
+  snapshot: ModelManagementSnapshot,
+  connection: ModelConnection
+): ModelCatalogEntry[] => snapshot.connectionModels?.[connection.id]
+  || snapshot.catalog.models.filter(model => model.providerId === connection.providerId)
+
+const groupProviders = (providers: ModelProvider[], modality: ModelModality) => {
+  const groups = new Map<string, {
+    id: string
+    displayName: string
+    kind: 'pi-native' | 'sdk'
+    providers: ModelProvider[]
+  }>()
+  providers.forEach(provider => {
+    const integrationGroup = provider.integrationGroups?.[modality]
+    if (!integrationGroup) return
+    const group = groups.get(integrationGroup.id) || { ...integrationGroup, providers: [] }
+    group.providers.push(provider)
+    groups.set(group.id, group)
+  })
+  return [...groups.values()].sort((left, right) => {
+    if (left.kind !== right.kind) return left.kind === 'pi-native' ? -1 : 1
+    return left.displayName.localeCompare(right.displayName, 'zh-CN')
+  })
+}
 
 const newConnectionDraft = (catalog: ModelCatalog, modality: ModelModality): ModelConnectionInput => {
   const providerIds = new Set(catalog.models.filter(model => model.modality === modality).map(model => model.providerId))

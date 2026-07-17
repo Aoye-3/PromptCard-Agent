@@ -3,17 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-PROVIDERS: tuple[dict[str, Any], ...] = (
-    {
-        "id": "deepseek",
-        "displayName": "DeepSeek",
-        "defaultApiBase": "https://api.deepseek.com",
-    },
-    {
-        "id": "volcengine-ark",
-        "displayName": "Volcengine Ark",
-        "defaultApiBase": "https://ark.cn-beijing.volces.com/api/v3",
-    },
+from app.gateway.model_management.provider_registry import (
+    provider_definition,
+    provider_responses,
 )
 
 MODELS: tuple[dict[str, Any], ...] = (
@@ -76,12 +68,37 @@ MODELS: tuple[dict[str, Any], ...] = (
 
 
 def catalog_response() -> dict[str, Any]:
-    return {"providers": deepcopy(PROVIDERS), "models": deepcopy(MODELS)}
+    return {
+        "providers": provider_responses(),
+        "models": [_model_response(model) for model in MODELS],
+    }
 
 
-def provider_exists(provider_id: str) -> bool:
-    return any(provider["id"] == provider_id for provider in PROVIDERS)
+def connection_models_response(connection_id: str, provider_id: str) -> dict[str, Any]:
+    provider = provider_definition(provider_id)
+    if provider is None:
+        return {"connectionId": connection_id, "providerId": provider_id, "models": []}
+    return {
+        "connectionId": connection_id,
+        "providerId": provider_id,
+        "models": [
+            _model_response(model)
+            for model in MODELS
+            if model["providerId"] == provider_id
+        ],
+    }
 
 
 def model_by_id(model_id: str) -> dict[str, Any] | None:
     return next((model for model in MODELS if model["id"] == model_id), None)
+
+
+def _model_response(model: dict[str, Any]) -> dict[str, Any]:
+    response = deepcopy(model)
+    provider = provider_definition(str(model["providerId"]))
+    group = provider.group_for(model["modality"]) if provider is not None else None
+    response["source"] = "provider-catalog"
+    response["assignable"] = group is not None
+    if group is not None:
+        response["integrationGroup"] = group.response()
+    return response

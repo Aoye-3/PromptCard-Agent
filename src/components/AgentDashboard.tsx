@@ -127,6 +127,7 @@ export function AgentDashboard({ initialSection = 'text-models', onAssignmentSav
           <ModelManagementPanel
             modality={activeSection === 'text-models' ? 'chat' : 'image'}
             onAssignmentSaved={onAssignmentSaved}
+            ready={runtimeStatus === 'connected' && authStatus === 'authenticated'}
           />
         )}
 

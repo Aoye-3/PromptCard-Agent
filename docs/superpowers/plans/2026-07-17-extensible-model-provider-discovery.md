@@ -8,6 +8,10 @@
 
 **Tech Stack:** FastAPI/Pydantic/Python 3.12, pytest, React/TypeScript, Vitest, `@earendil-works/pi-ai` 0.80.8, `@earendil-works/pi-agent-core` 0.80.8, Volcengine Ark SDK 5.0.36.
 
+## Completion record
+
+Implemented on `feat/extensible-model-provider-discovery` on 2026-07-17. Final verification used the repository's actual commands: `npm.cmd test -- --run` (529 tests), `npx.cmd tsc --noEmit`, `npm.cmd run text-agent:check`, `npm.cmd run build`, `npm.cmd run agent:check`, backend pytest (203 tests), and Ruff with `--no-cache`. The older `npm run typecheck` and `npm --prefix text-agent-runtime` examples below are planning artifacts; the root package owns both test and typecheck scripts.
+
 ## Global Constraints
 
 - Work only in `F:\.Agent-PromptCardManager\PromptCard-Manager` on an in-place Git branch; no worktrees or repository copies.

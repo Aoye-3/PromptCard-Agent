@@ -28,6 +28,11 @@ The installed `@earendil-works/pi-ai` 0.80.8 package supports provider collectio
 
 Ark inference API keys can invoke model IDs, while Ark management APIs that list account foundation models and endpoints are OpenAPI management operations using signed AK/SK credentials. The current connection form stores an inference API key. This implementation therefore defines connection model discovery as an assignable provider catalog returned through a provider adapter. It does not pretend that an inference API key can enumerate private account endpoints. A later management-credential capability can add AK/SK endpoint discovery without changing assignment contracts.
 
+Primary references:
+
+- [earendil-works/pi](https://github.com/earendil-works/pi) and its `@earendil-works/pi-ai` provider APIs.
+- [Volcengine Ark API reference](https://api.volcengine.com/api-docs/view/overview?serviceCode=ark), which separates inference APIs from foundation-model and endpoint management operations.
+
 ## Architecture
 
 ```mermaid

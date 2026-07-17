@@ -16,6 +16,7 @@ import app.gateway.promptcard_runtime as promptcard_runtime_module
 from app.gateway.model_management.connection_store import ModelConnectionStore, ModelManagementError
 from app.gateway.model_management.contracts import ConnectionRequest
 from app.gateway.model_management.credential_store import CredentialStoreError
+from app.gateway.model_management.migration import migrate_legacy_connection_state
 from app.gateway.routers import model_management
 
 
@@ -43,6 +44,56 @@ def model_api(tmp_path, monkeypatch):
     return TestClient(app), store, credentials
 
 
+def test_legacy_connection_state_is_recovered_once_without_moving_credentials(tmp_path):
+    credentials = MemoryCredentialStore()
+    connection_id = "575822c5-7569-44d5-8712-db8d4782ab17"
+    credentials.set(connection_id, "saved-secret")
+    store = ModelConnectionStore(
+        tmp_path / ".promptcard-runtime" / "promptcard-model-connections.json",
+        credentials,
+    )
+    legacy_path = tmp_path / ".deer-flow" / "promptcard-model-connections.json"
+    legacy_path.parent.mkdir(parents=True)
+    legacy_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "connections": [
+                    {
+                        "id": connection_id,
+                        "providerId": "volcengine-ark",
+                        "displayName": "Seedream",
+                        "apiBase": "https://ark.cn-beijing.volces.com/api/v3",
+                        "enabled": True,
+                        "credentialRef": f"connection:{connection_id}",
+                        "createdAt": 1,
+                        "updatedAt": 2,
+                    }
+                ],
+                "assignments": {
+                    "image.primary": {
+                        "slot": "image.primary",
+                        "connectionId": connection_id,
+                        "modelId": "doubao-seedream-5-0-pro-260628",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert migrate_legacy_connection_state(legacy_path, store) is True
+    assert migrate_legacy_connection_state(legacy_path, store) is False
+    assert len(store.list_connections()) == 1
+    assert store.assignment("image.primary") == {
+        "slot": "image.primary",
+        "connectionId": connection_id,
+        "modelId": "doubao-seedream-5-0-pro-260628",
+    }
+    assert credentials.get(connection_id) == "saved-secret"
+    assert "saved-secret" not in store.path.read_text(encoding="utf-8")
+
+
 def test_catalog_contains_chat_and_image_manifests(model_api):
     client, _, _ = model_api
 
@@ -51,6 +102,11 @@ def test_catalog_contains_chat_and_image_manifests(model_api):
     assert response.status_code == 200
     payload = response.json()
     assert {provider["id"] for provider in payload["providers"]} == {"deepseek", "volcengine-ark"}
+    deepseek_provider = next(provider for provider in payload["providers"] if provider["id"] == "deepseek")
+    ark_provider = next(provider for provider in payload["providers"] if provider["id"] == "volcengine-ark")
+    assert deepseek_provider["integrationGroups"]["chat"]["displayName"] == "PI 原生"
+    assert ark_provider["integrationGroups"]["chat"]["displayName"] == "方舟 SDK"
+    assert ark_provider["integrationGroups"]["image"]["displayName"] == "方舟 SDK"
     assert {
         (model["id"], model["providerId"], model["modality"])
         for model in payload["models"]
@@ -60,6 +116,13 @@ def test_catalog_contains_chat_and_image_manifests(model_api):
         ("doubao-seedream-5-0-pro-260628", "volcengine-ark", "image"),
     }
     seedream = next(model for model in payload["models"] if model["modality"] == "image")
+    assert seedream["integrationGroup"] == {
+        "id": "volcengine-ark-sdk",
+        "displayName": "方舟 SDK",
+        "kind": "sdk",
+    }
+    assert seedream["source"] == "provider-catalog"
+    assert seedream["assignable"] is True
     assert seedream["capabilities"] == {
         "modes": ["generate", "edit", "region-edit"],
         "maxReferenceImages": 10,
@@ -93,6 +156,28 @@ def test_catalog_contains_chat_and_image_manifests(model_api):
         "outputCount": 1,
         "streaming": False,
     }
+
+
+def test_connection_model_discovery_is_scoped_to_its_provider(model_api):
+    client, _, _ = model_api
+    connection = _create_connection(client, "volcengine-ark")
+
+    response = client.get(
+        f"/api/promptcard/runtime/model-connections/{connection['id']}/models"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["connectionId"] == connection["id"]
+    assert payload["providerId"] == "volcengine-ark"
+    assert {
+        (model["id"], model["modality"], model["integrationGroup"]["displayName"])
+        for model in payload["models"]
+    } == {
+        ("doubao-seed-2-0-lite-260215", "chat", "方舟 SDK"),
+        ("doubao-seedream-5-0-pro-260628", "image", "方舟 SDK"),
+    }
+    assert all(model["providerId"] == "volcengine-ark" for model in payload["models"])
 
 
 def test_connection_crud_never_serializes_or_logs_credentials(model_api, caplog):
@@ -514,8 +599,8 @@ def test_connection_test_uses_stored_secret_without_returning_it(model_api, monk
     connection = _create_connection(client, "deepseek", credential=secret)
     observed: dict[str, str] = {}
 
-    def fake_probe(api_base: str, credential: str) -> None:
-        observed.update(api_base=api_base, credential=credential)
+    def fake_probe(provider_id: str, api_base: str, credential: str) -> None:
+        observed.update(provider_id=provider_id, api_base=api_base, credential=credential)
 
     monkeypatch.setattr(model_management, "probe_connection", fake_probe)
     with caplog.at_level(logging.DEBUG):
@@ -526,6 +611,7 @@ def test_connection_test_uses_stored_secret_without_returning_it(model_api, monk
     assert response.status_code == 200
     assert response.json() == {"success": True, "message": "Connection ok."}
     assert observed == {
+        "provider_id": "deepseek",
         "api_base": "https://api.deepseek.com",
         "credential": secret,
     }
@@ -567,6 +653,48 @@ def test_connection_test_refuses_redirects_and_returns_sanitized_failure(model_a
     last_test = json.loads(store.path.read_text(encoding="utf-8"))["connections"][0]["lastTest"]
     assert last_test["ok"] is False
     assert last_test["message"] == "Connection failed."
+
+
+def test_ark_connection_probe_uses_documented_ping_endpoint(model_api, monkeypatch):
+    client, _, _ = model_api
+    connection = _create_connection(
+        client,
+        "volcengine-ark",
+        credential="ark-probe-secret",
+    )
+    opened: list[str] = []
+
+    class SuccessfulResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+    class SuccessfulOpener:
+        def open(self, request, timeout):
+            opened.append(request.full_url)
+            return SuccessfulResponse()
+
+    monkeypatch.setattr(
+        model_management,
+        "collect_image_generation_status",
+        lambda: _diagnostic_status("ready", None),
+    )
+    monkeypatch.setattr(
+        "app.gateway.model_management.service.urllib.request.build_opener",
+        lambda *handlers: SuccessfulOpener(),
+    )
+
+    response = client.post(
+        f"/api/promptcard/runtime/model-connections/{connection['id']}/test"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert opened == ["https://ark.cn-beijing.volces.com/ping"]
 
 
 def test_create_validates_corrupt_state_before_credential_mutation(model_api):
@@ -621,7 +749,7 @@ def test_connection_test_revalidates_persisted_endpoint_before_credential_read(m
 def test_connection_test_normalizes_last_test_persistence_failure(model_api, monkeypatch):
     client, store, _ = model_api
     connection = _create_connection(client, "deepseek", credential="sk-test")
-    monkeypatch.setattr(model_management, "probe_connection", lambda api_base, credential: None)
+    monkeypatch.setattr(model_management, "probe_connection", lambda *args: None)
     monkeypatch.setattr(
         store,
         "record_test",

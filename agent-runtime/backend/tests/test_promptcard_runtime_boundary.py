@@ -182,6 +182,121 @@ def test_messages_endpoint_keeps_public_contract(monkeypatch):
     assert response.json()["diagnostics"]["orchestrator"] == "pi"
 
 
+def test_internal_text_model_endpoint_returns_provider_descriptor(monkeypatch):
+    monkeypatch.setenv("PROMPTCARD_INTERNAL_TOKEN", "internal-test-token")
+    async def fake_internal_text_model():
+        return {
+            "connectionId": "connection-1",
+            "providerId": "deepseek",
+            "model": {
+                "id": "deepseek-chat",
+                "displayName": "DeepSeek Chat",
+                "modality": "chat",
+                "integrationGroup": {
+                    "id": "pi-native",
+                    "displayName": "PI 原生",
+                    "kind": "pi-native",
+                },
+            },
+        }
+
+    monkeypatch.setattr(
+        promptcard_runtime.runtime_service,
+        "internal_text_model",
+        fake_internal_text_model,
+    )
+    app = FastAPI()
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/promptcard/runtime/internal/text-model",
+            headers={"X-PromptCard-Internal-Token": "internal-test-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["model"]["integrationGroup"]["kind"] == "pi-native"
+    assert "credential" not in response.json()
+
+
+def test_internal_text_model_endpoint_rejects_local_session_only(monkeypatch):
+    monkeypatch.setenv("PROMPTCARD_INTERNAL_TOKEN", "internal-test-token")
+    app = FastAPI()
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app) as client:
+        response = client.get("/api/promptcard/runtime/internal/text-model")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "internal_auth_required"
+
+
+def test_pi_native_proxy_injects_stored_credential_and_streams(monkeypatch):
+    captured = {}
+    monkeypatch.setenv("PROMPTCARD_INTERNAL_TOKEN", "internal-test-token")
+
+    def fake_resolve(connection_id):
+        assert connection_id == "connection-1"
+        return {
+            "providerId": "deepseek",
+            "apiBase": "https://api.deepseek.com",
+            "credential": "stored-secret",
+            "modelId": "deepseek-chat",
+        }
+
+    class FakeUpstream:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        async def aiter_raw(self):
+            yield b'data: {"ok":true}\n\n'
+
+        async def aclose(self):
+            captured["upstreamClosed"] = True
+
+    class FakeClient:
+        def __init__(self, *, timeout):
+            captured["timeout"] = timeout
+
+        def build_request(self, method, url, *, content, headers):
+            captured.update(
+                method=method,
+                url=url,
+                content=content,
+                headers=headers,
+            )
+            return object()
+
+        async def send(self, request, *, stream):
+            captured["stream"] = stream
+            return FakeUpstream()
+
+        async def aclose(self):
+            captured["clientClosed"] = True
+
+    monkeypatch.setattr(promptcard_runtime, "resolve_pi_native_proxy", fake_resolve)
+    monkeypatch.setattr(promptcard_runtime.httpx, "AsyncClient", FakeClient)
+    app = FastAPI()
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/promptcard/runtime/internal/pi-proxy/connection-1/chat/completions",
+            headers={
+                "Authorization": "Bearer must-not-forward",
+                "X-PromptCard-Internal-Token": "internal-test-token",
+            },
+            json={"model": "deepseek-chat", "stream": True},
+        )
+
+    assert response.status_code == 200
+    assert captured["url"] == "https://api.deepseek.com/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer stored-secret"
+    assert captured["stream"] is True
+    assert captured["upstreamClosed"] is True
+    assert captured["clientClosed"] is True
+
+
 def test_media_analysis_endpoint_keeps_selected_asset_boundary(monkeypatch):
     async def fake_analyze(body, request):
         assert body.asset_id == "asset-selected"

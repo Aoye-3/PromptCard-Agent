@@ -1,5 +1,7 @@
 export type ModelModality = 'chat' | 'image'
 export type ModelSlot = 'chat.primary' | 'image.primary'
+export type ModelIntegrationKind = 'pi-native' | 'sdk'
+export type ModelCatalogSource = 'provider-catalog' | 'remote' | 'cached'
 export type ImageModelMode = 'generate' | 'edit' | 'region-edit'
 export type ImageOutputFormat = 'png' | 'jpeg'
 export type ImageRegionInput = 'point' | 'bbox'
@@ -11,9 +13,18 @@ export interface ModelProvider {
   id: string
   displayName: string
   defaultApiBase: string
+  integrationGroups?: Partial<Record<ModelModality, ModelIntegrationGroup>>
+}
+
+export interface ModelIntegrationGroup {
+  id: string
+  displayName: string
+  kind: ModelIntegrationKind
 }
 
 export interface ModelCapabilities {
+  input?: Array<'text' | 'image'>
+  toolCalling?: boolean
   modes?: ImageModelMode[]
   resolutions?: Array<'1K' | '2K'>
   aspectRatios?: string[]
@@ -53,10 +64,26 @@ export interface ModelCatalogEntry {
   modality: ModelModality
   displayName: string
   capabilities?: ModelCapabilities
+  integrationGroup?: ModelIntegrationGroup
+  source?: ModelCatalogSource
+  assignable?: boolean
 }
 
 export interface ModelCatalog {
   providers: ModelProvider[]
+  models: ModelCatalogEntry[]
+}
+
+export interface ConnectionModelCatalog {
+  connectionId: string
+  providerId: string
+  models: ModelCatalogEntry[]
+}
+
+export interface GroupedModelCatalog {
+  id: string
+  displayName: string
+  kind: ModelIntegrationKind
   models: ModelCatalogEntry[]
 }
 
@@ -207,4 +234,26 @@ export const validateModelAssignment = (
   return model.modality === SLOT_MODALITY[assignment.slot]
     ? []
     : [{ code: 'incompatible_model_slot' }]
+}
+
+export const groupAssignableModels = (
+  models: readonly ModelCatalogEntry[],
+  modality: ModelModality
+): GroupedModelCatalog[] => {
+  const groups = new Map<string, GroupedModelCatalog>()
+  models
+    .filter(model => model.modality === modality && model.assignable !== false && model.integrationGroup)
+    .forEach(model => {
+      const integrationGroup = model.integrationGroup!
+      const group = groups.get(integrationGroup.id) || {
+        ...integrationGroup,
+        models: []
+      }
+      group.models.push(model)
+      groups.set(group.id, group)
+    })
+  return [...groups.values()].sort((left, right) => {
+    if (left.kind !== right.kind) return left.kind === 'pi-native' ? -1 : 1
+    return left.displayName.localeCompare(right.displayName, 'zh-CN')
+  })
 }

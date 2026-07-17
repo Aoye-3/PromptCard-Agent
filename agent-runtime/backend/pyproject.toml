@@ -1,7 +1,7 @@
 [project]
 name = "promptcard-runtime"
 version = "1.0.0"
-description = "PromptCard local gateway for Ark models, pi text agents, and image generation"
+description = "PromptCard local gateway for pluggable text and image model providers"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

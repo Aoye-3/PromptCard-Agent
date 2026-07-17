@@ -5,31 +5,21 @@ from typing import Any
 
 from volcenginesdkarkruntime import Ark
 
-from app.gateway.model_management.connection_store import (
-    ModelManagementError,
-    get_connection_store,
-)
 
-
-def complete_ark_chat(payload: dict[str, Any]) -> dict[str, Any]:
-    store = get_connection_store()
-    assignment = store.assignment("chat.primary")
-    if assignment is None:
-        raise ModelManagementError("assignment_not_found")
-    connection = store.get_connection_config(str(assignment["connectionId"]))
-    if connection["providerId"] != "volcengine-ark":
-        raise ModelManagementError("model_provider_mismatch")
-    credential = store.credential_store.get(str(connection["id"]))
-    if not credential:
-        raise ModelManagementError("credential_missing")
-
+def complete_ark_chat(
+    payload: dict[str, Any],
+    *,
+    api_base: str,
+    credential: str,
+    model_id: str,
+) -> dict[str, Any]:
     messages = _ark_messages(
         str(payload.get("systemPrompt") or ""),
         payload.get("messages") or [],
     )
     tools = _ark_tools(payload.get("tools") or [])
     request: dict[str, Any] = {
-        "model": str(assignment["modelId"]),
+        "model": model_id,
         "messages": messages,
     }
     if tools:
@@ -40,7 +30,7 @@ def complete_ark_chat(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(payload.get("maxTokens"), int):
         request["max_tokens"] = payload["maxTokens"]
 
-    client = Ark(api_key=credential, base_url=str(connection["apiBase"]))
+    client = Ark(api_key=credential, base_url=api_base)
     response = client.chat.completions.create(**request)
     message = response.choices[0].message
     content: list[dict[str, Any]] = []

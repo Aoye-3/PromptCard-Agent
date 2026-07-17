@@ -3,6 +3,7 @@ import {
   type AssistantMessage,
   type Context,
   type Model,
+  type ProviderStreams,
   type SimpleStreamOptions
 } from '@earendil-works/pi-ai'
 
@@ -21,7 +22,7 @@ const EMPTY_USAGE = {
   }
 }
 
-export function createArkProxyStream(
+export function createSdkGatewayStream(
   model: Model<any>,
   context: Context,
   options: SimpleStreamOptions | undefined
@@ -46,7 +47,7 @@ export function createArkProxyStream(
         signal: options?.signal
       })
       if (!response.ok) {
-        throw new Error(`Ark proxy returned ${response.status}`)
+        throw new Error(`SDK gateway returned ${response.status}`)
       }
       const payload = await response.json() as {
         content?: AssistantMessage['content']
@@ -55,8 +56,8 @@ export function createArkProxyStream(
       }
       const message: AssistantMessage = {
         role: 'assistant',
-        api: 'promptcard-ark-proxy',
-        provider: 'promptcard-gateway',
+        api: model.api,
+        provider: model.provider,
         model: model.id,
         content: Array.isArray(payload.content) ? payload.content : [],
         usage: {
@@ -75,8 +76,8 @@ export function createArkProxyStream(
     } catch (error) {
       const message: AssistantMessage = {
         role: 'assistant',
-        api: 'promptcard-ark-proxy',
-        provider: 'promptcard-gateway',
+        api: model.api,
+        provider: model.provider,
         model: model.id,
         content: [],
         usage: EMPTY_USAGE,
@@ -93,6 +94,13 @@ export function createArkProxyStream(
     }
   })
   return stream
+}
+
+export function sdkGatewayApi(): ProviderStreams {
+  return {
+    stream: createSdkGatewayStream,
+    streamSimple: createSdkGatewayStream
+  }
 }
 
 function emitMessage(stream: ReturnType<typeof createAssistantMessageEventStream>, message: AssistantMessage) {

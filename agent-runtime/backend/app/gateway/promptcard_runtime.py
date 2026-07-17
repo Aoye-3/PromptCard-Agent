@@ -12,7 +12,6 @@ from fastapi import HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
-from app.gateway.ark_chat import complete_ark_chat
 from app.gateway.csrf_middleware import is_secure_request
 from app.gateway.image_generation.service import PromptCardStorageClient, StorageGatewayError
 from app.gateway.internal_auth import create_internal_auth_headers
@@ -25,6 +24,7 @@ from app.gateway.model_management.connection_store import (
 )
 from app.gateway.model_management.contracts import ConnectionRequest
 from app.gateway.model_management.service import ConnectionProbeError, probe_connection
+from app.gateway.text_generation.service import assigned_text_model, complete_sdk_text
 
 
 class PromptCardRuntimeMessageRequest(BaseModel):
@@ -152,7 +152,7 @@ class PromptCardRuntimeService:
                 {
                     "id": "promptcard-text-agent",
                     "name": "PromptCard Text Agent",
-                    "description": "pi orchestration with Ark multimodal text models",
+                    "description": "pi orchestration with pluggable multimodal text providers",
                 }
             ],
         }
@@ -215,9 +215,12 @@ class PromptCardRuntimeService:
         body: PromptCardInternalChatRequest,
     ) -> dict[str, Any]:
         return await run_in_threadpool(
-            complete_ark_chat,
+            complete_sdk_text,
             body.model_dump(by_alias=True),
         )
+
+    async def internal_text_model(self) -> dict[str, Any]:
+        return await run_in_threadpool(assigned_text_model)
 
     async def get_model_config(self, request: Request) -> dict[str, Any]:
         store = get_connection_store()
@@ -284,6 +287,7 @@ class PromptCardRuntimeService:
         try:
             await run_in_threadpool(
                 probe_connection,
+                str(connection["providerId"]),
                 body.api_base or connection["apiBase"],
                 credential,
             )

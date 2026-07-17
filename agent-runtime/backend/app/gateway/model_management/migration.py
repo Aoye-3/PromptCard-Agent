@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
@@ -13,6 +14,56 @@ from app.gateway.model_management.connection_store import (
 )
 from app.gateway.model_management.contracts import ConnectionRequest
 from app.gateway.model_management.credential_store import CredentialStoreError
+
+
+def migrate_legacy_connection_state(
+    legacy_path: Path,
+    store: ModelConnectionStore,
+) -> bool:
+    if not legacy_path.exists() or legacy_path.resolve() == store.path.resolve():
+        return False
+    try:
+        legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+    except OSError:
+        raise ModelManagementError("migration_failed") from None
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(legacy, dict):
+        return False
+    try:
+        store.validate_state(legacy)
+        destination = store.read_state()
+    except ModelManagementError:
+        raise ModelManagementError("migration_failed") from None
+
+    changed = False
+    known_ids = {
+        str(connection.get("id"))
+        for connection in destination["connections"]
+        if isinstance(connection, dict)
+    }
+    for connection in legacy.get("connections", []):
+        connection_id = str(connection.get("id"))
+        if connection_id in known_ids:
+            continue
+        destination["connections"].append(deepcopy(connection))
+        known_ids.add(connection_id)
+        changed = True
+
+    for slot, assignment in legacy.get("assignments", {}).items():
+        if slot in destination["assignments"]:
+            continue
+        destination["assignments"][slot] = deepcopy(assignment)
+        changed = True
+
+    if not changed:
+        return False
+    try:
+        store.validate_state(destination)
+        store.replace_state(destination)
+    except ModelManagementError:
+        raise ModelManagementError("migration_failed") from None
+    return True
 
 
 def migrate_legacy_model_config(

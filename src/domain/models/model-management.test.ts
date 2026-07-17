@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   getRuntimeErrorPresentation,
+  groupAssignableModels,
   validateModelAssignment,
   type ImageModelBinding,
   type ModelAssignment,
@@ -91,6 +92,39 @@ describe('model management domain', () => {
       connectionId: connection.id,
       modelId: 'missing-model'
     }, [chatModel, imageModel])).toEqual([{ code: 'model_not_found' }])
+  })
+
+  test('groups assignable models by integration family without modality leakage', () => {
+    const piChat: ModelCatalogEntry = {
+      ...chatModel,
+      integrationGroup: { id: 'pi-native', displayName: 'PI 原生', kind: 'pi-native' },
+      assignable: true
+    }
+    const arkChat: ModelCatalogEntry = {
+      ...chatModel,
+      id: 'ark-chat',
+      integrationGroup: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' },
+      assignable: true
+    }
+    const arkImage: ModelCatalogEntry = {
+      ...imageModel,
+      integrationGroup: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' },
+      assignable: true
+    }
+
+    expect(groupAssignableModels([arkImage, arkChat, piChat], 'chat').map(group => ({
+      label: group.displayName,
+      models: group.models.map(model => model.id)
+    }))).toEqual([
+      { label: 'PI 原生', models: ['chat-model'] },
+      { label: '方舟 SDK', models: ['ark-chat'] }
+    ])
+    expect(groupAssignableModels([arkImage, arkChat, piChat], 'image').map(group => ({
+      label: group.displayName,
+      models: group.models.map(model => model.id)
+    }))).toEqual([
+      { label: '方舟 SDK', models: ['image-model'] }
+    ])
   })
 
   test('represents the complete provider-neutral image capability contract', () => {

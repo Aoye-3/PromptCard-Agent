@@ -10,19 +10,23 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
-from app.gateway.model_management.catalog import model_by_id, provider_exists
+from app.gateway.model_management.catalog import model_by_id
 from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
 from app.gateway.model_management.credential_store import (
     CredentialStore,
     CredentialStoreError,
     SystemKeyringCredentialStore,
 )
+from app.gateway.model_management.provider_registry import (
+    PROVIDER_DEFINITIONS,
+    provider_exists,
+)
 
 CREDENTIAL_MASK = "••••••••"
 SLOT_MODALITY = {"chat.primary": "chat", "image.primary": "image"}
 PROVIDER_ENDPOINTS = {
-    "deepseek": "https://api.deepseek.com",
-    "volcengine-ark": "https://ark.cn-beijing.volces.com/api/v3",
+    provider.id: provider.default_api_base
+    for provider in PROVIDER_DEFINITIONS
 }
 
 

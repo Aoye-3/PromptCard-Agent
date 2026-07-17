@@ -6,7 +6,9 @@ PromptCard uses provider-neutral model connections and durable, local image-gene
 
 The Gateway must start, report health, and serve the model catalog without any configured credential. Credentials are read only for a valid model invocation. A valid request with no credential fails as `credential_missing`; keyring failure is `credential_store_unavailable`.
 
-The Agent panel separates `Text models` and `Image generation models`, but both pages consume one provider-neutral snapshot of providers, catalog entries, connections, and assignments. Each page filters by modality and owns its default slot (`chat.primary` or `image.primary`). The Ark endpoint is fixed and read-only in the normal UI; connection forms support cancel, save-only, and save-and-test.
+The Agent panel separates `Text models` and `Image generation models`, but both pages consume provider-neutral providers, catalog entries, connections, and assignments. Each page filters by modality and owns its default slot (`chat.primary` or `image.primary`). Text bindings are grouped first by `PI 原生` and then SDK family; image bindings are grouped by image SDK family and never receive chat entries. The Ark endpoint is fixed and read-only in the normal UI; connection forms support cancel, save-only, and save-and-test.
+
+`GET /api/promptcard/runtime/model-connections/{connectionId}/models` returns the assignable catalog scoped to that connection's provider. For an Ark inference API Key this is the supported PromptCard provider catalog, marked `source: "provider-catalog"`; it is not an enumeration of private account endpoints. Ark account-management APIs require separately modeled AK/SK signing credentials, which are outside the current connection contract and must not be inferred from an inference API Key.
 
 The model catalog is the only source of frontend capability controls. Inspector code must not infer ratios, resolutions, region tools, formats, or reference limits from the Seedream model ID. [ADR-009](../decisions/ADR-009-capability-driven-image-model-readiness.md) records the readiness and diagnostics boundary.
 
@@ -40,7 +42,7 @@ Run snapshots and API errors may contain technical identifiers and normalized er
 
 ## Credential storage and platform requirements
 
-Connection metadata lives at `$PROMPTCARD_RUNTIME_STATE_DIR/promptcard-model-connections.json`. It contains provider/model assignments and a `credentialRef`; the secret is stored by Python `keyring` under service `dev.promptcard.manager.shell` and username `connection:<connectionId>`.
+Connection metadata lives at `$PROMPTCARD_RUNTIME_STATE_DIR/promptcard-model-connections.json`. It contains provider/model assignments and a `credentialRef`; the secret is stored by Python `keyring` under service `dev.promptcard.manager.shell` and username `connection:<connectionId>`. On first model-management access, the Gateway idempotently merges missing connection IDs and unassigned slots from the former sibling `.deer-flow/promptcard-model-connections.json`. Stable IDs preserve existing keyring references; no secret is copied into JSON and newer destination state is never overwritten.
 
 The runtime account must have an available keyring backend:
 
@@ -54,7 +56,7 @@ Do not use `API-Key.txt`, parse `sk-` strings, set `DEEPSEEK_API_KEY`/`ARK_API_K
 
 ## Migration and transactional rollback
 
-The deprecated model-config compatibility API writes through the same provider-neutral connection store and keyring. New text-Agent configuration should assign a tested Volcengine Ark connection to `chat.primary`.
+The deprecated model-config compatibility API writes through the same provider-neutral connection store and keyring. New text-Agent configuration assigns any compatible, tested chat connection to `chat.primary`; PI-native and SDK-backed text invocation are resolved independently from `image.primary`.
 
 PromptCard Storage migrates schema v3 to v4 in place by adding permanent project conversations, nullable `conversation_id`/`node_id` run ownership, project/conversation indexes, and canvas placements. Old runs are deterministically grouped by `projectId + nodeId`; migration never creates placement work for old successful runs.
 

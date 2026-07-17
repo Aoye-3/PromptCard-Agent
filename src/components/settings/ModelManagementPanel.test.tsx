@@ -14,16 +14,48 @@ import {
 const snapshot = {
   catalog: {
     providers: [
-      { id: 'deepseek', displayName: 'DeepSeek', defaultApiBase: 'https://api.deepseek.com' },
-      { id: 'volcengine-ark', displayName: '火山方舟', defaultApiBase: 'https://ark.cn-beijing.volces.com/api/v3' }
+      {
+        id: 'deepseek',
+        displayName: 'DeepSeek',
+        defaultApiBase: 'https://api.deepseek.com',
+        integrationGroups: {
+          chat: { id: 'pi-native', displayName: 'PI 原生', kind: 'pi-native' as const }
+        }
+      },
+      {
+        id: 'volcengine-ark',
+        displayName: '火山方舟',
+        defaultApiBase: 'https://ark.cn-beijing.volces.com/api/v3',
+        integrationGroups: {
+          chat: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' as const },
+          image: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' as const }
+        }
+      }
     ],
     models: [
-      { id: 'deepseek-chat', providerId: 'deepseek', displayName: 'DeepSeek Chat', modality: 'chat' as const },
+      {
+        id: 'deepseek-chat',
+        providerId: 'deepseek',
+        displayName: 'DeepSeek Chat',
+        modality: 'chat' as const,
+        integrationGroup: { id: 'pi-native', displayName: 'PI 原生', kind: 'pi-native' as const },
+        assignable: true
+      },
+      {
+        id: 'ark-chat',
+        providerId: 'volcengine-ark',
+        displayName: 'Ark Chat',
+        modality: 'chat' as const,
+        integrationGroup: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' as const },
+        assignable: true
+      },
       {
         id: 'seedream',
         providerId: 'volcengine-ark',
         displayName: 'Seedream 5.0 Pro',
         modality: 'image' as const,
+        integrationGroup: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' as const },
+        assignable: true,
         capabilities: {
           modes: ['generate', 'edit', 'region-edit'],
           maxReferenceImages: 10,
@@ -138,7 +170,32 @@ describe('ModelManagementPanel', () => {
     expect(markup).toContain('重新检测')
     expect(markup).toContain('aria-live="polite"')
     expect(markup).not.toContain('文字连接')
+    expect(markup).not.toContain('DeepSeek Chat')
+    expect(markup).not.toContain('PI 原生')
     expect(markup).not.toContain('image.primary')
+  })
+
+  it('groups text models by PI native and Ark SDK without exposing image models', () => {
+    const markup = renderToStaticMarkup(
+      <ModelManagementPanelContent
+        modality="chat"
+        snapshot={snapshot}
+        imageStatus={imageStatus}
+        selectedConnectionId="connection-chat"
+        draft={{ providerId: 'deepseek', displayName: 'Chat', apiBase: 'https://api.deepseek.com', enabled: true }}
+        credentialDraft=""
+        busyAction={null}
+        testResults={{}}
+        error={null}
+        actions={actions}
+      />
+    )
+
+    expect(markup).toContain('<optgroup label="PI 原生">')
+    expect(markup).toContain('<optgroup label="方舟 SDK">')
+    expect(markup).toContain('DeepSeek Chat')
+    expect(markup).toContain('Ark Chat')
+    expect(markup).not.toContain('Seedream 5.0 Pro')
   })
 
   it('renders the official Ark API address as read-only and exposes all edit actions', () => {
@@ -265,6 +322,39 @@ describe('ModelManagementPanel', () => {
     expect(INITIAL_MODEL_CREDENTIAL_DRAFT).toBe('')
   })
 
+  it('waits for authenticated runtime readiness before loading protected endpoints', async () => {
+    const getCatalog = vi.spyOn(modelManagementClient, 'getCatalog').mockResolvedValue(snapshot.catalog)
+    const listConnections = vi.spyOn(modelManagementClient, 'listConnections').mockResolvedValue(snapshot.connections)
+    const listAssignments = vi.spyOn(modelManagementClient, 'listAssignments').mockResolvedValue([])
+    const getConnectionModels = vi.spyOn(modelManagementClient, 'getConnectionModels').mockImplementation(async connectionId => ({
+      connectionId,
+      providerId: snapshot.connections.find(item => item.id === connectionId)!.providerId,
+      models: snapshot.catalog.models.filter(model => model.providerId === snapshot.connections.find(item => item.id === connectionId)!.providerId)
+    }))
+    const getImageStatus = vi.spyOn(modelManagementClient, 'getImageGenerationStatus').mockResolvedValue(imageStatus)
+    let renderer: ReactTestRenderer
+
+    await act(async () => {
+      renderer = create(<ModelManagementPanel modality="image" ready={false} />)
+    })
+
+    expect(getCatalog).not.toHaveBeenCalled()
+    expect(listConnections).not.toHaveBeenCalled()
+    expect(listAssignments).not.toHaveBeenCalled()
+    expect(getConnectionModels).not.toHaveBeenCalled()
+    expect(getImageStatus).not.toHaveBeenCalled()
+
+    await act(async () => {
+      renderer!.update(<ModelManagementPanel modality="image" ready />)
+    })
+
+    expect(getCatalog).toHaveBeenCalledTimes(1)
+    expect(listConnections).toHaveBeenCalledTimes(1)
+    expect(listAssignments).toHaveBeenCalledTimes(1)
+    expect(getConnectionModels).toHaveBeenCalledTimes(snapshot.connections.length)
+    expect(getImageStatus).toHaveBeenCalledTimes(1)
+  })
+
   it('replaces a stale successful connection test when the next request fails', () => {
     expect(recordModelConnectionTestResult(
       { 'connection-image': { success: true, message: '连接正常' } },
@@ -278,5 +368,13 @@ function mockPanelLoad() {
   vi.spyOn(modelManagementClient, 'getCatalog').mockResolvedValue(snapshot.catalog)
   vi.spyOn(modelManagementClient, 'listConnections').mockResolvedValue(snapshot.connections)
   vi.spyOn(modelManagementClient, 'listAssignments').mockResolvedValue([])
+  vi.spyOn(modelManagementClient, 'getConnectionModels').mockImplementation(async connectionId => {
+    const connection = snapshot.connections.find(item => item.id === connectionId)!
+    return {
+      connectionId,
+      providerId: connection.providerId,
+      models: snapshot.catalog.models.filter(model => model.providerId === connection.providerId)
+    }
+  })
   vi.spyOn(modelManagementClient, 'getImageGenerationStatus').mockResolvedValue(imageStatus)
 }

@@ -166,7 +166,16 @@ npm.cmd run agent:check
 npm.cmd run agent:dev
 ```
 
-Confirm that one supported local key source exists. Do not print the key value.
+Confirm that runtime bootstrap succeeds before the model panel loads. Then verify all of the following without printing the key value:
+
+- one enabled text connection reports `credentialConfigured: true`;
+- the latest connection test passed;
+- one chat model is assigned to `chat.primary`;
+- `textAgentHealthUrl` from `logs/dev-runtime.json` is healthy.
+
+If the connection list is unexpectedly empty after upgrading from the removed DeerFlow runtime, refresh Model Management once. The Gateway performs an idempotent merge from the sibling `.deer-flow/promptcard-model-connections.json` into `.promptcard-runtime` while preserving connection IDs and keyring references.
+
+If text models appear in the image selector or image models appear in the text selector, treat it as a catalog/UI regression: connection discovery must first scope by provider, then filter by `modality`, then group by `integrationGroup`.
 
 ## Playwright Browser Missing
 

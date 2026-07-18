@@ -11,7 +11,8 @@ Responsibilities:
 - FastAPI browser boundary under `/api/promptcard/runtime/*`
 - process-local browser session cookie and CSRF protection
 - model catalog, connections, assignments, and OS-keyring credentials
-- Volcengine Ark Python SDK calls
+- secure PI-native provider forwarding with Python-owned credentials
+- SDK-backed text adapters, with Volcengine Ark as the first adapter
 - Media Library image loading
 - existing image-generation routing and lifecycle
 - internal authentication between local services
@@ -28,7 +29,8 @@ Responsibilities:
 - short in-memory session history
 - Prompt Library snapshot search
 - proposal-only tools for Canvas text and Prompt Library creation
-- multimodal message forwarding through the Gateway's Ark adapter
+- PI `createProvider`/`createModels` registration for PI-native and SDK-backed text families
+- multimodal message forwarding through the selected text provider
 
 The pi service does not hold model credentials and cannot write to Canvas, Storage, or the filesystem.
 
@@ -38,8 +40,8 @@ The pi service does not hold model credentials and cannot write to Canvas, Stora
 2. The Gateway validates browser session and CSRF state.
 3. The Gateway forwards a bounded request to pi with an internal token.
 4. pi decides whether to search the provided Prompt Library snapshot or emit one allowed proposal.
-5. pi sends the model context back to the Gateway's internal Ark endpoint.
-6. The Gateway resolves `chat.primary`, reads its keyring credential, and calls Ark.
+5. pi resolves `chat.primary` through the non-secret internal descriptor and its `Models` collection.
+6. PI-native calls use PI's API implementation through the secure Gateway proxy; SDK-backed calls dispatch through the Gateway text adapter registry.
 7. The Gateway validates returned proposals again before returning them to the frontend.
 8. The user explicitly applies or rejects each proposal.
 
@@ -58,10 +60,17 @@ npm.cmd run dev:with-agent
 
 - `PROMPTCARD_RUNTIME_STATE_DIR`: model connection metadata root.
 - `PROMPTCARD_TEXT_AGENT_URL`: Python Gateway to pi base URL.
-- `PROMPTCARD_GATEWAY_INTERNAL_URL`: pi to Python internal Ark endpoint base.
+- `PROMPTCARD_GATEWAY_INTERNAL_URL`: pi to Python internal runtime base.
 - `PROMPTCARD_INTERNAL_TOKEN`: shared local-service token.
-- `PROMPTCARD_TEXT_MODEL`: optional Ark chat model ID; defaults to `doubao-seed-2-0-lite-260215`.
 - `PROMPTCARD_STORAGE_HEALTH_URL`: Storage health endpoint.
 - `PROMPTCARD_LIBRARY_FILE`: development Prompt Library compatibility snapshot.
 
 Provider credentials are configured through Model Management and stored in the operating-system keyring.
+
+## Provider extension points
+
+- PI-native text provider: add provider/catalog metadata and select a PI API implementation in `text-agent-runtime/src/provider-runtime.ts`.
+- SDK-backed text provider: add provider/catalog metadata and register a Python `TextProviderAdapter` under `app/gateway/text_generation/providers/`.
+- Image provider: implement the image-generation provider interface only. Do not route image requests through either text extension point.
+
+Provider connections are reusable account metadata. Assignments remain modality-specific as `chat.primary` and `image.primary`.

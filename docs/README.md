@@ -67,8 +67,9 @@ Current-state truth lives in the architecture, API, frontend, backend, database,
 
 - Keep PromptCard UI integrations on the PromptCard Runtime Boundary (`/agent-api/promptcard/runtime/*`); the browser must not call pi or provider APIs directly.
 - Preserve project-level Agent session isolation. New Agent surfaces need a stable `sessionKey`, their own message/proposal cache, and pi session compatibility checks before reusing a `threadId`.
-- Keep model catalog, connections, and `chat.primary`/`image.primary` assignments unified through Agent Runtime Model Management. Deprecated DeepSeek model-config routes are migration compatibility only.
-- Keep model credentials in the operating-system keyring and provider SDK calls behind Agent Runtime adapters. The browser may manage connections but must never persist or call a provider with a credential.
+- Keep model catalog, connections, and `chat.primary`/`image.primary` assignments unified through Agent Runtime Model Management. Deprecated chat model-config routes are migration compatibility only.
+- Keep `PI 原生` text providers, SDK-backed text adapters, and image-generation adapters as separate invocation paths. Sharing connection metadata never authorizes cross-modality model leakage.
+- Keep model credentials in the operating-system keyring and external provider calls behind the Python credential boundary. The browser and Node pi runtime may use non-secret descriptors but must never receive or persist a provider credential.
 - Keep image-generation conversations, runs, placements, and image derivations in PromptCard Storage schema v5. Do not embed runs in project JSON or delete run/output/original/derived references when a project or node is removed.
 - Treat `workspaceContext.snapshot` as the per-request current workspace view. Do not use selected cards, current rows, or focused fields as the thread identity unless a future spec explicitly changes the product model.
 - Keep permission scopes narrow: `prompt-library-agent` is the only Prompt Library write proposal surface; `workspace-chatbot-agent` is the Canvas text proposal surface; `media-analysis-agent` is read-only analysis of one explicit media item.

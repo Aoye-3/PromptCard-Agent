@@ -21,7 +21,7 @@ The current delivery target is:
   - propose a new Canvas text node when none is selected;
   - write from a bounded Prompt Library snapshot;
   - propose new Prompt Library items;
-  - analyze one explicitly selected image through an Ark multimodal text model.
+  - analyze one explicitly selected image through the assigned multimodal text provider.
 - Storyboard and structured prompt workflows.
 
 All Agent mutations are proposals and require explicit user confirmation.
@@ -30,8 +30,8 @@ All Agent mutations are proposals and require explicit user confirmation.
 
 - React/Vite frontend
 - PromptCard Storage service
-- Python PromptCard Gateway for model management, Ark SDK calls, media access, and image generation
-- Node pi text runtime for the focused Agent loop
+- Python PromptCard Gateway for model management, keyring-owned provider access, SDK text adapters, media access, and independent image generation
+- Node pi text runtime for the focused Agent loop and PI provider collection
 
 DeerFlow and LangGraph have been removed from the maintained runtime.
 

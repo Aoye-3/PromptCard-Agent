@@ -14,7 +14,11 @@ flowchart TD
   DB["SQLite + local assets"]
   Gateway["Python PromptCard Gateway"]
   Pi["Node pi text Agent"]
-  Ark["Volcengine Ark"]
+  TextRegistry["Text provider registry"]
+  PINative["PI-native provider API"]
+  TextSDK["Gateway text SDK adapters"]
+  ImageSDK["Image provider adapters"]
+  Providers["External model providers"]
   Keyring["Operating-system keyring"]
 
   User --> Frontend
@@ -24,7 +28,13 @@ flowchart TD
   Gateway --> Storage
   Gateway --> Pi
   Pi --> Gateway
-  Gateway --> Ark
+  Pi --> TextRegistry
+  TextRegistry --> PINative
+  TextRegistry --> TextSDK
+  PINative --> Gateway
+  TextSDK --> Gateway
+  Gateway --> ImageSDK --> Providers
+  Gateway --> Providers
   Gateway --> Keyring
 ```
 
@@ -32,8 +42,8 @@ flowchart TD
 
 - Frontend: interaction state, Canvas selection, pending proposal UI, explicit Apply/Reject actions, and existing Canvas/image-generation components.
 - PromptCard Storage: projects, Prompt Library, media assets, captures, image conversations, immutable runs, placements, and derivatives.
-- Python Gateway: browser session and CSRF boundary, model catalog/connections/assignments, keyring access, Ark SDK calls, media loading, and image-generation lifecycle.
-- pi text runtime: bounded conversation state, prompt orchestration, Prompt Library search, and proposal-only tools.
+- Python Gateway: browser session and CSRF boundary, model catalog/connections/assignments, keyring access, secure PI-native forwarding, SDK-backed text adapters, media loading, and the independent image-generation lifecycle.
+- pi text runtime: bounded conversation state, PI provider collection, prompt orchestration, Prompt Library search, and proposal-only tools.
 
 ## Minimal Closed Loop
 
@@ -60,8 +70,8 @@ flowchart LR
 2. Vite proxies `/agent-api` to the Python Gateway.
 3. The Gateway authenticates the browser request and forwards it to pi using an internal token.
 4. pi can search only the supplied Prompt Library snapshot and can emit only tools allowed by the request policy.
-5. pi sends its model context to the Gateway's internal chat endpoint.
-6. The Gateway resolves `chat.primary`, reads the credential from keyring, and calls Ark.
+5. pi resolves the non-secret `chat.primary` descriptor into its provider collection.
+6. PI-native models stream through the credential-injecting Gateway proxy; SDK-backed models use the separate Gateway text-adapter registry.
 7. The Gateway validates the proposal again.
 8. The frontend displays Apply/Reject. No response mutates durable data automatically.
 
@@ -74,7 +84,7 @@ flowchart LR
 
 ## Image-Generation Isolation
 
-Image generation remains a separate Gateway module using `image.primary`. It does not depend on pi sessions or text-Agent availability. Existing Storage schema v5 conversations, runs, placements, original assets, derivatives, and Recent Capture behavior remain unchanged.
+Image generation remains a separate Gateway module using `image.primary`. Image models never enter the PI text provider collection or the text-SDK registry. It does not depend on pi sessions or text-Agent availability. Existing Storage schema v5 conversations, runs, placements, original assets, derivatives, and Recent Capture behavior remain unchanged.
 
 ## Local Port Discovery
 

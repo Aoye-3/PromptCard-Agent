@@ -18,11 +18,11 @@ uv run pytest tests/test_promptcard_runtime_boundary.py -q
 For text-Agent boundary changes, also run:
 
 ```powershell
-npm.cmd test -- --run text-agent-runtime/src/proposal-policy.test.ts src/services/agent-runtime-service.test.ts src/stores/agent.store.test.ts
-.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest agent-runtime\backend\tests\test_promptcard_runtime_boundary.py -q -p no:cacheprovider
+npm.cmd test -- --run text-agent-runtime/src/provider-runtime.test.ts text-agent-runtime/src/proposal-policy.test.ts src/services/agent-runtime-service.test.ts src/stores/agent.store.test.ts
+.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest agent-runtime\backend\tests\test_promptcard_runtime_boundary.py agent-runtime\backend\tests\test_text_generation_providers.py -q -p no:cacheprovider
 ```
 
-Verify selected-text update, no-selection create, Prompt Library create-only approval, one-image media analysis, incompatible pi thread rejection, and continued Canvas/image-generation use while the pi service is unavailable. A live Ark call is optional and must use an explicitly configured keyring credential.
+Verify selected-text update, no-selection create, Prompt Library create-only approval, one-image media analysis, incompatible pi thread rejection, PI-native and SDK-backed provider registration, internal-route authentication, and continued Canvas/image-generation use while the pi service is unavailable. Confirm the text selector groups `PI 原生` and SDK families, while the image selector contains only image models. A live provider call is optional and must use an explicitly configured keyring credential.
 
 For browser-facing changes, also smoke test the local app at:
 

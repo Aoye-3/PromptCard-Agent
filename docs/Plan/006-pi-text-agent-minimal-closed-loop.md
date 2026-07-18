@@ -16,12 +16,15 @@ Run the smallest maintainable product loop:
 
 - DeerFlow removed from maintained runtime and startup.
 - pi text runtime added as a separate Node service.
-- Ark multimodal chat adapter added to the Python Gateway.
+- PI provider collection added for PI-native and SDK-backed text models.
+- Ark multimodal chat retained as the first Python SDK text adapter.
 - Canvas selected-text update and no-selection create proposals.
 - Prompt Library search and additive creation proposals.
 - Media Library image style/free-form/reverse-prompt analysis.
 - Explicit Apply/Reject UI for Agent proposals.
 - Existing image-generation routes and lifecycle kept independent.
+- Model menus grouped by integration family with strict chat/image filtering.
+- Legacy model connections recovered idempotently without moving credentials out of keyring.
 
 ## Acceptance Rules
 
@@ -37,4 +40,5 @@ Run the smallest maintainable product loop:
 - video media analysis;
 - durable text-Agent conversation history;
 - broader script-decomposition proposal types;
-- additional Ark multimodal text model manifests.
+- additional PI-native providers and SDK-backed multimodal text model manifests;
+- Ark AK/SK management credentials for private endpoint enumeration.

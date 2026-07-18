@@ -23,7 +23,7 @@ Command purposes:
 - `storage:dev`: start only the local storage service. It reads `PROMPTCARD_STORAGE_HOST` and `PROMPTCARD_STORAGE_PORT`, defaulting to `127.0.0.1:8002`.
 - `agent:dev`: start only the Python PromptCard Gateway. It reads `GATEWAY_HOST` and `GATEWAY_PORT`, defaulting to `127.0.0.1:8001`.
 - `text-agent:dev`: start only the pi text Agent.
-- `agent:check`: validate the Python Gateway/Ark import and pi TypeScript runtime.
+- `agent:check`: validate the Python Gateway, required Ark SDK adapter dependency, and pi TypeScript runtime.
 - `startup:test`: start from `start.bat` and verify the full local startup flow.
 - `build`: run TypeScript and production Vite build.
 - `npm.cmd test -- --run`: run Vitest once.
@@ -165,7 +165,7 @@ Then start or reuse the runtime:
 npm.cmd run agent:dev
 ```
 
-In Model Management, verify that a tested Volcengine Ark connection is assigned to `chat.primary`. Do not print the key.
+In Model Management, verify that a tested compatible text connection is assigned to `chat.primary`. Text options are grouped as `PI 原生` and `方舟 SDK`; image options are filtered independently and must never contain chat models. Do not print the key.
 
 If Gateway health succeeds but text messages fail, also check `textAgentHealthUrl` from `logs/dev-runtime.json`. `npm.cmd run text-agent:dev` starts only the pi service for focused diagnosis.
 
@@ -180,7 +180,7 @@ If the raw Agent process starts but this endpoint fails, run `npm.cmd run agent:
 
 ### Agent Check Fails Before Runtime Loads
 
-`npm.cmd run agent:check` does not require a model credential. It verifies the PromptCard Gateway/Ark imports and pi TypeScript runtime. Configure and test the credential through Model Management before a live model call.
+`npm.cmd run agent:check` does not require a model credential. It verifies the PromptCard Gateway, installed SDK dependencies, and pi TypeScript runtime. Configure and test the credential through Model Management before a live model call.
 
 ### Missing Playwright Browser
 

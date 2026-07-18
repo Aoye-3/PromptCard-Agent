@@ -19,7 +19,7 @@ npm.cmd run text-agent:check
 npm.cmd run dev:with-agent
 ```
 
-`agent:dev` starts the Python Gateway. `text-agent:dev` starts the pi Node service, and `text-agent:check` type-checks that service. `agent:check` validates both Gateway/Ark imports and the pi TypeScript runtime.
+`agent:dev` starts the Python Gateway. `text-agent:dev` starts the pi Node service, and `text-agent:check` type-checks that service. `agent:check` validates the Gateway, required Ark SDK adapter dependency, and pi TypeScript runtime; it does not require a configured model credential.
 
 The PowerShell scripts derive the project root from `$PSScriptRoot`, so the project folder can be renamed without changing their core path logic. They do not load PromptCard provider credentials from `API-Key.txt` or provider environment variables. Model Management stores credentials in the operating-system keyring.
 

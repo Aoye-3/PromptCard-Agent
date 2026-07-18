@@ -52,6 +52,36 @@ Model management separates provider definitions, model capabilities, named conne
 
 Returns provider definitions and model catalog entries. The current image entry is `doubao-seedream-5-0-pro-260628` with capability metadata for modes, reference count, regions, resolutions, ratios, custom-size limits, prompt optimization, official input constraints, raster annotations, output transports, output count, and streaming.
 
+Provider definitions declare a modality-specific integration family. The initial text families are `PI 原生` and `方舟 SDK`; the initial image family is `方舟 SDK`:
+
+```json
+{
+  "providers": [
+    {
+      "id": "deepseek",
+      "displayName": "DeepSeek",
+      "defaultApiBase": "https://api.deepseek.com",
+      "integrationGroups": {
+        "chat": { "id": "pi-native", "displayName": "PI 原生", "kind": "pi-native" }
+      }
+    }
+  ],
+  "models": [
+    {
+      "id": "deepseek-chat",
+      "providerId": "deepseek",
+      "displayName": "DeepSeek Chat",
+      "modality": "chat",
+      "integrationGroup": { "id": "pi-native", "displayName": "PI 原生", "kind": "pi-native" },
+      "source": "provider-catalog",
+      "assignable": true
+    }
+  ]
+}
+```
+
+The frontend must filter by `modality` before grouping by `integrationGroup`. A connection may support both chat and image models, but `chat.primary` and `image.primary` remain independent assignments.
+
 The catalog is the frontend source of truth for image controls. UI code must consume `modes`, `resolutions`, `aspectRatios`, `customSize`, `promptOptimization`, `inputConstraints`, `annotationInputs`, `outputFormats`, `responseTransports`, `watermark`, `maxReferenceImages`, `regionInputs`, `outputCount`, and `streaming` instead of branching on a Seedream model ID.
 
 ### `GET /agent-api/promptcard/runtime/image-generation-status`
@@ -136,6 +166,32 @@ Tests the stored credential from Agent Runtime and records `lastTest`. The respo
 
 Changing provider, API base, credential, or enabled state clears the persisted successful test. A recorded test has no time-to-live; it remains valid until one of those material fields changes or a later test replaces it.
 
+Provider probes are registered per provider. DeepSeek currently probes `/models`; Volcengine Ark uses its registered `/ping` connectivity probe. The test route does not assume every provider implements a model-list endpoint.
+
+### `GET /agent-api/promptcard/runtime/model-connections/{id}/models`
+
+Returns assignable catalog entries scoped to the connection's provider:
+
+```json
+{
+  "connectionId": "uuid",
+  "providerId": "volcengine-ark",
+  "models": [
+    {
+      "id": "doubao-seed-2-0-lite-260215",
+      "providerId": "volcengine-ark",
+      "displayName": "Doubao Seed 2.0 Lite",
+      "modality": "chat",
+      "integrationGroup": { "id": "volcengine-ark-sdk", "displayName": "方舟 SDK", "kind": "sdk" },
+      "source": "provider-catalog",
+      "assignable": true
+    }
+  ]
+}
+```
+
+`source: "provider-catalog"` means the maintained PromptCard support catalog, not private account endpoint enumeration. The current connection stores an inference API Key. Ark foundation-model and endpoint management APIs require a future, separately modeled AK/SK management credential.
+
 ### `GET /agent-api/promptcard/runtime/model-connections/{id}/dependencies`
 
 Returns assignments and the number of persisted canvas-node references known to the Runtime:
@@ -191,7 +247,7 @@ The browser client normalizes this to `{code, message, action, retryable, field?
 
 ### Deprecated model-config compatibility routes
 
-`GET/PUT /agent-api/promptcard/runtime/model-config` and `POST /agent-api/promptcard/runtime/model-config/test` remain only as DeepSeek migration compatibility routes. New UI and integrations must use model connections and assignments. Compatibility writes still store credentials through keyring; they are not authorization for browser-local credential storage.
+`GET/PUT /agent-api/promptcard/runtime/model-config` and `POST /agent-api/promptcard/runtime/model-config/test` remain only as legacy chat-configuration compatibility routes. New UI and integrations must use model connections and assignments. Compatibility writes still store credentials through keyring; they are not authorization for browser-local credential storage.
 
 ## Image Generation
 
@@ -307,7 +363,7 @@ Current proposal behavior:
 
 New PromptCard UI calls must include `sessionKey`. pi keeps bounded process-local message history and rejects an existing `threadId` when its `sessionKey`, `projectId`, or `mode` conflicts with the new request.
 
-The Python Gateway validates the browser request and returned proposals. The pi runtime owns prompt orchestration and proposal tools. The Gateway resolves `chat.primary` and calls the Volcengine Ark SDK without exposing the credential to pi.
+The Python Gateway validates the browser request and returned proposals. The pi runtime owns prompt orchestration, the PI provider collection, and proposal tools. At Agent construction time it resolves the non-secret `chat.primary` descriptor. PI-native models use PI's API implementation through the credential-injecting Gateway proxy; SDK-backed models use the Gateway text-SDK registry. Provider credentials never enter the Node process.
 
 ### `POST /agent-api/promptcard/runtime/media-analysis`
 
@@ -323,13 +379,19 @@ Request:
 }
 ```
 
-`analysisType` is `style`, `freeform`, or `prompt`. The Gateway loads exactly the requested asset from PromptCard Storage, accepts image content only, limits the asset to 30 MiB, and sends one image attachment to pi/Ark. The response has the same `threadId`, `text`, `proposals`, and `diagnostics` shape as `/messages`, but media analysis returns no mutation proposals.
+`analysisType` is `style`, `freeform`, or `prompt`. The Gateway loads exactly the requested asset from PromptCard Storage, accepts image content only, limits the asset to 30 MiB, and sends one image attachment through pi to the assigned multimodal text provider. The response has the same `threadId`, `text`, `proposals`, and `diagnostics` shape as `/messages`, but media analysis returns no mutation proposals.
 
 Video analysis is not part of the current API behavior.
 
-## Internal Route
+## Internal Routes
 
-`POST /api/promptcard/runtime/internal/chat` is local-service-only. It requires `X-PromptCard-Internal-Token`, resolves the assigned Ark connection, and is not proxied as a browser integration contract.
+These routes are local-service-only, require `X-PromptCard-Internal-Token` at the route boundary, and are not browser integration contracts:
+
+- `GET /api/promptcard/runtime/internal/text-model` returns the current `chat.primary` connection ID, provider ID, model descriptor, capabilities, and integration group. It returns neither `apiBase` nor a credential.
+- `POST /api/promptcard/runtime/internal/pi-proxy/{connectionId}/chat/completions` is the PI-native OpenAI-compatible stream boundary. It accepts only the current PI-native assignment, exact `chat/completions` path, and exact assigned model ID; the Gateway replaces incoming authorization with the keyring credential.
+- `POST /api/promptcard/runtime/internal/chat` is the SDK-backed text boundary. It accepts only an SDK integration group and dispatches through the registered `TextProviderAdapter`; Volcengine Ark is the first adapter.
+
+A browser local-session cookie is insufficient for these routes.
 
 ## Removed Routes
 

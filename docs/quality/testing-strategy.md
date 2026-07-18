@@ -118,8 +118,8 @@ The focused image-generation commands are the regression gate for this feature. 
 
 - Runtime status moves from unknown to connected when Agent Runtime is available.
 - Local session bootstrap completes without showing a second login form.
-- Ark chat models, focused proposal tools, and the PromptCard Agent summary load.
-- An Ark-backed prompt returns an assistant response.
+- Text models load under `PI 原生` and SDK integration groups with no image-model leakage.
+- Both a PI-native provider descriptor and an SDK-backed provider descriptor register through the pi provider collection; an assigned compatible text model returns an assistant response.
 - Prompt library proposal JSON is parsed into a pending proposal.
 - Approving a proposal updates the Prompt library through preset store methods.
 - Rejecting a proposal does not mutate the Prompt library.
@@ -176,5 +176,5 @@ The focused image-generation commands are the regression gate for this feature. 
 ## Roadmap / Not Yet Implemented
 
 - The automated image-generation integration uses a dependency-injected provider and deterministic local image result. Real Windows Credential Locker + live Ark coverage remains a release-time manual smoke test.
-- Agent live-model tests depend on a configured Ark keyring credential and should not run in generic CI without secret configuration.
+- Agent live-model tests depend on the selected provider's configured keyring credential and should not run in generic CI without secret configuration.
 - Durable Agent proposal audit tests are not applicable until such storage exists.

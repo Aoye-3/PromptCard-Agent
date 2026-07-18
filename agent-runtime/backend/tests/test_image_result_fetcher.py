@@ -9,6 +9,7 @@ from PIL import Image
 from app.gateway.image_generation.result_fetcher import MAX_IMAGE_BYTES, ImageFetchError, ImageResultFetcher
 
 OFFICIAL_CDN = "ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com"
+OFFICIAL_COMBINED_CDN = "ark-acg-cn-beijing.tos-cn-beijing.volces.com"
 PUBLIC_IP = "93.184.216.34"
 
 
@@ -74,11 +75,22 @@ def test_transport_pins_validated_ip_while_preserving_host_and_tls_sni() -> None
     assert network.private_target_reached is False
 
 
-def test_fetches_and_decodes_an_official_https_image() -> None:
+@pytest.mark.parametrize("host", [OFFICIAL_CDN, OFFICIAL_COMBINED_CDN])
+def test_fetches_and_decodes_each_official_seedream_https_image(host: str) -> None:
     content = png_bytes()
-    fetcher = fetcher_for(lambda request: httpx.Response(200, headers={"content-type": "image/png"}, content=content, request=request))
+    fetcher = ImageResultFetcher(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                headers={"content-type": "image/png"},
+                content=content,
+                request=request,
+            )
+        ),
+        resolver=lambda _host: (PUBLIC_IP,),
+    )
 
-    image = fetcher.fetch(f"https://{OFFICIAL_CDN}/result.png?signature=opaque")
+    image = fetcher.fetch(f"https://{host}/result.png?signature=opaque")
 
     assert image.content == content
     assert image.content_type == "image/png"

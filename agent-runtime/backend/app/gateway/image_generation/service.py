@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import os
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -31,6 +32,8 @@ from app.gateway.image_generation.result_fetcher import FetchedImage, ImageFetch
 from app.gateway.model_management.catalog import model_by_id
 from app.gateway.model_management.connection_store import ModelConnectionStore, get_connection_store
 from app.gateway.model_management.diagnostics import collect_image_generation_status
+
+logger = logging.getLogger(__name__)
 
 MAX_RUNNING_PER_CONNECTION = 2
 MAX_RUNNING_TOTAL = 4
@@ -219,6 +222,7 @@ class ImageGenerationService:
         failure: GenerationError | None = None
         outcome: GenerationOutcome | None = None
         provider_request_id: str | None = None
+        provider_result_host = "<none>"
         try:
             if capacity_error == "connection":
                 raise GenerationError("generation_busy", "This model connection already has two running generations", True, command.run_id)
@@ -241,6 +245,7 @@ class ImageGenerationService:
             provider = self._provider_factory(connection)
             provider_result = provider.generate(provider_request)
             provider_request_id = provider_result.request_id
+            provider_result_host = _safe_result_host(provider_result.image.url)
             fetched = self._resolve_provider_image(provider_result.image, command)
             asset = self._storage.upload_asset(f"generated-{command.run_id}{fetched.extension}", fetched.content_type, fetched.content)
             asset_id = _required_response_id(asset, "asset")
@@ -267,6 +272,14 @@ class ImageGenerationService:
         except Exception as error:
             if isinstance(error, ProviderError) and error.request_id:
                 provider_request_id = error.request_id
+            if isinstance(error, ImageFetchError):
+                logger.warning(
+                    "Image result localization failed code=%s run_id=%s provider_request_id=%s host=%s",
+                    error.code,
+                    command.run_id,
+                    provider_request_id or "<none>",
+                    provider_result_host,
+                )
             failure = _normalize_generation_error(error, command.run_id)
         finally:
             if acquired:
@@ -838,6 +851,24 @@ def _required_response_id(payload: dict[str, Any], _kind: str) -> str:
     if not isinstance(value, str) or not value:
         raise StorageGatewayError()
     return value
+
+
+def _safe_result_host(url: str | None) -> str:
+    if not url:
+        return "<none>"
+    try:
+        hostname = urlsplit(url).hostname
+    except ValueError:
+        return "<invalid>"
+    if not hostname:
+        return "<invalid>"
+    normalized = hostname.lower()
+    if len(normalized) > 253 or not all(
+        character.isascii() and (character.isalnum() or character in ".-")
+        for character in normalized
+    ):
+        return "<invalid>"
+    return normalized
 
 
 def _normalize_generation_error(error: Exception, run_id: str) -> GenerationError:

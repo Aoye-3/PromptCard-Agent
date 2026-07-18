@@ -14,7 +14,12 @@ from PIL import Image, UnidentifiedImageError
 MAX_IMAGE_BYTES = 200 * 1024 * 1024
 MAX_IMAGE_PIXELS = 40_000_000
 MAX_REDIRECTS = 3
-OFFICIAL_IMAGE_HOSTS = frozenset({"ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com"})
+OFFICIAL_IMAGE_HOSTS = frozenset(
+    {
+        "ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com",
+        "ark-acg-cn-beijing.tos-cn-beijing.volces.com",
+    }
+)
 ALLOWED_IMAGE_MIME_TYPES = {
     "image/png": ("PNG", ".png"),
     "image/jpeg": ("JPEG", ".jpg"),

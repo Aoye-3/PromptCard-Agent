@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -641,6 +642,22 @@ def test_every_post_create_failure_persists_failed_terminal_state(failure: str, 
     assert REMOTE_URL not in combined
     states = [payload[1]["state"] for operation, payload in storage.operations if operation == "update_run"]
     assert states == ["running", "failed"]
+
+
+def test_result_localization_failure_logs_only_safe_provider_context(caplog: pytest.LogCaptureFixture) -> None:
+    fetcher = FakeFetcher(ImageFetchError("unsafe_image_url", "Remote image URL is not allowed", False))
+    service, _, _, _ = make_service(fetcher=fetcher)
+
+    with caplog.at_level(logging.WARNING, logger="app.gateway.image_generation.service"):
+        with pytest.raises(GenerationError):
+            service.generate(command("run-safe-diagnostics"))
+
+    diagnostics = "\n".join(caplog.messages)
+    assert "provider-request-1" in diagnostics
+    assert "ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com" in diagnostics
+    assert "run-safe-diagnostics" in diagnostics
+    assert "remote-secret" not in diagnostics
+    assert REMOTE_URL not in diagnostics
 
 
 def test_create_run_failure_does_not_retain_raw_storage_exception() -> None:

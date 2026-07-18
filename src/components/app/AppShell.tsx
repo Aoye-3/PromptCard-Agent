@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Bot, Camera, Folder, Grid2X2, Image, Plus, RefreshCw, Search, Smile, Trash2, Users } from 'lucide-react'
+import { Bot, Camera, Files, Folder, Grid2X2, Image, Plus, RefreshCw, Search, Smile, Trash2, Users } from 'lucide-react'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 import type { MainTab, ProjectMode, SaveStatus } from '@/features/app/app-types'
 import { useI18n } from '@/i18n'
@@ -41,6 +41,7 @@ export const AppShell = ({
   const navItems: Array<{ tab: MainTab; label: string; icon: ReactNode }> = [
     { tab: 'projects', label: '项目', icon: <Folder className="h-5 w-5" /> },
     { tab: 'media', label: t('mediaNav'), icon: <Image className="h-5 w-5" /> },
+    { tab: 'files', label: '文件', icon: <Files className="h-5 w-5" /> },
     { tab: 'capture', label: '捕获栏', icon: <Camera className="h-5 w-5" /> },
     { tab: 'library', label: 'Prompt库', icon: <Users className="h-5 w-5" /> },
     { tab: 'agents', label: 'Agent面板', icon: <Bot className="h-5 w-5" /> },
@@ -158,7 +159,7 @@ const SideNav = ({
     <div className="mt-8 border-t border-gray-100 pt-5" data-app-project-utilities>
       <div className="mb-3 hidden px-3 text-xs font-semibold uppercase tracking-wide text-gray-400 md:block">项目工具</div>
       <div className="space-y-1">
-        <SideNavItem icon={<Trash2 className="h-5 w-5" />} label="回收站" onClick={onShowProjectTrash} />
+        <SideNavItem active={activeTab === 'trash'} dataTab="trash" icon={<Trash2 className="h-5 w-5" />} label="回收站" onClick={onShowProjectTrash} />
       </div>
     </div>
   </aside>

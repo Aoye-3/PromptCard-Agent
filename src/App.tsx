@@ -4,6 +4,8 @@ import ThreeStageBuilderScreen from './components/ThreeStageBuilder'
 import { AgentDashboard } from './components/AgentDashboard'
 import { AppShell } from './components/app/AppShell'
 import { ProjectHome } from './components/app/ProjectHome'
+import { FileStorageScreen } from './features/files/FileStorageScreen'
+import { RecycleBinScreen } from './features/files/RecycleBinScreen'
 import { CardBuilderScreen } from './components/app/CardBuilderScreen'
 import { StoryboardBuilderScreen } from './components/app/StoryboardBuilderScreen'
 import FreeCanvasBuilderScreen from './components/canvas/FreeCanvasBuilderScreen'
@@ -1251,6 +1253,38 @@ function App() {
     { type: 'custom', label: cardTypeLabel('custom'), color: 'bg-gray-100 text-gray-700' }
   ] as const
 
+  const projectHomeContent = (trashMode = showProjectTrash) => (
+    <ProjectHome
+      projects={projects}
+      projectTrash={projectTrash}
+      selectedProjectIds={selectedProjectIds}
+      selectedProjectTrashIds={selectedProjectTrashIds}
+      showProjectTrash={trashMode}
+      searchTerm={projectSearchTerm}
+      promptHistory={promptHistory}
+      onCreateProject={handleCreateProject}
+      onOpenProject={openProject}
+      onDeleteProject={handleDeleteProject}
+      onRenameProject={handleRenameProject}
+      onShowHistory={() => setShowHistory(true)}
+      onToggleProjectSelection={handleToggleProjectSelection}
+      onToggleProjectTrashSelection={handleToggleProjectTrashSelection}
+      onSelectAllProjects={() => setSelectedProjectIds(projects.map(project => project.id))}
+      onSelectAllProjectTrash={() => setSelectedProjectTrashIds(projectTrash.map(entry => entry.id))}
+      onClearProjectSelection={() => setSelectedProjectIds([])}
+      onClearProjectTrashSelection={() => setSelectedProjectTrashIds([])}
+      onTrashSelectedProjects={handleTrashSelectedProjects}
+      onRestoreSelectedProjects={handleRestoreSelectedProjects}
+      onDeleteSelectedProjectsForever={handleDeleteSelectedProjectsForever}
+      onShowProjectTrash={(show) => {
+        if (trashMode && !show) setActiveTab('projects')
+        setShowProjectTrash(show)
+        setSelectedProjectIds([])
+        setSelectedProjectTrashIds([])
+      }}
+    />
+  )
+
   const content = activeTab === 'media' ? (
     <MediaScreen
       canPlaceOnCanvas={activeProject?.type === 'free-canvas' && Boolean(activeProject.freeCanvas)}
@@ -1269,6 +1303,10 @@ function App() {
       }}
       onOpenPromptLibrary={() => setActiveTab('library')}
     />
+  ) : activeTab === 'files' ? (
+    <FileStorageScreen />
+  ) : activeTab === 'trash' ? (
+    <RecycleBinScreen projectTrash={projectHomeContent(true)} />
   ) : activeTab === 'capture' ? (
     <CaptureBarScreen
       status={captureToolbarStatus}
@@ -1367,36 +1405,7 @@ function App() {
       activeCardId={activeCardId}
       t={t}
     />
-  ) : (
-    <ProjectHome
-      projects={projects}
-      projectTrash={projectTrash}
-      selectedProjectIds={selectedProjectIds}
-      selectedProjectTrashIds={selectedProjectTrashIds}
-      showProjectTrash={showProjectTrash}
-      searchTerm={projectSearchTerm}
-      promptHistory={promptHistory}
-      onCreateProject={handleCreateProject}
-      onOpenProject={openProject}
-      onDeleteProject={handleDeleteProject}
-      onRenameProject={handleRenameProject}
-      onShowHistory={() => setShowHistory(true)}
-      onToggleProjectSelection={handleToggleProjectSelection}
-      onToggleProjectTrashSelection={handleToggleProjectTrashSelection}
-      onSelectAllProjects={() => setSelectedProjectIds(projects.map(project => project.id))}
-      onSelectAllProjectTrash={() => setSelectedProjectTrashIds(projectTrash.map(entry => entry.id))}
-      onClearProjectSelection={() => setSelectedProjectIds([])}
-      onClearProjectTrashSelection={() => setSelectedProjectTrashIds([])}
-      onTrashSelectedProjects={handleTrashSelectedProjects}
-      onRestoreSelectedProjects={handleRestoreSelectedProjects}
-      onDeleteSelectedProjectsForever={handleDeleteSelectedProjectsForever}
-      onShowProjectTrash={(show) => {
-        setShowProjectTrash(show)
-        setSelectedProjectIds([])
-        setSelectedProjectTrashIds([])
-      }}
-    />
-  )
+  ) : projectHomeContent()
 
   return (
     <AppShell
@@ -1414,7 +1423,7 @@ function App() {
       onProjectSearchTermChange={setProjectSearchTerm}
       onCreateProject={handleCreateProject}
       onShowProjectTrash={() => {
-        setActiveTab('projects')
+        setActiveTab('trash')
         setProjectMode('home')
         setShowTemplateLibrary(false)
         setShowProjectTrash(true)

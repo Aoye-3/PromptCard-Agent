@@ -272,6 +272,37 @@ describe('storageServiceClient', () => {
     )
   })
 
+  test('lists and trashes storage artifacts through the storage lifecycle API', async () => {
+    const artifact = {
+      assetId: 'asset/one', familyAssetIds: ['asset/one'], category: 'generated-content',
+      status: 'active', title: 'Generated.png', contentType: 'image/png', mediaType: 'image',
+      sizeBytes: 12, createdAt: 1, trashedAt: null, referenceCount: 0,
+      previewUrl: '/storage-api/assets/asset%2Fone'
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ artifacts: [artifact], nextCursor: null }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ artifacts: [{ ...artifact, status: 'trash' }] }), {
+        status: 200, headers: { 'Content-Type': 'application/json' }
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(storageServiceClient.storageArtifacts.getPage({
+      category: 'generated-content', status: 'active', mediaType: 'image', query: 'Generated',
+      sort: 'size-desc', limit: 25
+    })).resolves.toEqual({ artifacts: [artifact], nextCursor: null })
+    await storageServiceClient.storageArtifacts.trash(['asset/one'])
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      '/storage-api/storage/artifacts?category=generated-content&status=active&mediaType=image&query=Generated&sort=size-desc&limit=25'
+    )
+    expect(fetchMock.mock.calls[1]).toEqual([
+      '/storage-api/storage/artifacts/trash',
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ ids: ['asset/one'], deletedBy: 'user' }) })
+    ])
+  })
+
   test('pages permanent image generation history by project and node without a delete API', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       runs: [{

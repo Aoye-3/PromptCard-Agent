@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import threading
 import time
@@ -15,6 +16,7 @@ from .assets import (
     DEFAULT_MAX_ASSET_BYTES,
     AssetStore,
     AssetValidationError,
+    DeletedAssetLookup,
     prepare_provider_image,
 )
 from .backup import BackupManager
@@ -31,7 +33,7 @@ from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 DATABASE_NAME = "promptcard.sqlite3"
 JSON_SOURCES = (
     "projects.json",
@@ -49,6 +51,16 @@ class RevisionConflict(Exception):
 
 class MissingItem(Exception):
     pass
+
+
+class DeletedAsset(Exception):
+    pass
+
+
+class AssetInUse(Exception):
+    def __init__(self, references: list[dict[str, Any]]) -> None:
+        super().__init__("asset is still referenced")
+        self.references = references
 
 
 class DuplicateItem(Exception):
@@ -179,13 +191,24 @@ class SqliteStore:
     def list_recent_captures(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT payload_json FROM recent_captures ORDER BY captured_at DESC, created_at DESC"
+                """SELECT recent_captures.payload_json
+                   FROM recent_captures
+                   LEFT JOIN assets ON assets.asset_id = recent_captures.asset_id
+                   WHERE assets.lifecycle_status='active' OR assets.asset_id IS NULL
+                   ORDER BY recent_captures.captured_at DESC, recent_captures.created_at DESC"""
             ).fetchall()
         return [json.loads(row[0]) for row in rows]
 
     def get_recent_capture(self, item_id: str) -> dict[str, Any]:
         with self._connect() as connection:
-            row = connection.execute("SELECT payload_json FROM recent_captures WHERE id=?", (item_id,)).fetchone()
+            row = connection.execute(
+                """SELECT recent_captures.payload_json
+                   FROM recent_captures
+                   LEFT JOIN assets ON assets.asset_id = recent_captures.asset_id
+                   WHERE recent_captures.id=?
+                     AND (assets.lifecycle_status='active' OR assets.asset_id IS NULL)""",
+                (item_id,),
+            ).fetchone()
         if not row:
             raise MissingItem()
         return json.loads(row[0])
@@ -267,7 +290,7 @@ class SqliteStore:
                 if capture.get("registeredPromptId"):
                     raise ValueError(f"Recent capture is already registered: {capture['id']}")
                 asset_row = connection.execute(
-                    "SELECT original_filename, content_type, size FROM assets WHERE asset_id=?",
+                    "SELECT original_filename, content_type, size FROM assets WHERE asset_id=? AND lifecycle_status='active'",
                     (capture["assetId"],),
                 ).fetchone()
                 if not asset_row:
@@ -548,7 +571,7 @@ class SqliteStore:
             ).fetchone()
         if not row:
             raise MissingItem()
-        return json.loads(row[0])
+        return self._with_output_asset_states(json.loads(row[0]))
 
     def update_image_generation_run_state(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         with self._transaction() as connection:
@@ -633,7 +656,9 @@ class SqliteStore:
                 f"SELECT payload_json FROM image_generation_runs{where} ORDER BY created_at DESC, id DESC LIMIT ?",
                 parameters,
             ).fetchall()
-        return image_run_page([json.loads(row[0]) for row in rows], normalized_limit)
+        page = image_run_page([json.loads(row[0]) for row in rows], normalized_limit)
+        page["runs"] = [self._with_output_asset_states(run) for run in page["runs"]]
+        return page
 
     def list_image_generation_conversations(
         self,
@@ -1025,8 +1050,353 @@ class SqliteStore:
     def get_asset(self, asset_id: str) -> tuple[Path, str]:
         try:
             return self._assets.get(asset_id)
+        except DeletedAssetLookup as exc:
+            raise DeletedAsset() from exc
         except LookupError as exc:
             raise MissingItem() from exc
+
+    def get_asset_download(self, asset_id: str) -> tuple[Path, str, str]:
+        path, content_type = self.get_asset(asset_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT original_filename FROM assets WHERE asset_id=?",
+                (asset_id,),
+            ).fetchone()
+        if not row:
+            raise MissingItem()
+        return path, content_type, row[0]
+
+    def list_storage_artifacts(
+        self,
+        *,
+        category: str | None = None,
+        status: str = "active",
+        media_type: str | None = None,
+        query: str | None = None,
+        sort: str = "created-desc",
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        if category is not None and category not in {"generated-content", "external-media", "project-material", "other"}:
+            raise ValueError("Storage artifact category is invalid")
+        if status not in {"active", "trash"}:
+            raise ValueError("Storage artifact status is invalid")
+        if media_type is not None and media_type not in {"image", "video", "audio", "other"}:
+            raise ValueError("Storage artifact media type is invalid")
+        if sort not in {"created-desc", "size-desc", "name-asc"}:
+            raise ValueError("Storage artifact sort is invalid")
+        normalized_limit = max(1, min(int(limit), 100))
+        artifacts = [item for item in self._storage_artifacts() if item["status"] == status]
+        if category:
+            artifacts = [item for item in artifacts if item["category"] == category]
+        if media_type:
+            artifacts = [item for item in artifacts if item["mediaType"] == media_type]
+        normalized_query = (query or "").strip().casefold()
+        if normalized_query:
+            artifacts = [item for item in artifacts if normalized_query in item["title"].casefold()]
+        if sort == "size-desc":
+            artifacts.sort(key=lambda item: (-item["sizeBytes"], -item["createdAt"], item["assetId"]))
+        elif sort == "name-asc":
+            artifacts.sort(key=lambda item: (item["title"].casefold(), -item["createdAt"], item["assetId"]))
+        else:
+            artifacts.sort(key=lambda item: (-item["createdAt"], item["assetId"]))
+        if cursor:
+            cursor_index = next((index for index, item in enumerate(artifacts) if item["assetId"] == cursor), None)
+            if cursor_index is not None:
+                artifacts = artifacts[cursor_index + 1:]
+        page = artifacts[:normalized_limit]
+        return {
+            "artifacts": page,
+            "nextCursor": page[-1]["assetId"] if len(artifacts) > normalized_limit and page else None,
+        }
+
+    def get_storage_artifact_references(self, asset_id: str) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            members = self._asset_family_ids(connection, asset_id)
+            return self._storage_references(connection, members)
+
+    def trash_storage_artifacts(
+        self,
+        ids: list[str],
+        deleted_by: Actor = "user",
+        delete_reason: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if deleted_by not in {"user", "agent"}:
+            raise ValueError("Invalid deletedBy")
+        with self._transaction() as connection:
+            members = self._expand_asset_families(connection, ids)
+            placeholders = ",".join("?" for _ in members)
+            rows = connection.execute(
+                f"SELECT asset_id, lifecycle_status FROM assets WHERE asset_id IN ({placeholders})",
+                tuple(members),
+            ).fetchall()
+            if len(rows) != len(members) or any(row[1] != "active" for row in rows):
+                raise MissingItem()
+            timestamp = now_ms()
+            connection.execute(
+                f"UPDATE assets SET lifecycle_status='trash', trashed_at=?, trashed_by=?, trash_reason=? WHERE asset_id IN ({placeholders})",
+                (timestamp, deleted_by, delete_reason, *members),
+            )
+        requested = set(ids)
+        return [
+            item for item in self._storage_artifacts()
+            if requested & set(item["familyAssetIds"])
+        ]
+
+    def restore_storage_artifacts(self, ids: list[str]) -> list[dict[str, Any]]:
+        with self._transaction() as connection:
+            members = self._expand_asset_families(connection, ids)
+            placeholders = ",".join("?" for _ in members)
+            rows = connection.execute(
+                f"SELECT asset_id, lifecycle_status FROM assets WHERE asset_id IN ({placeholders})",
+                tuple(members),
+            ).fetchall()
+            if len(rows) != len(members) or any(row[1] != "trash" for row in rows):
+                raise MissingItem()
+            connection.execute(
+                f"UPDATE assets SET lifecycle_status='active', trashed_at=NULL, trashed_by=NULL, trash_reason=NULL WHERE asset_id IN ({placeholders})",
+                tuple(members),
+            )
+        requested = set(ids)
+        return [
+            item for item in self._storage_artifacts()
+            if requested & set(item["familyAssetIds"])
+        ]
+
+    def delete_storage_artifacts_forever(self, ids: list[str]) -> None:
+        with self._connect() as connection:
+            members = self._expand_asset_families(connection, ids)
+            references = self._storage_references(connection, members)
+            if references:
+                raise AssetInUse(references)
+            placeholders = ",".join("?" for _ in members)
+            rows = connection.execute(
+                f"SELECT asset_id, relative_path, lifecycle_status FROM assets WHERE asset_id IN ({placeholders})",
+                tuple(members),
+            ).fetchall()
+        if len(rows) != len(members) or any(row[2] != "trash" for row in rows):
+            raise MissingItem()
+        quarantined: list[tuple[Path, Path]] = []
+        tombstoned = False
+        try:
+            for asset_id, relative_path, _status in rows:
+                source = self.data_dir / relative_path
+                if source.is_file():
+                    target = source.with_name(f".purge-{uuid.uuid4().hex}-{asset_id}")
+                    os.replace(source, target)
+                    quarantined.append((source, target))
+            with self._transaction() as connection:
+                placeholders = ",".join("?" for _ in members)
+                connection.execute(
+                    f"UPDATE assets SET lifecycle_status='deleted', deleted_at=? WHERE asset_id IN ({placeholders})",
+                    (now_ms(), *members),
+                )
+                connection.execute(
+                    f"DELETE FROM recent_captures WHERE asset_id IN ({placeholders})",
+                    tuple(members),
+                )
+            tombstoned = True
+            for _source, target in quarantined:
+                target.unlink(missing_ok=True)
+        except Exception:
+            if not tombstoned:
+                for source, target in reversed(quarantined):
+                    if target.exists() and not source.exists():
+                        os.replace(target, source)
+            raise
+
+    def reconcile_orphan_assets(self) -> list[dict[str, Any]]:
+        orphan_ids = [
+            item["assetId"]
+            for item in self._storage_artifacts()
+            if item["status"] == "active" and item["category"] == "other" and item["referenceCount"] == 0
+        ]
+        if not orphan_ids:
+            return []
+        return self.trash_storage_artifacts(orphan_ids, "user", "orphan reconciliation")
+
+    def get_storage_summary(self, warning_bytes: int | None = None) -> dict[str, Any]:
+        threshold = warning_bytes if warning_bytes is not None else int(
+            os.environ.get("PROMPTCARD_STORAGE_WARNING_BYTES", str(10 * 1024 * 1024 * 1024))
+        )
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT asset_id, size, lifecycle_status FROM assets WHERE lifecycle_status!='deleted'"
+            ).fetchall()
+            derived_ids = {row[0] for row in connection.execute("SELECT DISTINCT derived_asset_id FROM image_asset_derivations")}
+        user_asset_bytes = sum(row[1] for row in rows)
+        trash_bytes = sum(row[1] for row in rows if row[2] == "trash")
+        internal_derivative_bytes = sum(row[1] for row in rows if row[0] in derived_ids)
+        artifacts = self._storage_artifacts()
+        orphan_bytes = sum(
+            item["sizeBytes"]
+            for item in artifacts
+            if item["status"] == "active" and item["category"] == "other" and item["referenceCount"] == 0
+        )
+        disk = shutil.disk_usage(self.data_dir)
+        free_ratio = disk.free / disk.total if disk.total else 0
+        if disk.free < 2 * 1024 * 1024 * 1024 or free_ratio < 0.05:
+            disk_warning = "critical"
+        elif disk.free < 10 * 1024 * 1024 * 1024 or free_ratio < 0.10:
+            disk_warning = "warning"
+        else:
+            disk_warning = "normal"
+        system_bytes = sum(
+            path.stat().st_size
+            for path in [self.database_path, self.database_path.with_suffix(".sqlite3-wal"), self.database_path.with_suffix(".sqlite3-shm")]
+            if path.is_file()
+        )
+        logs_dir = self.data_dir.parent / "logs"
+        if logs_dir.is_dir():
+            system_bytes += sum(path.stat().st_size for path in logs_dir.rglob("*") if path.is_file())
+        return {
+            "userAssetBytes": user_asset_bytes,
+            "activeBytes": user_asset_bytes - trash_bytes,
+            "trashBytes": trash_bytes,
+            "internalDerivativeBytes": internal_derivative_bytes,
+            "systemBytes": system_bytes,
+            "orphanBytes": orphan_bytes,
+            "assetSoftThresholdBytes": threshold,
+            "assetWarningLevel": "warning" if user_asset_bytes >= threshold else "normal",
+            "diskTotalBytes": disk.total,
+            "diskFreeBytes": disk.free,
+            "diskWarningLevel": disk_warning,
+            "artifactCount": len(artifacts),
+        }
+
+    def _storage_artifacts(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            asset_rows = connection.execute(
+                """SELECT asset_id, original_filename, content_type, size, created_at,
+                          lifecycle_status, trashed_at
+                   FROM assets WHERE lifecycle_status!='deleted'"""
+            ).fetchall()
+            assets = {
+                row[0]: {
+                    "assetId": row[0], "title": row[1], "contentType": row[2], "size": row[3],
+                    "createdAt": row[4], "status": row[5], "trashedAt": row[6],
+                }
+                for row in asset_rows
+            }
+            derivations = connection.execute(
+                "SELECT source_asset_id, derived_asset_id FROM image_asset_derivations"
+            ).fetchall()
+            generated_ids: set[str] = set()
+            for row in connection.execute("SELECT payload_json FROM image_generation_runs WHERE state='succeeded'"):
+                output_ids = json.loads(row[0]).get("outputAssetIds", [])
+                if isinstance(output_ids, list):
+                    generated_ids.update(item for item in output_ids if isinstance(item, str) and item)
+            captures = [json.loads(row[0]) for row in connection.execute("SELECT payload_json FROM recent_captures")]
+            project_rows = connection.execute("SELECT status, payload_json FROM projects").fetchall()
+            preset_rows = connection.execute("SELECT status, payload_json FROM presets").fetchall()
+            referenced_project_ids = set()
+            for _status, payload in [*project_rows, *preset_rows]:
+                referenced_project_ids.update(_asset_ids(json.loads(payload)))
+
+            graph: dict[str, set[str]] = {asset_id: set() for asset_id in assets}
+            derived_ids: set[str] = set()
+            for source_id, derived_id in derivations:
+                if source_id in graph and derived_id in graph:
+                    graph[source_id].add(derived_id)
+                    graph[derived_id].add(source_id)
+                    if source_id != derived_id:
+                        derived_ids.add(derived_id)
+
+            artifacts: list[dict[str, Any]] = []
+            visited: set[str] = set()
+            for asset_id in assets:
+                if asset_id in visited:
+                    continue
+                members = _graph_component(graph, asset_id)
+                visited.update(members)
+                roots = sorted(members - derived_ids, key=lambda member: (assets[member]["createdAt"], member))
+                root_id = roots[0] if roots else sorted(members)[0]
+                root = assets[root_id]
+                family_captures = [capture for capture in captures if capture.get("assetId") in members]
+                if members & generated_ids:
+                    category = "generated-content"
+                elif family_captures:
+                    category = "external-media"
+                elif members & referenced_project_ids:
+                    category = "project-material"
+                else:
+                    category = "other"
+                capture = max(family_captures, key=lambda item: item.get("capturedAt", 0), default=None)
+                title = str(capture.get("title")) if capture and capture.get("title") else root["title"]
+                content_type = root["contentType"]
+                top_level_type = content_type.split("/", 1)[0] if "/" in content_type else "other"
+                media_type = top_level_type if top_level_type in {"image", "video", "audio"} else "other"
+                references = self._storage_references(connection, members)
+                artifacts.append({
+                    "assetId": root_id,
+                    "familyAssetIds": sorted(members),
+                    "category": category,
+                    "status": root["status"],
+                    "title": title,
+                    "contentType": content_type,
+                    "mediaType": media_type,
+                    "sizeBytes": sum(assets[member]["size"] for member in members),
+                    "createdAt": root["createdAt"],
+                    "trashedAt": root["trashedAt"],
+                    "referenceCount": len(references),
+                    "previewUrl": f"/storage-api/assets/{root_id}",
+                })
+        return artifacts
+
+    def _asset_family_ids(self, connection: sqlite3.Connection, asset_id: str) -> set[str]:
+        registered = {row[0] for row in connection.execute("SELECT asset_id FROM assets")}
+        if asset_id not in registered:
+            raise MissingItem()
+        graph: dict[str, set[str]] = {item: set() for item in registered}
+        for source_id, derived_id in connection.execute(
+            "SELECT source_asset_id, derived_asset_id FROM image_asset_derivations"
+        ):
+            if source_id in graph and derived_id in graph:
+                graph[source_id].add(derived_id)
+                graph[derived_id].add(source_id)
+        return _graph_component(graph, asset_id)
+
+    def _expand_asset_families(self, connection: sqlite3.Connection, ids: list[str]) -> list[str]:
+        if not ids:
+            raise ValueError("At least one asset id is required")
+        members: set[str] = set()
+        for asset_id in ids:
+            members.update(self._asset_family_ids(connection, asset_id))
+        return sorted(members)
+
+    def _storage_references(self, connection: sqlite3.Connection, members: set[str] | list[str]) -> list[dict[str, Any]]:
+        member_set = set(members)
+        references: list[dict[str, Any]] = []
+        for item_id, status, payload_json in connection.execute("SELECT id, status, payload_json FROM projects"):
+            payload = json.loads(payload_json)
+            if member_set & _asset_ids(payload):
+                references.append({
+                    "kind": "project", "id": item_id, "status": status,
+                    "title": payload.get("title") or item_id,
+                })
+        for item_id, status, payload_json in connection.execute("SELECT id, status, payload_json FROM presets"):
+            payload = json.loads(payload_json)
+            if member_set & _asset_ids(payload):
+                references.append({
+                    "kind": "prompt", "id": item_id, "status": status,
+                    "title": payload.get("label") or item_id,
+                })
+        return references
+
+    def _with_output_asset_states(self, run: dict[str, Any]) -> dict[str, Any]:
+        output_ids = run.get("outputAssetIds", [])
+        if not output_ids:
+            return run
+        placeholders = ",".join("?" for _ in output_ids)
+        with self._connect() as connection:
+            states = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    f"SELECT asset_id, lifecycle_status FROM assets WHERE asset_id IN ({placeholders})",
+                    tuple(output_ids),
+                )
+            }
+        return {**run, "outputAssetStates": {asset_id: states.get(asset_id, "missing") for asset_id in output_ids}}
 
     def diagnose_assets(self) -> dict[str, list[str]]:
         return self._assets.diagnose()
@@ -1146,6 +1516,19 @@ class SqliteStore:
                 except Exception:
                     connection.rollback()
                     raise
+            if current_version == 5:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._migrate_asset_lifecycle_v6(connection)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                        (6, "add-asset-lifecycle", now_ms()),
+                    )
+                    connection.commit()
+                    current_version = 6
+                except Exception:
+                    connection.rollback()
+                    raise
             if current_version != SCHEMA_VERSION:
                 raise MigrationError(f"Unsupported SQLite schema version: {current_version}")
 
@@ -1169,13 +1552,32 @@ class SqliteStore:
             CREATE INDEX presets_status_order ON presets(status, sort_order, created_at);
             CREATE TABLE assets(
                 asset_id TEXT PRIMARY KEY, original_filename TEXT NOT NULL, relative_path TEXT NOT NULL UNIQUE,
-                content_type TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL
+                content_type TEXT NOT NULL, size INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                lifecycle_status TEXT NOT NULL DEFAULT 'active' CHECK(lifecycle_status IN ('active','trash','deleted')),
+                trashed_at INTEGER, trashed_by TEXT, trash_reason TEXT, deleted_at INTEGER
             );
+            CREATE INDEX assets_lifecycle_order ON assets(lifecycle_status, created_at DESC, asset_id DESC);
             CREATE TABLE browser_imports(migration_id TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
         """)
         self._create_recent_captures_schema(connection)
         self._create_image_generation_v4_schema(connection)
         self._create_image_asset_derivations_v5_schema(connection)
+
+    def _migrate_asset_lifecycle_v6(self, connection: sqlite3.Connection) -> None:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(assets)")}
+        additions = {
+            "lifecycle_status": "TEXT NOT NULL DEFAULT 'active' CHECK(lifecycle_status IN ('active','trash','deleted'))",
+            "trashed_at": "INTEGER",
+            "trashed_by": "TEXT",
+            "trash_reason": "TEXT",
+            "deleted_at": "INTEGER",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                connection.execute(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS assets_lifecycle_order ON assets(lifecycle_status, created_at DESC, asset_id DESC)"
+        )
 
     def _insert_project(self, connection: sqlite3.Connection, item: dict[str, Any], status: str, trash: dict[str, Any] | None = None) -> None:
         connection.execute(
@@ -1589,6 +1991,36 @@ def _capture_source_metadata(capture: dict[str, Any]) -> dict[str, Any]:
         "capturedAt": capture.get("capturedAt"),
         "origin": capture.get("origin", {}),
     }
+
+
+def _asset_ids(value: Any) -> set[str]:
+    found: set[str] = set()
+    if isinstance(value, dict):
+        for key in ("assetId", "sourceAssetId", "derivedAssetId"):
+            asset_id = value.get(key)
+            if isinstance(asset_id, str) and asset_id:
+                found.add(asset_id)
+        output_asset_ids = value.get("outputAssetIds")
+        if isinstance(output_asset_ids, list):
+            found.update(item for item in output_asset_ids if isinstance(item, str) and item)
+        for child in value.values():
+            found.update(_asset_ids(child))
+    elif isinstance(value, list):
+        for child in value:
+            found.update(_asset_ids(child))
+    return found
+
+
+def _graph_component(graph: dict[str, set[str]], start: str) -> set[str]:
+    members: set[str] = set()
+    pending = [start]
+    while pending:
+        current = pending.pop()
+        if current in members:
+            continue
+        members.add(current)
+        pending.extend(graph.get(current, set()) - members)
+    return members
 
 
 def now_ms() -> int:

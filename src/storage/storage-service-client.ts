@@ -39,6 +39,57 @@ export interface RecentCaptureItem {
   revision: number
 }
 
+export type AssetLifecycleStatus = 'active' | 'trash' | 'deleted'
+export type StorageArtifactCategory = 'generated-content' | 'external-media' | 'project-material' | 'other'
+export type StorageArtifactMediaType = 'image' | 'video' | 'audio' | 'other'
+
+export interface StorageArtifact {
+  assetId: string
+  familyAssetIds: string[]
+  category: StorageArtifactCategory
+  status: Exclude<AssetLifecycleStatus, 'deleted'>
+  title: string
+  contentType: string
+  mediaType: StorageArtifactMediaType
+  sizeBytes: number
+  createdAt: number
+  trashedAt?: number | null
+  referenceCount: number
+  previewUrl: string
+}
+
+export interface StorageUsageSummary {
+  userAssetBytes: number
+  activeBytes: number
+  trashBytes: number
+  internalDerivativeBytes: number
+  systemBytes: number
+  orphanBytes: number
+  assetSoftThresholdBytes: number
+  assetWarningLevel: 'normal' | 'warning'
+  diskTotalBytes: number
+  diskFreeBytes: number
+  diskWarningLevel: 'normal' | 'warning' | 'critical'
+  artifactCount: number
+}
+
+export interface AssetReference {
+  kind: 'project' | 'prompt'
+  id: string
+  status: 'active' | 'trash'
+  title: string
+}
+
+export interface StorageArtifactQuery {
+  category?: StorageArtifactCategory
+  status?: 'active' | 'trash'
+  mediaType?: StorageArtifactMediaType
+  query?: string
+  sort?: 'created-desc' | 'size-desc' | 'name-asc'
+  cursor?: string
+  limit?: number
+}
+
 export interface RecentCaptureRegistrationRequest {
   mode: 'separate' | 'merged'
   captures: Array<{
@@ -96,6 +147,7 @@ export interface ImageGenerationRun {
   state: ImageGenerationRunState
   requestSnapshot: ImageGenerationRunSnapshot
   outputAssetIds: string[]
+  outputAssetStates?: Record<string, AssetLifecycleStatus | 'missing'>
   createdAt: number
   startedAt?: number
   finishedAt?: number
@@ -346,6 +398,51 @@ export const storageServiceClient = {
       return request('/storage-api/recent-captures/register-to-prompt-library', {
         method: 'POST', body: JSON.stringify(payload)
       })
+    }
+  },
+  storageArtifacts: {
+    getSummary(): Promise<StorageUsageSummary> {
+      return request('/storage-api/storage/summary')
+    },
+    getPage(query: StorageArtifactQuery = {}): Promise<{ artifacts: StorageArtifact[]; nextCursor?: string | null }> {
+      const parameters = new URLSearchParams()
+      if (query.category) parameters.set('category', query.category)
+      if (query.status) parameters.set('status', query.status)
+      if (query.mediaType) parameters.set('mediaType', query.mediaType)
+      if (query.query) parameters.set('query', query.query)
+      if (query.sort) parameters.set('sort', query.sort)
+      if (query.cursor) parameters.set('cursor', query.cursor)
+      if (query.limit !== undefined) parameters.set('limit', String(query.limit))
+      const queryString = parameters.toString()
+      return request(`/storage-api/storage/artifacts${queryString ? `?${queryString}` : ''}`)
+    },
+    async getReferences(assetId: string): Promise<AssetReference[]> {
+      return (await request<{ references: AssetReference[] }>(
+        `/storage-api/storage/artifacts/${encodeURIComponent(assetId)}/references`
+      )).references
+    },
+    async trash(ids: string[]): Promise<StorageArtifact[]> {
+      return (await request<{ artifacts: StorageArtifact[] }>('/storage-api/storage/artifacts/trash', {
+        method: 'POST', body: JSON.stringify({ ids, deletedBy: 'user' })
+      })).artifacts
+    },
+    async restore(ids: string[]): Promise<StorageArtifact[]> {
+      return (await request<{ artifacts: StorageArtifact[] }>('/storage-api/storage/artifacts/restore', {
+        method: 'POST', body: JSON.stringify({ ids })
+      })).artifacts
+    },
+    async deleteForever(ids: string[]): Promise<void> {
+      await request('/storage-api/storage/artifacts/delete-forever', {
+        method: 'POST', body: JSON.stringify({ ids })
+      })
+    },
+    async reconcileOrphans(): Promise<StorageArtifact[]> {
+      return (await request<{ artifacts: StorageArtifact[] }>('/storage-api/storage/reconcile-orphans', {
+        method: 'POST'
+      })).artifacts
+    },
+    downloadUrl(assetId: string): string {
+      return `/storage-api/storage/artifacts/${encodeURIComponent(assetId)}/download`
     }
   },
   imageAssets: {
@@ -629,6 +726,13 @@ const normalizeImageGenerationRun = (candidate: unknown): ImageGenerationRun[] =
       ? candidate.outputAssetIds.filter((item): item is string => typeof item === 'string')
       : [],
     createdAt: candidate.createdAt as number
+  }
+  if (isRecord(candidate.outputAssetStates)) {
+    run.outputAssetStates = Object.fromEntries(
+      Object.entries(candidate.outputAssetStates).filter((entry): entry is [string, AssetLifecycleStatus | 'missing'] => (
+        entry[1] === 'active' || entry[1] === 'trash' || entry[1] === 'deleted' || entry[1] === 'missing'
+      ))
+    )
   }
   if (typeof candidate.nodeId === 'string' && candidate.nodeId) run.nodeId = candidate.nodeId
   if (typeof candidate.conversationId === 'string' && candidate.conversationId) run.conversationId = candidate.conversationId

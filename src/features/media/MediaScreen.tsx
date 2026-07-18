@@ -52,21 +52,21 @@ export const MediaScreen = ({
 
   const handleDeleteCapture = async (capture: RecentCaptureItemViewModel) => {
     const confirmed = window.confirm(
-      `确定从“近期捕获”移除“${capture.title}”吗？\n\n这只会移除近期捕获记录，不会删除已绑定的 Prompt、画布节点或共享素材文件。`
+      `将“${capture.title}”移入文件回收站吗？\n\n恢复文件后，它会重新回到媒体分析队列。`
     )
     if (!confirmed) return
 
     setCaptureActionError('')
     setDeletingCaptureId(capture.id)
     try {
-      await storage.recentCaptures.delete(capture.id, capture.revision)
+      await storage.storageArtifacts.trash([capture.assetId])
       if (selectedCaptureId === capture.id) setSelectedCaptureId(null)
       if (analysisCaptureId === capture.id) setAnalysisCaptureId(null)
       setSelectedCaptureIds(current => current.filter(id => id !== capture.id))
       setRegistrationCaptureIds(current => current?.filter(id => id !== capture.id) || null)
       await refreshCaptures()
     } catch (error) {
-      setCaptureActionError(error instanceof Error ? `移除近期捕获记录失败：${error.message}` : '移除近期捕获记录失败，请重试。')
+      setCaptureActionError(error instanceof Error ? `移入文件回收站失败：${error.message}` : '移入文件回收站失败，请重试。')
     } finally {
       setDeletingCaptureId(null)
     }

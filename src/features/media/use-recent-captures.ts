@@ -23,7 +23,11 @@ export const useRecentCaptures = () => {
   useEffect(() => {
     void refreshCaptures()
     window.addEventListener(RECENT_CAPTURES_CHANGED_EVENT, refreshCaptures)
-    return () => window.removeEventListener(RECENT_CAPTURES_CHANGED_EVENT, refreshCaptures)
+    window.addEventListener('promptcard:storage-artifacts-changed', refreshCaptures)
+    return () => {
+      window.removeEventListener(RECENT_CAPTURES_CHANGED_EVENT, refreshCaptures)
+      window.removeEventListener('promptcard:storage-artifacts-changed', refreshCaptures)
+    }
   }, [refreshCaptures])
 
   const selectedCapture = useMemo(

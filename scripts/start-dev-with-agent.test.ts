@@ -55,7 +55,7 @@ function isProcessRunning(pid: number) {
 function startHealthyServer() {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'application/json' })
-    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":5,"capabilities":{"assets":true,"sqlite":true}}')
+    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":6,"capabilities":{"assets":true,"sqlite":true}}')
   })
 
   return new Promise<string>((resolve) => {

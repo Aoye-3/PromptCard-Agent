@@ -11,7 +11,15 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .assets import MAX_IMAGE_IMPORT_BYTES
-from .store import AssetValidationError, DuplicateItem, MissingItem, RevisionConflict, SqliteStore
+from .store import (
+    AssetInUse,
+    AssetValidationError,
+    DeletedAsset,
+    DuplicateItem,
+    MissingItem,
+    RevisionConflict,
+    SqliteStore,
+)
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -99,8 +107,66 @@ def create_app(storage: SqliteStore) -> FastAPI:
         try:
             path, content_type = storage.get_asset(asset_id)
             return FileResponse(path, media_type=content_type)
+        except DeletedAsset as exc:
+            raise _http_error(410, "asset_deleted", "Asset was permanently deleted") from exc
         except MissingItem as exc:
             raise _http_error(404, "not_found", "Asset not found") from exc
+
+    @application.get("/api/storage/summary")
+    def get_storage_summary() -> dict[str, Any]:
+        return storage.get_storage_summary()
+
+    @application.get("/api/storage/artifacts")
+    def list_storage_artifacts(
+        category: str | None = None,
+        status: str = "active",
+        mediaType: str | None = None,
+        query: str | None = None,
+        sort: str = "created-desc",
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.list_storage_artifacts(
+            category=category,
+            status=status,
+            media_type=mediaType,
+            query=query,
+            sort=sort,
+            cursor=cursor,
+            limit=limit,
+        ))
+
+    @application.get("/api/storage/artifacts/{asset_id}/references")
+    def get_storage_artifact_references(asset_id: str) -> dict[str, Any]:
+        return _handle(lambda: {"references": storage.get_storage_artifact_references(asset_id)})
+
+    @application.get("/api/storage/artifacts/{asset_id}/download")
+    def download_storage_artifact(asset_id: str):
+        try:
+            path, content_type, filename = storage.get_asset_download(asset_id)
+            return FileResponse(path, media_type=content_type, filename=filename)
+        except DeletedAsset as exc:
+            raise _http_error(410, "asset_deleted", "Asset was permanently deleted") from exc
+        except MissingItem as exc:
+            raise _http_error(404, "not_found", "Asset not found") from exc
+
+    @application.post("/api/storage/artifacts/trash")
+    def trash_storage_artifacts(payload: TrashPayload) -> dict[str, Any]:
+        return _handle(lambda: {"artifacts": storage.trash_storage_artifacts(
+            payload.ids, payload.deletedBy, payload.deleteReason
+        )})
+
+    @application.post("/api/storage/artifacts/restore")
+    def restore_storage_artifacts(payload: IdsPayload) -> dict[str, Any]:
+        return _handle(lambda: {"artifacts": storage.restore_storage_artifacts(payload.ids)})
+
+    @application.post("/api/storage/artifacts/delete-forever")
+    def delete_storage_artifacts_forever(payload: IdsPayload) -> dict[str, Any]:
+        return _handle(lambda: _delete_storage_artifacts(storage, payload.ids))
+
+    @application.post("/api/storage/reconcile-orphans")
+    def reconcile_orphan_assets() -> dict[str, Any]:
+        return _handle(lambda: {"artifacts": storage.reconcile_orphan_assets()})
 
     @application.post("/api/image-assets/import")
     async def import_image_asset(request: Request) -> dict[str, Any]:
@@ -308,6 +374,10 @@ def _handle(callback: Callable[[], Any]) -> Any:
         raise _http_error(409, "duplicate_item", "Storage item already exists", {"id": str(exc)}) from exc
     except RevisionConflict as exc:
         raise _http_error(409, "revision_conflict", "Storage revision conflict", current=exc.current) from exc
+    except AssetInUse as exc:
+        raise _http_error(409, "asset_in_use", "Asset is still referenced", {"references": exc.references}) from exc
+    except DeletedAsset as exc:
+        raise _http_error(410, "asset_deleted", "Asset was permanently deleted") from exc
     except ValueError as exc:
         raise _http_error(400, "invalid_payload", str(exc)) from exc
 
@@ -319,6 +389,11 @@ def _http_error(status: int, code: str, message: str, detail: Any = None, curren
     if current is not None:
         payload["current"] = current
     return HTTPException(status_code=status, detail=payload)
+
+
+def _delete_storage_artifacts(storage: SqliteStore, ids: list[str]) -> dict[str, bool]:
+    storage.delete_storage_artifacts_forever(ids)
+    return {"ok": True}
 
 
 store = SqliteStore(DATA_DIR, presets_seed=load_seed_presets())

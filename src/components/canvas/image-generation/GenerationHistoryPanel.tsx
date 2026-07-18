@@ -203,7 +203,9 @@ const GenerationRunCard = ({ run, onRetry, onSetCurrentResult, onPlaceOnCanvas }
     segment.type === 'text' ? segment.text : `@${segment.label}`
   )).join('')
   const timestamp = run.finishedAt ?? run.startedAt ?? run.createdAt
-  const outputAssetId = run.outputAssetIds[0]
+  const availableOutputIds = run.outputAssetIds.filter(assetId => !['deleted', 'missing'].includes(run.outputAssetStates?.[assetId] || 'active'))
+  const hasDeletedOutput = run.outputAssetIds.some(assetId => ['deleted', 'missing'].includes(run.outputAssetStates?.[assetId] || 'active'))
+  const outputAssetId = availableOutputIds[0]
   return (
     <article className="space-y-2 rounded-[8px] border border-gray-200 p-3" data-generation-run={run.id}>
       <div className="flex items-center justify-between gap-3">
@@ -217,11 +219,12 @@ const GenerationRunCard = ({ run, onRetry, onSetCurrentResult, onPlaceOnCanvas }
           {run.requestSnapshot.inputAssets.map(input => <img key={`${input.referenceId}-${input.order}`} src={assetUrl(input.assetId)} alt={input.referenceId} className="h-12 w-12 rounded object-cover" />)}
         </div>
       )}
-      {run.outputAssetIds.length > 0 && (
+      {availableOutputIds.length > 0 && (
         <div className="flex flex-wrap gap-1.5" aria-label="生成结果">
-          {run.outputAssetIds.map(assetId => <img key={assetId} src={assetUrl(assetId)} alt="生成结果" className="h-16 w-16 rounded object-cover" />)}
+          {availableOutputIds.map(assetId => <img key={assetId} src={assetUrl(assetId)} alt="生成结果" className="h-16 w-16 rounded object-cover" />)}
         </div>
       )}
+      {hasDeletedOutput && <div className="rounded-[6px] border border-dashed border-gray-300 bg-gray-50 px-3 py-4 text-xs font-bold text-gray-500">本地文件已删除，生成参数与历史记录仍保留。</div>}
       {run.error && <div role="alert" className="text-xs font-bold text-red-700">{run.error.message} {run.error.retryable ? '（可重试）' : ''}</div>}
       {run.state === 'failed' && run.error?.retryable && onRetry && (
         <button type="button" className="rounded-[6px] border px-2 py-1 text-xs font-bold" onClick={() => onRetry(run)}>重试</button>

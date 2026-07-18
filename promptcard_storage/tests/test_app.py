@@ -143,6 +143,53 @@ class StorageAppContractTest(unittest.TestCase):
         self.assertEqual(payload["presets"][0]["meta"]["media"][0]["assetId"], asset["id"])
         self.assertEqual(payload["captures"][0]["registeredPromptId"], payload["presets"][0]["id"])
 
+    def test_storage_artifact_contract_lists_trashes_restores_and_downloads(self) -> None:
+        asset = self.client.post(
+            "/api/assets",
+            content=b"\x89PNG\r\n\x1a\nimage",
+            headers={"content-type": "image/png", "x-file-name": "reference.png"},
+        ).json()
+        self.client.post("/api/recent-captures", json={
+            "id": "capture-storage", "assetId": asset["id"], "kind": "screenshot",
+            "contentType": "image/png", "title": "Reference", "capturedAt": 123,
+        })
+
+        summary = self.client.get("/api/storage/summary")
+        listed = self.client.get("/api/storage/artifacts", params={"category": "external-media"})
+        downloaded = self.client.get(f"/api/storage/artifacts/{asset['id']}/download")
+        trashed = self.client.post("/api/storage/artifacts/trash", json={"ids": [asset["id"]]})
+
+        self.assertEqual(summary.status_code, 200)
+        self.assertGreater(summary.json()["userAssetBytes"], 0)
+        self.assertEqual(listed.json()["artifacts"][0]["assetId"], asset["id"])
+        self.assertIn("reference.png", downloaded.headers["content-disposition"])
+        self.assertEqual(trashed.status_code, 200)
+        self.assertEqual(self.client.get("/api/recent-captures").json()["captures"], [])
+
+        restored = self.client.post("/api/storage/artifacts/restore", json={"ids": [asset["id"]]})
+        self.assertEqual(restored.status_code, 200)
+        self.assertEqual(self.client.get("/api/recent-captures").json()["captures"][0]["id"], "capture-storage")
+
+    def test_storage_permanent_delete_returns_reference_details(self) -> None:
+        asset = self.client.post(
+            "/api/assets",
+            content=b"\x89PNG\r\n\x1a\nimage",
+            headers={"content-type": "image/png", "x-file-name": "project.png"},
+        ).json()
+        self.client.post("/api/projects", json={
+            "id": "project-storage", "title": "Storage Project", "type": "free-canvas",
+            "pages": [], "currentPage": 0,
+            "freeCanvas": {"nodes": [{"id": "image", "kind": "image", "assetId": asset["id"]}], "edges": []},
+            "createdAt": 1, "updatedAt": 1, "lastOpenedAt": 1, "meta": {},
+        })
+        self.client.post("/api/storage/artifacts/trash", json={"ids": [asset["id"]]})
+
+        response = self.client.post("/api/storage/artifacts/delete-forever", json={"ids": [asset["id"]]})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"]["code"], "asset_in_use")
+        self.assertEqual(response.json()["detail"]["detail"]["references"][0]["id"], "project-storage")
+
 
 if __name__ == "__main__":
     unittest.main()

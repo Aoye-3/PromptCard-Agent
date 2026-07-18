@@ -13,7 +13,7 @@ The core rule is simple: source can be updated from GitHub; user data must not b
 | User projects | User | `data/promptcard.sqlite3` | No | `projects` rows, active and Trash state, revisions, and full project JSON payloads. |
 | Prompt Library presets | User | `data/promptcard.sqlite3` | No | `presets` rows, active and Trash state, ordering, usage counts, and full preset JSON payloads. |
 | Recent Captures | User | `data/promptcard.sqlite3` | No | Capture inbox metadata with `assetId` references. |
-| User media assets | User | `data/assets/` | No | PNG, JPEG, WebP, and future MP4 bytes. Projects and presets store references only. |
+| User assets | User | `data/assets/` | No | Generated content, imported media, project material, and other user files. Projects and presets store references only. |
 | User backups | User | `backups/` | No | Migration, manual, and pre-update snapshots. |
 | Desktop logs | User/runtime | `logs/desktop-profile/logs/` | No | Runtime diagnostics for the editable desktop shell. |
 | Agent Runtime state | User/runtime | `logs/desktop-profile/agent-runtime/.promptcard-runtime/` | No | Model connection metadata; pi conversation state is process-local. |
@@ -70,12 +70,16 @@ Startup must verify that Storage Service health reports the expected repository 
 
 The local storage service owns durable project data:
 
-- SQLite database: projects, presets, Recent Captures, assets metadata, Trash state, schema migrations, and browser import markers.
-- Assets directory: uploaded media bytes addressed by generated `assetId` values.
+- SQLite database: projects, presets, Recent Captures, asset metadata and lifecycle, Trash state, schema migrations, and browser import markers.
+- Assets directory: user file bytes addressed by generated `assetId` values. Schema v6 tracks `active -> trash -> deleted`; permanent deletion leaves a lightweight tombstone.
 - Backup/restore: SQLite-consistent backups that include both database and asset files.
 - Migration: read-only import from legacy JSON and browser cache.
 
 Frontend code must use `src/utils/storage.ts` and `/storage-api/*`. It must not write project, preset, Recent Capture, or asset data directly to files.
+
+The Files page is the management surface for user assets. It classifies root asset families as generated content, external media, project material, or other files. Preview/provider derivatives are folded into the root family and contribute to its size. Internal derivatives, SQLite/WAL data, caches, and discoverable logs contribute to capacity reporting but are not independently actionable file items. The Media page remains an ingestion, analysis, annotation, and Prompt Library registration workflow for external media.
+
+Moving a file to Trash changes lifecycle state without removing bytes, so existing project references continue to resolve and restoration is lossless. Permanent deletion is only allowed from file Trash and is blocked while an active or recoverable project, canvas, Prompt, or preset references the family. Generation history is retained as a soft reference and displays a deleted-file tombstone after bytes are removed. Storage warnings are advisory: the default user-asset threshold is 10 GiB (`PROMPTCARD_STORAGE_WARNING_BYTES`), while disk warnings are based on remaining bytes and percentage; neither warning automatically deletes files or rejects writes.
 
 Browser storage remains user-owned but separate from the filesystem profile. It is not currently migrated into SQLite unless a feature-specific migration explicitly says so.
 

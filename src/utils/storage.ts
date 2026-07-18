@@ -79,6 +79,8 @@ export const storage = {
     }
   },
 
+  storageArtifacts: storageServiceClient.storageArtifacts,
+
   recentCaptures: {
     getAll(): Promise<RecentCaptureItem[]> {
       return storageServiceClient.recentCaptures.getAll()

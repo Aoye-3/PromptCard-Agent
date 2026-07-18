@@ -44,6 +44,10 @@ class AssetValidationError(Exception):
     pass
 
 
+class DeletedAssetLookup(LookupError):
+    pass
+
+
 def prepare_provider_image(content_type: str, content: bytes) -> dict[str, Any]:
     normalized_content_type = content_type.lower()
     if normalized_content_type not in IMAGE_CONTENT_TYPES:
@@ -162,9 +166,14 @@ class AssetStore:
         if candidate.name != asset_id:
             raise LookupError(asset_id)
         with self._connect() as connection:
-            row = connection.execute("SELECT relative_path, content_type FROM assets WHERE asset_id=?", (asset_id,)).fetchone()
+            row = connection.execute(
+                "SELECT relative_path, content_type, lifecycle_status FROM assets WHERE asset_id=?",
+                (asset_id,),
+            ).fetchone()
         if not row:
             raise LookupError(asset_id)
+        if row[2] == "deleted":
+            raise DeletedAssetLookup(asset_id)
         path = self.data_dir / row[0]
         if not path.is_file():
             raise LookupError(asset_id)
@@ -172,14 +181,20 @@ class AssetStore:
 
     def diagnose(self) -> dict[str, list[str]]:
         with self._connect() as connection:
-            registered = {row[0] for row in connection.execute("SELECT asset_id FROM assets")}
+            all_registered = {row[0] for row in connection.execute("SELECT asset_id FROM assets")}
+            registered = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT asset_id FROM assets WHERE lifecycle_status IN ('active','trash')"
+                )
+            }
         on_disk = {path.name for path in self.assets_dir.iterdir() if path.is_file() and not path.name.startswith(".")} if self.assets_dir.exists() else set()
         referenced = _collect_asset_ids(self._referenced_payloads())
         return {
             "unregisteredFiles": sorted(on_disk - registered),
             "missingFiles": sorted(registered - on_disk),
             "unreferencedAssets": sorted(registered - referenced),
-            "missingReferences": sorted(referenced - registered),
+            "missingReferences": sorted(referenced - all_registered),
         }
 
 

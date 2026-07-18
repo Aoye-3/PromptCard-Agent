@@ -43,7 +43,8 @@ describe('MediaScreen', () => {
     expect(markup).toContain('data-app-side-nav')
     expect(markup).toContain('data-project-search-input')
     expect(markup).toContain('data-app-project-utilities')
-    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(8)
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(9)
+    expect(markup).toContain('data-app-nav-tab="files"')
     expect(markup).toContain('data-active="true"')
     expect(markup).not.toContain('grid-cols-5')
   })
@@ -70,7 +71,7 @@ describe('MediaScreen', () => {
 
     expect(markup).toContain('data-side-nav-item="捕获栏"')
     expect(markup).toContain('data-active="true"')
-    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(8)
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(9)
   })
 
   it('hides the primary navigation in project builder mode', () => {
@@ -125,7 +126,7 @@ describe('MediaScreen', () => {
     expect(markup).toContain('data-app-project-utilities')
     expect(markup).toContain('data-side-nav-item="回收站"')
     expect(markup).not.toContain('data-side-nav-item="模板库"')
-    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(8)
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(9)
   })
 
   it('renders Update as a top-level side navigation item', () => {
@@ -150,7 +151,7 @@ describe('MediaScreen', () => {
 
     expect(markup).toContain('data-side-nav-item="更新"')
     expect(markup).toContain('data-active="true"')
-    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(8)
+    expect(markup.match(/data-side-nav-item=/g)?.length).toBe(9)
   })
 
   it('renders the media analysis dialog shell for a selected capture', () => {

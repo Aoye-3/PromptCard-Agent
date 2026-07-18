@@ -120,6 +120,20 @@ describe('GenerationHistoryPanelView', () => {
     expect(onSetCurrentResult).toHaveBeenCalledWith(succeeded, 'asset-output.png')
     expect(onPlaceOnCanvas).toHaveBeenCalledWith(succeeded, 'asset-output.png')
   })
+
+  it('renders a stable tombstone instead of requesting permanently deleted output files', () => {
+    const deletedRun: ImageGenerationRun = {
+      ...succeeded,
+      outputAssetStates: { 'asset-output.png': 'deleted' }
+    }
+    const markup = renderToStaticMarkup(
+      <GenerationHistoryPanelView runs={[deletedRun]} nextCursor={null} loading={false} onLoadMore={() => undefined} onSetCurrentResult={() => undefined} />
+    )
+
+    expect(markup).toContain('本地文件已删除')
+    expect(markup).not.toContain('/storage-api/assets/asset-output.png')
+    expect(markup).not.toContain('设置为当前结果')
+  })
 })
 
 describe('GenerationHistoryPanel async isolation', () => {

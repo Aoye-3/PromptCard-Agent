@@ -56,6 +56,18 @@ Normalization behavior:
 - Form numbering is monotonic per form type and is not compacted after deletion.
 - `selectedPairId` is retained only for input compatibility and is synchronized to `null`.
 
+## Asset Lifecycle And Classification
+
+PromptCard Storage schema v6 adds lifecycle metadata to each asset:
+
+- `lifecycle_status: "active" | "trash" | "deleted"`
+- `trashed_at?`, `trashed_by?`, and `trash_reason?`
+- `deleted_at?`
+
+Existing assets migrate to `active` without changing their files. Image derivation relationships form an asset family: source, preview, provider-input, and annotation-flattened files are counted and lifecycle-managed together, while the Files page lists only the user root asset.
+
+Source classification is derived from current references in priority order: successful generation output, Recent Capture/external media, project/Prompt/preset material, then other or orphaned files. An asset in Trash is hidden from active Files and Media lists but remains readable for existing references. Permanent deletion requires Trash state, refuses strong project/Prompt/preset dependencies, removes family bytes, and retains metadata as a tombstone. Generation runs remain immutable; their `outputAssetStates` projection marks deleted or missing local outputs without removing run parameters.
+
 ## Recent Capture Shape
 
 `RecentCaptureItem` is durable metadata stored by the local storage service. It references the physical asset file by `assetId`; it does not duplicate image bytes inside project JSON or capture JSON.
@@ -109,7 +121,7 @@ New generation work is owned by the project-level Image Generation conversation 
 
 Legacy Free Canvas edges persist `targetHandle`, input order, and stable `referenceId`. Those fields remain part of project normalization so old projects load without loss. The node is now read-only: no Inspector, node mutation, edge change, reload, or selection event may invoke image generation. Its only creation action is an explicit user command that opens the project Image Generation tab and pre-fills a new draft.
 
-`ImageGenerationRun` is not embedded in the project. PromptCard Storage schema v5 persists it independently with:
+`ImageGenerationRun` is not embedded in the project. PromptCard Storage persists it independently with:
 
 - project plus conversation or legacy node identity, connection/provider/model identity;
 - immutable `requestSnapshot` containing structured prompt, ordered input assets, regions, and settings;

@@ -70,12 +70,14 @@ Startup must verify that Storage Service health reports the expected repository 
 
 The local storage service owns durable project data:
 
-- SQLite database: projects, presets, Recent Captures, asset metadata and lifecycle, Trash state, schema migrations, and browser import markers.
+- SQLite database: projects, project-scoped resource folders/resources, presets, Recent Captures, asset metadata and lifecycle, Trash state, schema migrations, and browser import markers.
 - Assets directory: user file bytes addressed by generated `assetId` values. Schema v6 tracks `active -> trash -> deleted`; permanent deletion leaves a lightweight tombstone.
 - Backup/restore: SQLite-consistent backups that include both database and asset files.
 - Migration: read-only import from legacy JSON and browser cache.
 
-Frontend code must use `src/utils/storage.ts` and `/storage-api/*`. It must not write project, preset, Recent Capture, or asset data directly to files.
+Schema v7 stores project resource metadata independently from project JSON. Every resource query is scoped by an active `project_id`; project Trash preserves rows read-only, permanent project deletion cascades metadata, and source/preview/provider asset IDs remain strong references.
+
+Frontend code must use `src/utils/storage.ts`, `storageServiceClient.projectResources`, and `/storage-api/*`. It must not write project, resource, preset, Recent Capture, or asset data directly to files.
 
 The Files page is the management surface for user assets. It classifies root asset families as generated content, external media, project material, or other files. Preview/provider derivatives are folded into the root family and contribute to its size. Internal derivatives, SQLite/WAL data, caches, and discoverable logs contribute to capacity reporting but are not independently actionable file items. The Media page remains an ingestion, analysis, annotation, and Prompt Library registration workflow for external media.
 

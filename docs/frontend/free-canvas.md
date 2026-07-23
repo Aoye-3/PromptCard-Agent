@@ -63,6 +63,16 @@ dialog show and edit only the name and template body; they do not display or wri
 - Removing any node removes connected Free Canvas edges.
 - Deleting the final node is valid and leaves an empty canvas.
 
+## Project Subject And Material Library
+
+Free Canvas has a project-scoped resource rail below the project title. It enters each project collapsed at 44 px. The expanded panel is 280 px; at 1440 px and wider it reserves canvas width, while narrower windows use an overlay that closes on canvas click or Escape. Switching projects clears the old snapshot before loading and resets the panel to the Subject tab.
+
+Subjects use a dense three-column grid. Hover or keyboard focus waits 250 ms before showing a large preview and closes 150 ms after leaving. `加入本轮` appends the provider-ready asset to the current image Composer as a stable `reference-image`, preserves the original source asset identity, enforces duplicate/model limits, opens the right image-generation tab, and never sends a request.
+
+Materials may be uploaded into arbitrary-depth folders. Folder expansion, inline renaming, moving, and ordering use native HTML drag and drop. Indentation grows by 12 px per level and is visually capped at 48 px; the full path remains available as a tooltip. These operations update metadata only. `置入画布` creates a normal image node from the preview asset and saved dimensions near the visible canvas center.
+
+Resource state is optimistic. Failed writes restore the previous snapshot; a revision conflict reloads the entire active-project snapshot. The global MiniMap lives at the canvas lower right, immediately left of the zoom controls.
+
 ## Project Image Generation Agent And Legacy Nodes
 
 The right rail has three peer tabs: `Agent | 图片生成 | Prompt库`. `图片生成` is a project-level task Agent UI backed directly by the image Runtime; it does not call the text LLM. Every send is one independent image request. Previous turns are displayed from immutable run snapshots and are never appended to the next provider request.

@@ -68,6 +68,14 @@ Existing assets migrate to `active` without changing their files. Image derivati
 
 Source classification is derived from current references in priority order: successful generation output, Recent Capture/external media, project/Prompt/preset material, then other or orphaned files. An asset in Trash is hidden from active Files and Media lists but remains readable for existing references. Permanent deletion requires Trash state, refuses strong project/Prompt/preset dependencies, removes family bytes, and retains metadata as a tombstone. Generation runs remain immutable; their `outputAssetStates` projection marks deleted or missing local outputs without removing run parameters.
 
+## Project Resource Tables
+
+PromptCard Storage schema v7 adds `project_resource_folders` and `project_resources`. Both rows carry `project_id`; project permanent deletion cascades their metadata, while project Trash retains it unchanged.
+
+Folders use nullable `parent_id`, integer `sort_order`, and optimistic `revision`. The application rejects cycles and non-empty deletion. Resources use `kind: "subject" | "material"`, name, source/preview/provider asset IDs, decoded dimensions, MIME type, nullable folder, order, and revision. Subject folders are prohibited by a database check, and `(project_id, kind, source_asset_id)` is unique.
+
+All three asset IDs are foreign-key and diagnostics references. Removing a resource never deletes those assets. Layout changes validate every supplied revision and commit parent/folder/order changes in one transaction.
+
 ## Recent Capture Shape
 
 `RecentCaptureItem` is durable metadata stored by the local storage service. It references the physical asset file by `assetId`; it does not duplicate image bytes inside project JSON or capture JSON.

@@ -4,7 +4,7 @@ The local storage service is the durable source of truth for projects, Prompt Li
 
 ## Health
 
-`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, and `recentCaptures`. Full image input/derivation support requires schema version `5`.
+`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, `recentCaptures`, and `projectResources`. Project resource support requires schema version `7`.
 
 - `GET /health`
 
@@ -186,6 +186,23 @@ Project writes require a `revision` in the request body:
 If the revision is stale, the service returns `409` with the current item in the response detail. The frontend project save coordinator adopts the returned revision and retries the newest complete local project snapshot, serially, up to three attempts. Local editable content is authoritative during this retry and is never replaced by the conflict payload.
 
 Network failures and exhausted retries leave the newest local snapshot pending. A later automatic or manual save retries it; the UI reports failure without rolling back local edits.
+
+### Project resources
+
+- `GET /api/projects/{projectId}/resources`
+- `POST /api/projects/{projectId}/resource-folders`
+- `PUT|DELETE /api/projects/{projectId}/resource-folders/{folderId}`
+- `POST /api/projects/{projectId}/resources`
+- `PUT|DELETE /api/projects/{projectId}/resources/{resourceId}`
+- `PUT /api/projects/{projectId}/resource-layout`
+
+The snapshot response is `{ "folders": [], "resources": [] }`. Folders carry `parentId`, `sortOrder`, and `revision`. Resources are `subject` or `material` and retain `sourceAssetId`, `previewAssetId`, `providerAssetId`, decoded dimensions, MIME type, folder/order, and revision. Subject `folderId` is always null.
+
+Names are trimmed and must contain 1-80 characters. A folder cannot become its own descendant (`409 folder_cycle`) and cannot be deleted while it contains folders or resources (`409 folder_not_empty`). Deleting a resource removes only its metadata row.
+
+`resource-layout` receives folder/resource identities, destinations, orders, and current revisions. The service validates the complete proposal before writing it. One stale record returns `409 revision_conflict` and leaves every row unchanged.
+
+Every endpoint verifies that the path project is active and owns the requested IDs. Missing, cross-project, and Trash-project requests all return `404`. Moving a project to Trash preserves its resources but makes them unavailable for editing; restore reveals them unchanged. Permanent project deletion cascades resource metadata without deleting shared image files.
 
 ## Prompt Library
 

@@ -16,6 +16,8 @@ from .store import (
     AssetValidationError,
     DeletedAsset,
     DuplicateItem,
+    FolderCycle,
+    FolderNotEmpty,
     MissingItem,
     RevisionConflict,
     SqliteStore,
@@ -288,6 +290,70 @@ def create_app(storage: SqliteStore) -> FastAPI:
     def list_project_trash() -> dict[str, Any]:
         return {"items": storage.list_project_trash()}
 
+    @application.get("/api/projects/{project_id}/resources")
+    def list_project_resources(project_id: str) -> dict[str, Any]:
+        return _handle(lambda: storage.list_project_resources(project_id))
+
+    @application.post("/api/projects/{project_id}/resource-folders")
+    def create_project_resource_folder(project_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.create_project_resource_folder(project_id, item))
+
+    @application.put("/api/projects/{project_id}/resource-folders/{folder_id}")
+    def update_project_resource_folder(
+        project_id: str,
+        folder_id: str,
+        payload: UpdatePayload,
+    ) -> dict[str, Any]:
+        return _handle(
+            lambda: storage.update_project_resource_folder(
+                project_id, folder_id, payload.updates, payload.revision
+            )
+        )
+
+    @application.delete("/api/projects/{project_id}/resource-folders/{folder_id}")
+    def delete_project_resource_folder(
+        project_id: str,
+        folder_id: str,
+        payload: RevisionPayload,
+    ) -> dict[str, Any]:
+        def delete() -> dict[str, bool]:
+            storage.delete_project_resource_folder(project_id, folder_id, payload.revision)
+            return {"ok": True}
+
+        return _handle(delete)
+
+    @application.post("/api/projects/{project_id}/resources")
+    def create_project_resource(project_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.create_project_resource(project_id, item))
+
+    @application.put("/api/projects/{project_id}/resources/{resource_id}")
+    def update_project_resource(
+        project_id: str,
+        resource_id: str,
+        payload: UpdatePayload,
+    ) -> dict[str, Any]:
+        return _handle(
+            lambda: storage.update_project_resource(
+                project_id, resource_id, payload.updates, payload.revision
+            )
+        )
+
+    @application.delete("/api/projects/{project_id}/resources/{resource_id}")
+    def delete_project_resource(
+        project_id: str,
+        resource_id: str,
+        payload: RevisionPayload,
+    ) -> dict[str, Any]:
+        def delete() -> dict[str, bool]:
+            storage.delete_project_resource(project_id, resource_id, payload.revision)
+            return {"ok": True}
+
+        return _handle(delete)
+
+    @application.put("/api/projects/{project_id}/resource-layout")
+    def update_project_resource_layout(project_id: str, layout: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.update_project_resource_layout(project_id, layout))
+
     @application.get("/api/projects/{item_id}")
     def get_project(item_id: str) -> dict[str, Any]:
         return _handle(lambda: storage.get_project(item_id))
@@ -374,6 +440,10 @@ def _handle(callback: Callable[[], Any]) -> Any:
         raise _http_error(409, "duplicate_item", "Storage item already exists", {"id": str(exc)}) from exc
     except RevisionConflict as exc:
         raise _http_error(409, "revision_conflict", "Storage revision conflict", current=exc.current) from exc
+    except FolderCycle as exc:
+        raise _http_error(409, "folder_cycle", "A folder cannot be moved inside itself") from exc
+    except FolderNotEmpty as exc:
+        raise _http_error(409, "folder_not_empty", "The folder must be empty before deletion") from exc
     except AssetInUse as exc:
         raise _http_error(409, "asset_in_use", "Asset is still referenced", {"references": exc.references}) from exc
     except DeletedAsset as exc:

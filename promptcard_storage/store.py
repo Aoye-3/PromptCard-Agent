@@ -33,7 +33,7 @@ from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 DATABASE_NAME = "promptcard.sqlite3"
 JSON_SOURCES = (
     "projects.json",
@@ -67,6 +67,14 @@ class DuplicateItem(Exception):
     pass
 
 
+class FolderCycle(Exception):
+    pass
+
+
+class FolderNotEmpty(Exception):
+    pass
+
+
 class SqliteStore:
     def __init__(
         self,
@@ -95,7 +103,8 @@ class SqliteStore:
             + self.list_presets()
             + [entry["payload"] for entry in self.list_preset_trash()]
             + self._successful_image_run_payloads()
-            + self._image_asset_derivation_payloads(),
+            + self._image_asset_derivation_payloads()
+            + self._project_resource_asset_payloads(),
             now_ms,
         )
         self._backups = BackupManager(
@@ -127,6 +136,7 @@ class SqliteStore:
                 "imageGenerationConversations": True,
                 "imageGenerationPlacements": True,
                 "imageAssetDerivations": True,
+                "projectResources": True,
             },
         }
 
@@ -187,6 +197,303 @@ class SqliteStore:
 
     def delete_project_trash(self, ids: list[str]) -> None:
         self._delete_trash("projects", ids)
+
+    def list_project_resources(self, project_id: str) -> dict[str, list[dict[str, Any]]]:
+        with self._connect() as connection:
+            self._require_active_project(connection, project_id)
+            folders = [
+                self._project_resource_folder(row)
+                for row in connection.execute(
+                    """SELECT id, project_id, parent_id, name, sort_order, revision, created_at, updated_at
+                       FROM project_resource_folders
+                       WHERE project_id=?
+                       ORDER BY sort_order, created_at, id""",
+                    (project_id,),
+                )
+            ]
+            resources = [
+                self._project_resource(row)
+                for row in connection.execute(
+                    """SELECT id, project_id, kind, name, source_asset_id, preview_asset_id,
+                              provider_asset_id, width, height, content_type, folder_id,
+                              sort_order, revision, created_at, updated_at
+                       FROM project_resources
+                       WHERE project_id=?
+                       ORDER BY kind, sort_order, created_at, id""",
+                    (project_id,),
+                )
+            ]
+        return {"folders": folders, "resources": resources}
+
+    def create_project_resource_folder(self, project_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        name = self._project_resource_name(item.get("name"))
+        item_id = str(item.get("id") or uuid.uuid4())
+        parent_id = item.get("parentId")
+        timestamp = now_ms()
+        with self._transaction() as connection:
+            self._require_active_project(connection, project_id)
+            if parent_id is not None:
+                self._require_project_folder(connection, project_id, str(parent_id))
+            sort_order = item.get("sortOrder")
+            if not isinstance(sort_order, int):
+                sort_order = connection.execute(
+                    "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM project_resource_folders WHERE project_id=? AND parent_id IS ?",
+                    (project_id, parent_id),
+                ).fetchone()[0]
+            try:
+                connection.execute(
+                    """INSERT INTO project_resource_folders(
+                           id, project_id, parent_id, name, sort_order, revision, created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)""",
+                    (item_id, project_id, parent_id, name, sort_order, timestamp, timestamp),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateItem(item_id) from exc
+            row = connection.execute(
+                """SELECT id, project_id, parent_id, name, sort_order, revision, created_at, updated_at
+                   FROM project_resource_folders WHERE id=?""",
+                (item_id,),
+            ).fetchone()
+        return self._project_resource_folder(row)
+
+    def update_project_resource_folder(
+        self,
+        project_id: str,
+        folder_id: str,
+        updates: dict[str, Any],
+        revision: int,
+    ) -> dict[str, Any]:
+        with self._transaction() as connection:
+            self._require_active_project(connection, project_id)
+            current = self._require_project_folder(connection, project_id, folder_id)
+            if current["revision"] != revision:
+                raise RevisionConflict(current)
+            parent_id = updates.get("parentId", current["parentId"])
+            if parent_id is not None:
+                self._require_project_folder(connection, project_id, str(parent_id))
+                self._ensure_folder_parent_is_acyclic(connection, project_id, folder_id, str(parent_id))
+            name = self._project_resource_name(updates["name"]) if "name" in updates else current["name"]
+            sort_order = updates.get("sortOrder", current["sortOrder"])
+            if not isinstance(sort_order, int):
+                raise ValueError("sortOrder must be an integer")
+            timestamp = now_ms()
+            connection.execute(
+                """UPDATE project_resource_folders
+                   SET parent_id=?, name=?, sort_order=?, revision=revision+1, updated_at=?
+                   WHERE id=? AND project_id=?""",
+                (parent_id, name, sort_order, timestamp, folder_id, project_id),
+            )
+            row = connection.execute(
+                """SELECT id, project_id, parent_id, name, sort_order, revision, created_at, updated_at
+                   FROM project_resource_folders WHERE id=?""",
+                (folder_id,),
+            ).fetchone()
+        return self._project_resource_folder(row)
+
+    def delete_project_resource_folder(self, project_id: str, folder_id: str, revision: int) -> None:
+        with self._transaction() as connection:
+            self._require_active_project(connection, project_id)
+            current = self._require_project_folder(connection, project_id, folder_id)
+            if current["revision"] != revision:
+                raise RevisionConflict(current)
+            child_count = connection.execute(
+                """SELECT
+                     (SELECT COUNT(*) FROM project_resource_folders WHERE project_id=? AND parent_id=?) +
+                     (SELECT COUNT(*) FROM project_resources WHERE project_id=? AND folder_id=?)""",
+                (project_id, folder_id, project_id, folder_id),
+            ).fetchone()[0]
+            if child_count:
+                raise FolderNotEmpty()
+            connection.execute(
+                "DELETE FROM project_resource_folders WHERE id=? AND project_id=?",
+                (folder_id, project_id),
+            )
+
+    def create_project_resource(self, project_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        kind = item.get("kind")
+        if kind not in {"subject", "material"}:
+            raise ValueError("kind must be subject or material")
+        name = self._project_resource_name(item.get("name"))
+        item_id = str(item.get("id") or uuid.uuid4())
+        folder_id = None if kind == "subject" else item.get("folderId")
+        timestamp = now_ms()
+        asset_ids = (
+            item.get("sourceAssetId"),
+            item.get("previewAssetId"),
+            item.get("providerAssetId"),
+        )
+        if not all(isinstance(asset_id, str) and asset_id for asset_id in asset_ids):
+            raise ValueError("sourceAssetId, previewAssetId and providerAssetId are required")
+        width = item.get("width")
+        height = item.get("height")
+        if not isinstance(width, int) or width <= 0 or not isinstance(height, int) or height <= 0:
+            raise ValueError("width and height must be positive integers")
+        content_type = item.get("contentType")
+        if not isinstance(content_type, str) or not content_type:
+            raise ValueError("contentType is required")
+        with self._transaction() as connection:
+            self._require_active_project(connection, project_id)
+            if folder_id is not None:
+                self._require_project_folder(connection, project_id, str(folder_id))
+            sort_order = item.get("sortOrder")
+            if not isinstance(sort_order, int):
+                sort_order = connection.execute(
+                    """SELECT COALESCE(MAX(sort_order), -1) + 1 FROM project_resources
+                       WHERE project_id=? AND kind=? AND folder_id IS ?""",
+                    (project_id, kind, folder_id),
+                ).fetchone()[0]
+            try:
+                connection.execute(
+                    """INSERT INTO project_resources(
+                           id, project_id, kind, name, source_asset_id, preview_asset_id,
+                           provider_asset_id, width, height, content_type, folder_id,
+                           sort_order, revision, created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                    (
+                        item_id, project_id, kind, name, *asset_ids, width, height,
+                        content_type, folder_id, sort_order, timestamp, timestamp,
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateItem(item_id) from exc
+            row = connection.execute(
+                """SELECT id, project_id, kind, name, source_asset_id, preview_asset_id,
+                          provider_asset_id, width, height, content_type, folder_id,
+                          sort_order, revision, created_at, updated_at
+                   FROM project_resources WHERE id=?""",
+                (item_id,),
+            ).fetchone()
+        return self._project_resource(row)
+
+    def update_project_resource(
+        self,
+        project_id: str,
+        resource_id: str,
+        updates: dict[str, Any],
+        revision: int,
+    ) -> dict[str, Any]:
+        with self._transaction() as connection:
+            self._require_active_project(connection, project_id)
+            current = self._require_project_resource(connection, project_id, resource_id)
+            if current["revision"] != revision:
+                raise RevisionConflict(current)
+            folder_id = updates.get("folderId", current["folderId"])
+            if current["kind"] == "subject":
+                folder_id = None
+            elif folder_id is not None:
+                self._require_project_folder(connection, project_id, str(folder_id))
+            name = self._project_resource_name(updates["name"]) if "name" in updates else current["name"]
+            sort_order = updates.get("sortOrder", current["sortOrder"])
+            if not isinstance(sort_order, int):
+                raise ValueError("sortOrder must be an integer")
+            timestamp = now_ms()
+            connection.execute(
+                """UPDATE project_resources
+                   SET name=?, folder_id=?, sort_order=?, revision=revision+1, updated_at=?
+                   WHERE id=? AND project_id=?""",
+                (name, folder_id, sort_order, timestamp, resource_id, project_id),
+            )
+            row = connection.execute(
+                """SELECT id, project_id, kind, name, source_asset_id, preview_asset_id,
+                          provider_asset_id, width, height, content_type, folder_id,
+                          sort_order, revision, created_at, updated_at
+                   FROM project_resources WHERE id=?""",
+                (resource_id,),
+            ).fetchone()
+        return self._project_resource(row)
+
+    def delete_project_resource(self, project_id: str, resource_id: str, revision: int) -> None:
+        with self._transaction() as connection:
+            self._require_active_project(connection, project_id)
+            current = self._require_project_resource(connection, project_id, resource_id)
+            if current["revision"] != revision:
+                raise RevisionConflict(current)
+            connection.execute(
+                "DELETE FROM project_resources WHERE id=? AND project_id=?",
+                (resource_id, project_id),
+            )
+
+    def update_project_resource_layout(
+        self,
+        project_id: str,
+        layout: dict[str, Any],
+    ) -> dict[str, list[dict[str, Any]]]:
+        folders = layout.get("folders", [])
+        resources = layout.get("resources", [])
+        if not isinstance(folders, list) or not isinstance(resources, list):
+            raise ValueError("folders and resources must be arrays")
+        with self._transaction() as connection:
+            self._require_active_project(connection, project_id)
+            current_folders = {
+                folder["id"]: folder
+                for folder in (
+                    self._project_resource_folder(row)
+                    for row in connection.execute(
+                        """SELECT id, project_id, parent_id, name, sort_order, revision, created_at, updated_at
+                           FROM project_resource_folders WHERE project_id=?""",
+                        (project_id,),
+                    )
+                )
+            }
+            current_resources = {
+                resource["id"]: resource
+                for resource in (
+                    self._project_resource(row)
+                    for row in connection.execute(
+                        """SELECT id, project_id, kind, name, source_asset_id, preview_asset_id,
+                                  provider_asset_id, width, height, content_type, folder_id,
+                                  sort_order, revision, created_at, updated_at
+                           FROM project_resources WHERE project_id=?""",
+                        (project_id,),
+                    )
+                )
+            }
+            proposed_parents = {item["id"]: item.get("parentId") for item in folders}
+            for item in folders:
+                current = current_folders.get(item.get("id"))
+                if current is None:
+                    raise MissingItem()
+                if current["revision"] != item.get("revision"):
+                    raise RevisionConflict(current)
+                parent_id = item.get("parentId")
+                if parent_id is not None and parent_id not in current_folders:
+                    raise MissingItem()
+                self._ensure_proposed_folder_parent_is_acyclic(
+                    item["id"], parent_id, proposed_parents, current_folders
+                )
+                if not isinstance(item.get("sortOrder"), int):
+                    raise ValueError("sortOrder must be an integer")
+            for item in resources:
+                current = current_resources.get(item.get("id"))
+                if current is None:
+                    raise MissingItem()
+                if current["revision"] != item.get("revision"):
+                    raise RevisionConflict(current)
+                folder_id = None if current["kind"] == "subject" else item.get("folderId")
+                if folder_id is not None and folder_id not in current_folders:
+                    raise MissingItem()
+                if not isinstance(item.get("sortOrder"), int):
+                    raise ValueError("sortOrder must be an integer")
+            timestamp = now_ms()
+            for item in folders:
+                connection.execute(
+                    """UPDATE project_resource_folders
+                       SET parent_id=?, sort_order=?, revision=revision+1, updated_at=?
+                       WHERE id=? AND project_id=?""",
+                    (item.get("parentId"), item["sortOrder"], timestamp, item["id"], project_id),
+                )
+            for item in resources:
+                current = current_resources[item["id"]]
+                connection.execute(
+                    """UPDATE project_resources
+                       SET folder_id=?, sort_order=?, revision=revision+1, updated_at=?
+                       WHERE id=? AND project_id=?""",
+                    (
+                        None if current["kind"] == "subject" else item.get("folderId"),
+                        item["sortOrder"], timestamp, item["id"], project_id,
+                    ),
+                )
+        return self.list_project_resources(project_id)
 
     def list_recent_captures(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -1292,6 +1599,10 @@ class SqliteStore:
             referenced_project_ids = set()
             for _status, payload in [*project_rows, *preset_rows]:
                 referenced_project_ids.update(_asset_ids(json.loads(payload)))
+            for resource_assets in connection.execute(
+                "SELECT source_asset_id, preview_asset_id, provider_asset_id FROM project_resources"
+            ):
+                referenced_project_ids.update(asset_id for asset_id in resource_assets if asset_id)
 
             graph: dict[str, set[str]] = {asset_id: set() for asset_id in assets}
             derived_ids: set[str] = set()
@@ -1380,6 +1691,19 @@ class SqliteStore:
                 references.append({
                     "kind": "prompt", "id": item_id, "status": status,
                     "title": payload.get("label") or item_id,
+                })
+        for row in connection.execute(
+            """SELECT resources.id, projects.status, resources.name,
+                      resources.source_asset_id, resources.preview_asset_id, resources.provider_asset_id
+               FROM project_resources AS resources
+               JOIN projects ON projects.id=resources.project_id"""
+        ):
+            if member_set & {row[3], row[4], row[5]}:
+                references.append({
+                    "kind": "project-resource",
+                    "id": row[0],
+                    "status": row[1],
+                    "title": row[2],
                 })
         return references
 
@@ -1529,6 +1853,19 @@ class SqliteStore:
                 except Exception:
                     connection.rollback()
                     raise
+            if current_version == 6:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._create_project_resources_v7_schema(connection)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                        (7, "add-project-resources", now_ms()),
+                    )
+                    connection.commit()
+                    current_version = 7
+                except Exception:
+                    connection.rollback()
+                    raise
             if current_version != SCHEMA_VERSION:
                 raise MigrationError(f"Unsupported SQLite schema version: {current_version}")
 
@@ -1562,6 +1899,7 @@ class SqliteStore:
         self._create_recent_captures_schema(connection)
         self._create_image_generation_v4_schema(connection)
         self._create_image_asset_derivations_v5_schema(connection)
+        self._create_project_resources_v7_schema(connection)
 
     def _migrate_asset_lifecycle_v6(self, connection: sqlite3.Connection) -> None:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(assets)")}
@@ -1578,6 +1916,43 @@ class SqliteStore:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS assets_lifecycle_order ON assets(lifecycle_status, created_at DESC, asset_id DESC)"
         )
+
+    def _create_project_resources_v7_schema(self, connection: sqlite3.Connection) -> None:
+        connection.executescript("""
+            CREATE TABLE IF NOT EXISTS project_resource_folders(
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                parent_id TEXT REFERENCES project_resource_folders(id) ON DELETE RESTRICT,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS project_resource_folders_project_order
+                ON project_resource_folders(project_id, parent_id, sort_order, created_at, id);
+            CREATE TABLE IF NOT EXISTS project_resources(
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL CHECK(kind IN ('subject','material')),
+                name TEXT NOT NULL,
+                source_asset_id TEXT NOT NULL REFERENCES assets(asset_id) ON DELETE RESTRICT,
+                preview_asset_id TEXT NOT NULL REFERENCES assets(asset_id) ON DELETE RESTRICT,
+                provider_asset_id TEXT NOT NULL REFERENCES assets(asset_id) ON DELETE RESTRICT,
+                width INTEGER NOT NULL CHECK(width > 0),
+                height INTEGER NOT NULL CHECK(height > 0),
+                content_type TEXT NOT NULL,
+                folder_id TEXT REFERENCES project_resource_folders(id) ON DELETE RESTRICT,
+                sort_order INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                CHECK(kind != 'subject' OR folder_id IS NULL),
+                UNIQUE(project_id, kind, source_asset_id)
+            );
+            CREATE INDEX IF NOT EXISTS project_resources_project_order
+                ON project_resources(project_id, kind, folder_id, sort_order, created_at, id);
+        """)
 
     def _insert_project(self, connection: sqlite3.Connection, item: dict[str, Any], status: str, trash: dict[str, Any] | None = None) -> None:
         connection.execute(
@@ -1825,6 +2200,135 @@ class SqliteStore:
         with self._transaction() as connection:
             placeholders = ",".join("?" for _ in ids)
             connection.execute(f"DELETE FROM {table} WHERE status='trash' AND id IN ({placeholders})", tuple(ids))
+
+    def _require_active_project(self, connection: sqlite3.Connection, project_id: str) -> None:
+        row = connection.execute(
+            "SELECT 1 FROM projects WHERE id=? AND status='active'",
+            (project_id,),
+        ).fetchone()
+        if not row:
+            raise MissingItem()
+
+    def _require_project_folder(
+        self,
+        connection: sqlite3.Connection,
+        project_id: str,
+        folder_id: str,
+    ) -> dict[str, Any]:
+        row = connection.execute(
+            """SELECT id, project_id, parent_id, name, sort_order, revision, created_at, updated_at
+               FROM project_resource_folders WHERE id=? AND project_id=?""",
+            (folder_id, project_id),
+        ).fetchone()
+        if not row:
+            raise MissingItem()
+        return self._project_resource_folder(row)
+
+    def _require_project_resource(
+        self,
+        connection: sqlite3.Connection,
+        project_id: str,
+        resource_id: str,
+    ) -> dict[str, Any]:
+        row = connection.execute(
+            """SELECT id, project_id, kind, name, source_asset_id, preview_asset_id,
+                      provider_asset_id, width, height, content_type, folder_id,
+                      sort_order, revision, created_at, updated_at
+               FROM project_resources WHERE id=? AND project_id=?""",
+            (resource_id, project_id),
+        ).fetchone()
+        if not row:
+            raise MissingItem()
+        return self._project_resource(row)
+
+    def _ensure_folder_parent_is_acyclic(
+        self,
+        connection: sqlite3.Connection,
+        project_id: str,
+        folder_id: str,
+        parent_id: str,
+    ) -> None:
+        cursor: str | None = parent_id
+        seen: set[str] = set()
+        while cursor is not None:
+            if cursor == folder_id or cursor in seen:
+                raise FolderCycle()
+            seen.add(cursor)
+            row = connection.execute(
+                "SELECT parent_id FROM project_resource_folders WHERE id=? AND project_id=?",
+                (cursor, project_id),
+            ).fetchone()
+            if not row:
+                raise MissingItem()
+            cursor = row[0]
+
+    def _ensure_proposed_folder_parent_is_acyclic(
+        self,
+        folder_id: str,
+        parent_id: str | None,
+        proposed_parents: dict[str, str | None],
+        current_folders: dict[str, dict[str, Any]],
+    ) -> None:
+        cursor = parent_id
+        seen: set[str] = set()
+        while cursor is not None:
+            if cursor == folder_id or cursor in seen:
+                raise FolderCycle()
+            seen.add(cursor)
+            cursor = proposed_parents.get(cursor, current_folders[cursor]["parentId"])
+
+    def _project_resource_name(self, value: Any) -> str:
+        if not isinstance(value, str):
+            raise ValueError("name is required")
+        name = value.strip()
+        if not 1 <= len(name) <= 80:
+            raise ValueError("name must contain 1 to 80 characters")
+        return name
+
+    def _project_resource_folder(self, row: Any) -> dict[str, Any]:
+        return {
+            "id": row[0],
+            "projectId": row[1],
+            "parentId": row[2],
+            "name": row[3],
+            "sortOrder": row[4],
+            "revision": row[5],
+            "createdAt": row[6],
+            "updatedAt": row[7],
+        }
+
+    def _project_resource(self, row: Any) -> dict[str, Any]:
+        return {
+            "id": row[0],
+            "projectId": row[1],
+            "kind": row[2],
+            "name": row[3],
+            "sourceAssetId": row[4],
+            "previewAssetId": row[5],
+            "providerAssetId": row[6],
+            "width": row[7],
+            "height": row[8],
+            "contentType": row[9],
+            "folderId": row[10],
+            "sortOrder": row[11],
+            "revision": row[12],
+            "createdAt": row[13],
+            "updatedAt": row[14],
+        }
+
+    def _project_resource_asset_payloads(self) -> list[dict[str, Any]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT source_asset_id, preview_asset_id, provider_asset_id FROM project_resources"
+            ).fetchall()
+        return [
+            {
+                "sourceAssetId": row[0],
+                "assetId": row[1],
+                "derivedAssetId": row[2],
+            }
+            for row in rows
+        ]
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:

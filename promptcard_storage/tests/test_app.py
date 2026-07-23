@@ -119,6 +119,55 @@ class StorageAppContractTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/recent-captures").json()["captures"], [])
         self.assertEqual(self.client.get(f"/api/assets/{asset_id}").status_code, 200)
 
+    def test_project_resource_api_is_project_scoped_and_reports_folder_errors(self) -> None:
+        for project_id in ("project-a", "project-b"):
+            response = self.client.post("/api/projects", json={
+                "id": project_id,
+                "title": project_id,
+                "type": "free-canvas",
+                "pages": [],
+                "currentPage": 0,
+                "meta": {},
+            })
+            self.assertEqual(response.status_code, 200)
+        asset = self.client.post(
+            "/api/assets",
+            content=b"\x89PNG\r\n\x1a\nresource",
+            headers={"content-type": "image/png", "x-file-name": "resource.png"},
+        ).json()
+        folder = self.client.post("/api/projects/project-a/resource-folders", json={
+            "id": "folder-a", "name": " Folder "
+        }).json()
+        resource = self.client.post("/api/projects/project-a/resources", json={
+            "id": "resource-a",
+            "kind": "material",
+            "name": "Reference",
+            "sourceAssetId": asset["id"],
+            "previewAssetId": asset["id"],
+            "providerAssetId": asset["id"],
+            "width": 640,
+            "height": 480,
+            "contentType": "image/png",
+            "folderId": folder["id"],
+        }).json()
+
+        snapshot = self.client.get("/api/projects/project-a/resources")
+        cross_project = self.client.put(
+            f"/api/projects/project-b/resources/{resource['id']}",
+            json={"revision": resource["revision"], "updates": {"name": "Leaked"}},
+        )
+        non_empty = self.client.request(
+            "DELETE",
+            f"/api/projects/project-a/resource-folders/{folder['id']}",
+            json={"revision": folder["revision"]},
+        )
+
+        self.assertEqual(snapshot.status_code, 200)
+        self.assertEqual(snapshot.json()["folders"][0]["name"], "Folder")
+        self.assertEqual(cross_project.status_code, 404)
+        self.assertEqual(non_empty.status_code, 409)
+        self.assertEqual(non_empty.json()["detail"]["code"], "folder_not_empty")
+
     def test_registers_recent_captures_to_prompt_library_atomically(self) -> None:
         asset = self.client.post(
             "/api/assets",

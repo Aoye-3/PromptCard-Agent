@@ -74,7 +74,7 @@ export interface StorageUsageSummary {
 }
 
 export interface AssetReference {
-  kind: 'project' | 'prompt'
+  kind: 'project' | 'prompt' | 'project-resource'
   id: string
   status: 'active' | 'trash'
   title: string
@@ -235,6 +235,53 @@ export interface ImageAssetDerivation {
 }
 
 export type CreateImageAssetDerivationRequest = Omit<ImageAssetDerivation, 'id' | 'createdAt'>
+
+export interface ProjectResourceFolder {
+  id: string
+  projectId: string
+  parentId: string | null
+  name: string
+  sortOrder: number
+  revision: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ProjectResource {
+  id: string
+  projectId: string
+  kind: 'subject' | 'material'
+  name: string
+  sourceAssetId: string
+  previewAssetId: string
+  providerAssetId: string
+  width: number
+  height: number
+  contentType: string
+  folderId: string | null
+  sortOrder: number
+  revision: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ProjectResourceSnapshot {
+  folders: ProjectResourceFolder[]
+  resources: ProjectResource[]
+}
+
+export interface ProjectResourceLayout {
+  folders: Array<Pick<ProjectResourceFolder, 'id' | 'parentId' | 'sortOrder' | 'revision'>>
+  resources: Array<Pick<ProjectResource, 'id' | 'folderId' | 'sortOrder' | 'revision'>>
+}
+
+export type CreateProjectResourceFolder = Pick<ProjectResourceFolder, 'name'> &
+  Partial<Pick<ProjectResourceFolder, 'id' | 'parentId' | 'sortOrder'>>
+
+export type CreateProjectResource = Pick<
+  ProjectResource,
+  'kind' | 'name' | 'sourceAssetId' | 'previewAssetId' | 'providerAssetId' | 'width' | 'height' | 'contentType'
+> & Partial<Pick<ProjectResource, 'id' | 'folderId' | 'sortOrder'>>
 
 export class StorageRevisionConflict<T> extends Error {
   current: T
@@ -562,6 +609,66 @@ export const storageServiceClient = {
       const placement = normalizeImageGenerationPlacement(payload)[0]
       if (!placement) throw new StorageHttpError(502, 'invalid_response', 'Storage returned an invalid placement')
       return placement
+    }
+  },
+  projectResources: {
+    getSnapshot(projectId: string, signal?: AbortSignal): Promise<ProjectResourceSnapshot> {
+      return request(
+        `/storage-api/projects/${encodeURIComponent(projectId)}/resources`,
+        { signal }
+      )
+    },
+    createFolder(projectId: string, folder: CreateProjectResourceFolder): Promise<ProjectResourceFolder> {
+      return request(`/storage-api/projects/${encodeURIComponent(projectId)}/resource-folders`, {
+        method: 'POST',
+        body: JSON.stringify(folder)
+      })
+    },
+    updateFolder(
+      projectId: string,
+      folderId: string,
+      revision: number,
+      updates: Partial<Pick<ProjectResourceFolder, 'name' | 'parentId' | 'sortOrder'>>
+    ): Promise<ProjectResourceFolder> {
+      return request(
+        `/storage-api/projects/${encodeURIComponent(projectId)}/resource-folders/${encodeURIComponent(folderId)}`,
+        { method: 'PUT', body: JSON.stringify({ revision, updates }) }
+      )
+    },
+    async deleteFolder(projectId: string, folderId: string, revision: number): Promise<void> {
+      await request(
+        `/storage-api/projects/${encodeURIComponent(projectId)}/resource-folders/${encodeURIComponent(folderId)}`,
+        { method: 'DELETE', body: JSON.stringify({ revision }) }
+      )
+    },
+    createResource(projectId: string, resource: CreateProjectResource): Promise<ProjectResource> {
+      return request(`/storage-api/projects/${encodeURIComponent(projectId)}/resources`, {
+        method: 'POST',
+        body: JSON.stringify(resource)
+      })
+    },
+    updateResource(
+      projectId: string,
+      resourceId: string,
+      revision: number,
+      updates: Partial<Pick<ProjectResource, 'name' | 'folderId' | 'sortOrder'>>
+    ): Promise<ProjectResource> {
+      return request(
+        `/storage-api/projects/${encodeURIComponent(projectId)}/resources/${encodeURIComponent(resourceId)}`,
+        { method: 'PUT', body: JSON.stringify({ revision, updates }) }
+      )
+    },
+    async deleteResource(projectId: string, resourceId: string, revision: number): Promise<void> {
+      await request(
+        `/storage-api/projects/${encodeURIComponent(projectId)}/resources/${encodeURIComponent(resourceId)}`,
+        { method: 'DELETE', body: JSON.stringify({ revision }) }
+      )
+    },
+    updateLayout(projectId: string, layout: ProjectResourceLayout): Promise<ProjectResourceSnapshot> {
+      return request(`/storage-api/projects/${encodeURIComponent(projectId)}/resource-layout`, {
+        method: 'PUT',
+        body: JSON.stringify(layout)
+      })
     }
   },
   projects: {

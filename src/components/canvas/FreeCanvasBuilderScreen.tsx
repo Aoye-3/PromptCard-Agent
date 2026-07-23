@@ -36,9 +36,10 @@ import {
 import { ImageGenerationConversationPanel } from '@/components/canvas/image-generation/ImageGenerationConversationPanel'
 import { AnnotationEditorDialog } from '@/components/canvas/image-generation/AnnotationEditorDialog'
 import { RegionEditorDialog } from '@/components/canvas/image-generation/RegionEditorDialog'
+import { ProjectResourceLibrary } from '@/components/canvas/ProjectResourceLibrary'
 import type { ImageGenerationConversationSummary as ImageGenerationConversationView, ImageGenerationTurn, ImageGenerationTurnAction } from '@/components/canvas/image-generation/types'
-import { canvasImageAssetUrl, getClipboardImageFiles, isFileDrag, isSupportedImageFile, uploadFreeCanvasImageFiles } from '@/components/canvas/canvas-image-assets'
-import { createFreeCanvasCroppedNodes, type FreeCanvasCropLines, type FreeCanvasMediaNode } from '@/domain/free-canvas/free-canvas'
+import { canvasImageAssetUrl, fitImageNode, getClipboardImageFiles, isFileDrag, isSupportedImageFile, uploadFreeCanvasImageFiles } from '@/components/canvas/canvas-image-assets'
+import { createFreeCanvasCroppedNodes, createFreeCanvasMediaNode, type FreeCanvasCropLines, type FreeCanvasMediaNode } from '@/domain/free-canvas/free-canvas'
 import {
   createFreeCanvasImageNodeFromMedia,
   createFreeCanvasImageGenerationPlaceholder,
@@ -83,6 +84,7 @@ import {
   switchComposerImageInputRole,
   validateComposerCustomSize
 } from '@/domain/image-generation/composer-draft'
+import { appendSubjectReference } from '@/domain/project-resources/project-resource-library'
 import {
   rasterizeAnnotationDocument,
   type ImageAnnotationDocument
@@ -94,7 +96,8 @@ import { createImageGenerationRunId, ImageGenerationClientError, requestImageGen
 import {
   storageServiceClient,
   type ImageGenerationConversationSummary,
-  type ImageGenerationRun
+  type ImageGenerationRun,
+  type ProjectResource
 } from '@/storage/storage-service-client'
 import type { AgentWorkspaceProposal } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
@@ -194,6 +197,7 @@ const FreeCanvasBuilderInner = ({
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
   const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false)
+  const [resourceLibraryExpanded, setResourceLibraryExpanded] = useState(false)
   const [rightPanelMode, setRightPanelMode] = useState<'agent' | 'image-generation' | 'prompt-library'>('agent')
   const [previewPreset, setPreviewPreset] = useState<IPreset | null>(null)
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false)
@@ -421,6 +425,51 @@ const FreeCanvasBuilderInner = ({
       setUploadError(error instanceof Error ? error.message : 'Image upload failed.')
     }
   }, [freeCanvas, onChange])
+
+  const placeProjectMaterial = useCallback((resource: ProjectResource) => {
+    const leftInset = resourceLibraryExpanded && window.innerWidth >= 1440 ? 280 : 44
+    const rightInset = rightPanelCollapsed ? 80 : 520
+    const position = reactFlow.screenToFlowPosition({
+      x: leftInset + Math.max(0, window.innerWidth - leftInset - rightInset) / 2,
+      y: 56 + Math.max(0, window.innerHeight - 56) / 2
+    })
+    const size = fitImageNode(resource.width, resource.height)
+    const media = {
+      ...createFreeCanvasMediaNode('imageAsset', {
+        x: position.x - size.width / 2,
+        y: position.y - size.height / 2
+      }),
+      title: resource.name,
+      width: size.width,
+      height: size.height,
+      assetId: resource.previewAssetId,
+      imageUrl: canvasImageAssetUrl(resource.previewAssetId),
+      meta: {
+        originalWidth: resource.width,
+        originalHeight: resource.height,
+        projectResourceId: resource.id,
+        sourceAssetId: resource.sourceAssetId
+      }
+    }
+    const node = createFreeCanvasImageNodeFromMedia(media)
+    onChange({
+      ...freeCanvas,
+      nodes: [...freeCanvas.nodes, node],
+      selectedNodeId: node.id
+    })
+  }, [freeCanvas, onChange, reactFlow, resourceLibraryExpanded, rightPanelCollapsed])
+
+  const addProjectSubjectToComposer = useCallback((resource: ProjectResource) => {
+    const activeModel = imageCatalogModels.find(model => model.id === imageComposerDraft.modelId)
+    const maxReferenceImages = activeModel?.capabilities?.maxReferenceImages ?? 10
+    const result = appendSubjectReference(imageComposerDraft.inputs, resource, maxReferenceImages)
+    if (!result.reason) {
+      setImageComposerDraft(current => ({ ...current, inputs: result.inputs }))
+      setRightPanelMode('image-generation')
+      setRightPanelCollapsed(false)
+    }
+    return { reason: result.reason }
+  }, [imageCatalogModels, imageComposerDraft.inputs, imageComposerDraft.modelId])
 
   const createImage = useCallback(() => {
     imageInputRef.current?.click()
@@ -704,8 +753,10 @@ const FreeCanvasBuilderInner = ({
       let current = freeCanvasRef.current
       const persisted: Array<{ runId: string; nodeId: string }> = []
       const awaitingPersistence: Array<{ runId: string; nodeId: string }> = []
+      const leftInset = resourceLibraryExpanded && window.innerWidth >= 1440 ? 292 : 0
+      const rightInset = rightPanelCollapsed ? 80 : 520
       const base = reactFlow.screenToFlowPosition({
-        x: Math.max(180, (window.innerWidth - (rightPanelCollapsed ? 80 : 520)) / 2),
+        x: Math.max(180, leftInset + (window.innerWidth - leftInset - rightInset) / 2),
         y: window.innerHeight / 2
       })
       const additions: IFreeCanvasImageNode[] = []
@@ -774,7 +825,7 @@ const FreeCanvasBuilderInner = ({
     } finally {
       placementProcessingRef.current = false
     }
-  }, [emitGenerationCanvas, onPersistCanvas, reactFlow, rightPanelCollapsed])
+  }, [emitGenerationCanvas, onPersistCanvas, reactFlow, resourceLibraryExpanded, rightPanelCollapsed])
 
   useEffect(() => {
     void processPendingImagePlacements(activeProject.id).catch(() => undefined)
@@ -1436,8 +1487,18 @@ const FreeCanvasBuilderInner = ({
         <ToolbarButton title="Save" onClick={onSave}><Save className="h-4 w-4" /></ToolbarButton>
       </header>
 
+      <ProjectResourceLibrary
+        projectId={activeProject.id}
+        expanded={resourceLibraryExpanded}
+        onExpandedChange={setResourceLibraryExpanded}
+        onPlaceMaterial={placeProjectMaterial}
+        onAddSubject={addProjectSubjectToComposer}
+      />
+
       <div
-        className={`relative h-full transition-[padding] ${rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'}`}
+        className={`relative h-full transition-[padding] ${
+          rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'
+        } ${resourceLibraryExpanded ? 'xl:pl-[292px]' : ''}`}
         onDragOver={event => {
           if (!isFileDrag(event.dataTransfer)) return
           event.preventDefault()
@@ -1463,6 +1524,7 @@ const FreeCanvasBuilderInner = ({
             setSelectedNodeId(null)
             setSelectedEdgeId(null)
             setEditingNodeId(null)
+            if (window.innerWidth < 1440) setResourceLibraryExpanded(false)
           }}
           panOnScroll
           panOnDrag={false}
@@ -1475,11 +1537,20 @@ const FreeCanvasBuilderInner = ({
           maxZoom={2}
         >
           <Background variant={BackgroundVariant.Lines} gap={28} size={1} color="#e2e8f0" />
-          <MiniMap pannable zoomable className="!bottom-4 !left-4 !right-auto" />
-          <Controls className="!bottom-6 !left-auto !right-6" />
+          <MiniMap pannable zoomable className="!bottom-6 !left-auto !right-16" />
+          <Controls className="!bottom-6 !left-auto !right-4" />
         </ReactFlow>
 
         <CanvasBottomToolbar
+          positionClassName={
+            resourceLibraryExpanded
+              ? rightPanelCollapsed
+                ? 'left-[calc(50%_-_40px)] xl:left-[calc(50%_+_106px)]'
+                : 'left-[calc(50%_-_260px)] xl:left-[calc(50%_-_114px)]'
+              : rightPanelCollapsed
+                ? 'left-[calc(50%_-_40px)]'
+                : 'left-[calc(50%_-_260px)]'
+          }
           quickDrawerOpen={quickDrawerOpen}
           quickPresets={quickPresets}
           onCreateText={createText}
@@ -3599,6 +3670,7 @@ const TextNodeToolbar = ({
 )
 
 export const CanvasBottomToolbar = ({
+  positionClassName,
   quickDrawerOpen,
   quickPresets,
   onCreateText,
@@ -3609,6 +3681,7 @@ export const CanvasBottomToolbar = ({
   onEditQuickPreset,
   onUseQuickPreset
 }: {
+  positionClassName?: string
   quickDrawerOpen: boolean
   quickPresets: IPreset[]
   onCreateText: () => void
@@ -3620,7 +3693,7 @@ export const CanvasBottomToolbar = ({
   onEditQuickPreset: (preset: IPreset) => void
   onUseQuickPreset: (preset: IPreset) => void
 }) => (
-    <div className="absolute bottom-6 left-1/2 z-30 flex -translate-x-1/2 flex-col items-center gap-3">
+    <div className={`absolute bottom-6 z-30 flex -translate-x-1/2 flex-col items-center gap-3 ${positionClassName || 'left-1/2'}`}>
       {quickDrawerOpen && (
         <div className="w-[300px] rounded-[8px] border border-gray-200 bg-white p-2 shadow-[0_18px_60px_rgba(15,23,42,0.18)]">
           <div className="px-2 pb-2 pt-1 text-xs font-semibold text-gray-400">可能@的内容</div>

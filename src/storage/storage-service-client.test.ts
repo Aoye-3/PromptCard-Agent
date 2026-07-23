@@ -54,6 +54,41 @@ describe('storageServiceClient', () => {
       }))
   })
 
+  test('loads and atomically updates one project resource snapshot', async () => {
+    const snapshot = {
+      folders: [{ id: 'folder-1', projectId: 'project/1', parentId: null, name: 'Mood', sortOrder: 0, revision: 1, createdAt: 1, updatedAt: 1 }],
+      resources: []
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(snapshot), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(storageServiceClient.projectResources.getSnapshot('project/1')).resolves.toEqual(snapshot)
+    await storageServiceClient.projectResources.updateLayout('project/1', {
+      folders: [{ id: 'folder-1', parentId: null, sortOrder: 0, revision: 1 }],
+      resources: []
+    })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/storage-api/projects/project%2F1/resources',
+      expect.any(Object)
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/storage-api/projects/project%2F1/resource-layout',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          folders: [{ id: 'folder-1', parentId: null, sortOrder: 0, revision: 1 }],
+          resources: []
+        })
+      })
+    )
+  })
+
   test('returns null for a missing project', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       detail: { code: 'not_found', message: 'Missing' }

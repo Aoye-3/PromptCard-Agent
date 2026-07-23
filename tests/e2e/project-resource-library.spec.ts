@@ -1,6 +1,10 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 const storageUrl = 'http://127.0.0.1:38102'
+const fixturePng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAI0lEQVR4nGN8l2fAQApgIkk1w6gG4gATkergYFQDMYDkUAIA7rIBrEa8Z3wAAAAASUVORK5CYII=',
+  'base64'
+)
 
 test('project resources stay isolated and subject append remains an unsent Composer draft', async ({ page, request }) => {
   const suffix = Date.now()
@@ -26,6 +30,18 @@ test('project resources stay isolated and subject append remains an unsent Compo
     height: 480,
     contentType: 'image/png'
   })
+  await postJson(request, `/api/projects/${projectA}/resources`, {
+    id: `material-${suffix}`,
+    kind: 'material',
+    name: 'Canvas material',
+    sourceAssetId: asset.id,
+    previewAssetId: asset.id,
+    providerAssetId: asset.id,
+    width: 640,
+    height: 480,
+    contentType: 'image/png',
+    folderId: folder.id
+  })
 
   await page.goto('/', { waitUntil: 'networkidle' })
   await openProject(page, titleA)
@@ -36,6 +52,30 @@ test('project resources stay isolated and subject append remains an unsent Compo
   await expect(library).toHaveClass(/w-\[280px\]/)
   await expect(library.locator('.grid-cols-3')).toBeVisible()
 
+  const dataTransfer = await page.evaluateHandle((base64) => {
+    const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0))
+    const transfer = new DataTransfer()
+    transfer.items.add(new File([bytes], 'Dropped subject.png', { type: 'image/png' }))
+    return transfer
+  }, fixturePng.toString('base64'))
+  const libraryDropzone = library.locator('[data-project-resource-dropzone]')
+  await libraryDropzone.dispatchEvent('dragenter', { dataTransfer })
+  await expect(library.getByText('松开以加入主体库')).toBeVisible()
+  await expect(page.getByText('松开以添加图片', { exact: true })).toHaveCount(0)
+  await libraryDropzone.dispatchEvent('drop', { dataTransfer })
+  await expect(library.locator('[title="Dropped subject"]')).toBeVisible()
+  await expect(library.getByText('1 张图片已加入主体库')).toBeVisible()
+  await expect(page.getByText('松开以添加图片', { exact: true })).toHaveCount(0)
+
+  await library.getByTitle('素材').click()
+  await library.getByText('Mood', { exact: true }).click()
+  const canvasDropzone = page.locator('[data-free-canvas-dropzone]')
+  await library.locator('[title="Canvas material"]').dragTo(canvasDropzone, {
+    targetPosition: { x: 360, y: 260 }
+  })
+  await expect(canvasDropzone.getByAltText('Canvas material')).toBeVisible()
+  await library.getByTitle('主体').click()
+
   let generationRequests = 0
   page.on('request', outgoing => {
     if (outgoing.url().includes('/image-generations') && outgoing.method() === 'POST') generationRequests += 1
@@ -44,6 +84,13 @@ test('project resources stay isolated and subject append remains an unsent Compo
   await subjectCard.hover()
   await subjectCard.getByText('加入', { exact: true }).click()
   await expect(page.locator('[data-free-canvas-image-generation-panel]')).toBeVisible()
+  const composerDropzone = page.locator('[data-free-canvas-composer-dropzone]')
+  await composerDropzone.dispatchEvent('dragenter', { dataTransfer })
+  await expect(composerDropzone.getByText('松开以加入本轮参考图', { exact: true })).toBeVisible()
+  await expect(page.getByText('松开以添加图片', { exact: true })).toHaveCount(0)
+  await composerDropzone.dispatchEvent('drop', { dataTransfer })
+  await expect(composerDropzone.getByText('松开以加入本轮参考图', { exact: true })).toHaveCount(0)
+  await expect(composerDropzone.getByAltText('Dropped subject.png')).toBeVisible()
   expect(generationRequests).toBe(0)
 
   await library.getByTitle('素材').click()
@@ -80,7 +127,7 @@ async function seedProject(request: APIRequestContext, id: string, title: string
 
 async function seedAsset(request: APIRequestContext) {
   const response = await request.post(`${storageUrl}/api/assets`, {
-    data: Buffer.from('\x89PNG\r\n\x1a\nproject-resource-e2e', 'binary'),
+    data: fixturePng,
     headers: {
       'content-type': 'image/png',
       'x-file-name': 'project-resource.png'

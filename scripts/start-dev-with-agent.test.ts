@@ -55,7 +55,7 @@ function isProcessRunning(pid: number) {
 function startHealthyServer() {
   const server = createServer((_, response) => {
     response.writeHead(200, { 'content-type': 'application/json' })
-    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":6,"capabilities":{"assets":true,"sqlite":true}}')
+    response.end('{"ok":true,"serviceVersion":"2.0.0","schemaVersion":7,"capabilities":{"assets":true,"sqlite":true,"projectResources":true}}')
   })
 
   return new Promise<string>((resolve) => {
@@ -251,6 +251,7 @@ async function expectScriptSupportsTestParameters() {
     expect(script).toContain('PROMPTCARD_DEV_RUNTIME_MANIFEST')
     expect(script).toContain('PROMPTCARD_IMAGE_GENERATION_NODE_V1')
     expect(script).toContain('$payload.capabilities.sqlite')
+    expect(script).toContain('$payload.capabilities.projectResources')
     expect(script).toContain('unoptimized CommonJS React modules')
     expect(script).toContain('Stop-StalePromptCardServiceProcesses')
     expect(script).toContain('Stopping stale PromptCard service process')

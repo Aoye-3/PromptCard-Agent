@@ -71,7 +71,21 @@ Subjects use a dense three-column grid. Hover or keyboard focus waits 250 ms bef
 
 Materials may be uploaded into arbitrary-depth folders. Folder expansion, inline renaming, moving, and ordering use native HTML drag and drop. Indentation grows by 12 px per level and is visually capped at 48 px; the full path remains available as a tooltip. These operations update metadata only. `置入画布` creates a normal image node from the preview asset and saved dimensions near the visible canvas center.
 
+A material card may also be dragged directly from the left library onto the central canvas. The card carries a dedicated project-material payload alongside the library's internal sort payload. A same-project drop creates the same ordinary preview-backed image node at the pointer location; this is a copy/placement operation, so the resource remains in its folder and no image is uploaded again. Cross-project payloads are rejected. Subject cards remain Composer-only and cannot be placed on the canvas through this path.
+
 Resource state is optimistic. Failed writes restore the previous snapshot; a revision conflict reloads the entire active-project snapshot. The global MiniMap lives at the canvas lower right, immediately left of the zoom controls.
+
+### Drag-and-drop surface boundaries
+
+Free Canvas has three mutually exclusive image-file drop surfaces:
+
+| Surface | Active bounds | Drop result |
+| --- | --- | --- |
+| Project resource library | Expanded content area to the right of the 44 px icon rail | Imports supported image files into the active Subject tab or the selected Material folder. |
+| Central canvas | React Flow canvas area after left/right panel insets | Uploads external image files and creates ordinary image nodes at the pointer location; also accepts the active project's internal material-card payload without re-uploading it. |
+| Image-generation workbench | Right conversation/Composer panel only | Imports supported image files as ordered references in the current in-memory draft, subject to the active model limit. |
+
+Each surface owns its own drag depth, overlay, `dragover`, and `drop` handling. A handled drop stops propagation so the full-screen canvas overlay cannot remain stuck and one file cannot be imported by two destinations. Leaving or completing a drop clears only the owning surface's overlay. Composer drops open the image-generation mode when needed but never create a run or call the provider; material-card payloads are deliberately ignored there because project materials are not a Composer attachment source.
 
 ## Project Image Generation Agent And Legacy Nodes
 
@@ -85,7 +99,7 @@ The shared right workbench is 456 px wide and reserves 56 px when collapsed. Can
 
 The Image Generation tab contains one compact project/conversation row with icon-only new-conversation and project-history actions, chronological turn cards, and a fixed bottom Composer. Model readiness appears in the shared workbench header; the conversation row exposes only the remediation action when configuration is required. Empty conversations keep starter actions near the top rather than vertically centering a large placeholder.
 
-The Composer is one compact visual surface: a 40 px attachment strip, a 56 px prompt editor, and one 28–32 px bottom toolbar. Workflow, ready model, ratio/resolution/custom size, output format, prompt optimization, and watermark settings open in anchored popovers instead of occupying permanent vertical space. It supports local uploads, explicit injection of the current React Flow selection, and the point/bounding-box region dialog.
+The Composer is one compact visual surface: a 40 px attachment strip, a 56 px prompt editor, and one 28–32 px bottom toolbar. Workflow, ready model, ratio/resolution/custom size, output format, prompt optimization, and watermark settings open in anchored popovers instead of occupying permanent vertical space. It supports local uploads through the picker or a file drop anywhere inside the right workbench, explicit injection of the current React Flow selection, and the point/bounding-box region dialog.
 
 Canvas nodes are injected only after the user clicks `加入所选节点`. Visible ordered text is appended to the draft and image nodes with local `assetId` values become references. Selection, dragging, connecting, restoring a project, or editing node properties never injects content or invokes the provider. Rejected selections report a concrete reason.
 
@@ -240,10 +254,12 @@ On project load, running nodes are reconciled against Storage by `generationRunI
 
 ```powershell
 npm.cmd test -- --run src/domain/free-canvas/free-canvas-project.test.ts src/utils/agent-workspace.test.ts src/services/agent-runtime-service.test.ts src/utils/storage.test.ts
+npm.cmd test -- --run src/domain/project-resources/project-resource-drag.test.ts src/components/canvas/ProjectResourceLibrary.test.tsx src/components/canvas/FreeCanvasBuilderScreen.image-generation.test.tsx
 npm.cmd test -- --run src/components/AgentCollaborationPanel.test.tsx src/components/canvas/image-generation/ImageGenerationConversationPanel.test.tsx src/components/canvas/image-generation/ImageGenerationComposer.test.tsx
 npm.cmd run test:e2e -- free-canvas-image-crop.spec.ts
 npm.cmd run test:e2e -- free-canvas-text-node.spec.ts
 npx.cmd playwright test tests/e2e/free-canvas-dense-right-panel.spec.ts --project=chromium
+npx.cmd playwright test tests/e2e/project-resource-library.spec.ts --project=chromium
 npx.cmd playwright test tests/e2e/model-management.spec.ts tests/e2e/image-generation-node.spec.ts --workers=1
 npm.cmd run build
 ```
@@ -261,4 +277,6 @@ Quick-message manual checks should confirm the drawer and lightweight dialog hav
 and that clicking a quick message inserts only a red preset text node even when the preset has
 reference media in Prompt Library.
 
-Image-generation manual checks should confirm connection/assignment selection, explicit canvas text/image injection, stable multi-reference `@` binding after reorder, source/reference role switching, 1K/2K/custom validation, point/bbox save and undo, visual-markup rasterization, placeholder appearance before the delayed Runtime response, running-node movement/resizing and deletion blocking, in-place success without frame reset, retained failure, failed-run retry as a new row, generated-result placement and Media reuse, reload recovery, and history retention after project deletion. A failed placeholder save must not call the provider. Node selection, edge changes, project reload, and result-node continuation must not call the provider until the user presses Generate. Do not perform a live Ark smoke test unless the user has configured a keyring credential and explicitly enabled the server rollout flag.
+Resource-library drag checks should cover all three destination bounds independently: dropping an external file inside the expanded left list imports it only into the active library location; dropping it on the canvas creates only a canvas node; dropping it on the right workbench creates only a draft reference. Dragging a same-project material card onto the canvas must place it at the drop point without moving the library record or uploading another asset. Subject cards and cross-project material payloads must not use that path. Every overlay must clear after drop or cancellation.
+
+Image-generation manual checks should confirm connection/assignment selection, explicit canvas text/image injection, right-workbench file drops, stable multi-reference `@` binding after reorder, source/reference role switching, 1K/2K/custom validation, point/bbox save and undo, visual-markup rasterization, placeholder appearance before the delayed Runtime response, running-node movement/resizing and deletion blocking, in-place success without frame reset, retained failure, failed-run retry as a new row, generated-result placement and Media reuse, reload recovery, and history retention after project deletion. A file drop or failed placeholder save must not call the provider. Node selection, edge changes, project reload, and result-node continuation must not call the provider until the user presses Generate. Do not perform a live Ark smoke test unless the user has configured a keyring credential and explicitly enabled the server rollout flag.

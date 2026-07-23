@@ -25,6 +25,7 @@ import {
   X
 } from 'lucide-react'
 import {
+  StorageHttpError,
   StorageRevisionConflict,
   storageServiceClient,
   type ProjectResource,
@@ -33,6 +34,7 @@ import {
   type ProjectResourceSnapshot
 } from '@/storage/storage-service-client'
 import { buildFolderPath, canMoveFolder } from '@/domain/project-resources/project-resource-library'
+import { PROJECT_MATERIAL_DRAG_MIME } from '@/domain/project-resources/project-resource-drag'
 
 type ResourceKind = 'subject' | 'material'
 type DragItem = { type: 'folder' | 'resource'; id: string }
@@ -46,6 +48,24 @@ interface ProjectResourceLibraryProps {
 }
 
 const emptySnapshot: ProjectResourceSnapshot = { folders: [], resources: [] }
+const projectResourcesUnavailableMessage = '项目资源库需要 Storage schema v7，请重启本地开发服务后重试。'
+const supportedImageTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/bmp',
+  'image/tiff',
+  'image/gif',
+  'image/heic',
+  'image/heif'
+])
+const supportedImageExtensions = /\.(?:jpe?g|png|webp|bmp|tiff?|gif|heic|heif)$/i
+
+const isSupportedResourceImage = (file: File) =>
+  supportedImageTypes.has(file.type.toLowerCase()) || supportedImageExtensions.test(file.name)
+
+const isExternalFileDrag = (event: DragEvent) =>
+  Array.from(event.dataTransfer.types || []).includes('Files') || event.dataTransfer.files.length > 0
 
 export const ProjectResourceLibrary = ({
   projectId,
@@ -65,6 +85,8 @@ export const ProjectResourceLibrary = ({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [fileDragActive, setFileDragActive] = useState(false)
+  const [resourceApiUnavailable, setResourceApiUnavailable] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null)
   const [editingFolderName, setEditingFolderName] = useState('')
@@ -76,6 +98,7 @@ export const ProjectResourceLibrary = ({
     const next = await storageServiceClient.projectResources.getSnapshot(projectId, signal)
     setSnapshot(next)
     setSnapshotProjectId(projectId)
+    setResourceApiUnavailable(false)
     return next
   }, [projectId])
 
@@ -87,11 +110,18 @@ export const ProjectResourceLibrary = ({
     setSelectedFolderId(null)
     setCollapsedFolders(new Set())
     setPreview(null)
+    setFileDragActive(false)
+    setResourceApiUnavailable(false)
     onExpandedChange(false)
     setLoading(true)
     void loadSnapshot(controller.signal)
       .catch(error => {
         if (controller.signal.aborted) return
+        if (error instanceof StorageHttpError && error.status === 404) {
+          setResourceApiUnavailable(true)
+          setNotice(projectResourcesUnavailableMessage)
+          return
+        }
         setNotice(error instanceof Error ? error.message : '资源库加载失败')
       })
       .finally(() => {
@@ -267,41 +297,115 @@ export const ProjectResourceLibrary = ({
     }
   }
 
-  const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files || [])
-    event.target.value = ''
-    if (files.length === 0) return
+  const uploadFiles = async (incomingFiles: File[]) => {
+    if (resourceApiUnavailable) {
+      try {
+        await loadSnapshot()
+      } catch {
+        setNotice(projectResourcesUnavailableMessage)
+        return
+      }
+    }
+    const files = incomingFiles.filter(isSupportedResourceImage)
+    if (files.length === 0) {
+      setNotice('仅支持 JPEG、PNG、WebP、BMP、TIFF、GIF、HEIC 和 HEIF 图片。')
+      return
+    }
+    const targetKind = kind
+    const targetFolderId = targetKind === 'material' ? selectedFolderId : null
     setUploading(true)
     setNotice(null)
     let succeeded = 0
-    for (const file of files) {
-      try {
-        const imported = await storageServiceClient.imageAssets.import(file)
-        const created = await storageServiceClient.projectResources.createResource(projectId, {
-          kind,
-          name: file.name.replace(/\.[^.]+$/, '').slice(0, 80) || '未命名图片',
-          sourceAssetId: imported.originalAsset.id,
-          previewAssetId: imported.previewAsset.id,
-          providerAssetId: imported.providerInputAsset.id,
-          width: imported.width,
-          height: imported.height,
-          contentType: imported.originalAsset.contentType,
-          folderId: kind === 'material' ? selectedFolderId : null
-        })
-        setSnapshot(current => ({ ...current, resources: [...current.resources, created] }))
-        succeeded += 1
-      } catch (error) {
-        setNotice(`${succeeded} 张已加入；${file.name} 上传失败：${error instanceof Error ? error.message : '未知错误'}`)
+    try {
+      for (const file of files) {
+        try {
+          const imported = await storageServiceClient.imageAssets.import(file)
+          const created = await storageServiceClient.projectResources.createResource(projectId, {
+            kind: targetKind,
+            name: file.name.replace(/\.[^.]+$/, '').slice(0, 80) || '未命名图片',
+            sourceAssetId: imported.originalAsset.id,
+            previewAssetId: imported.previewAsset.id,
+            providerAssetId: imported.providerInputAsset.id,
+            width: imported.width,
+            height: imported.height,
+            contentType: imported.originalAsset.contentType,
+            folderId: targetFolderId
+          })
+          setSnapshot(current => ({ ...current, resources: [...current.resources, created] }))
+          succeeded += 1
+        } catch (error) {
+          if (error instanceof StorageHttpError && error.status === 404) {
+            setResourceApiUnavailable(true)
+            setNotice(projectResourcesUnavailableMessage)
+            break
+          }
+          setNotice(`${succeeded} 张已加入；${file.name} 上传失败：${error instanceof Error ? error.message : '未知错误'}`)
+        }
       }
+      if (succeeded === files.length) {
+        setNotice(
+          incomingFiles.length > files.length
+            ? `${succeeded} 张图片已加入；已忽略不支持的文件`
+            : `${succeeded} 张图片已加入${targetKind === 'subject' ? '主体库' : '素材库'}`
+        )
+      }
+    } finally {
+      setUploading(false)
     }
-    if (succeeded === files.length) setNotice(`${succeeded} 张图片已加入${kind === 'subject' ? '主体库' : '素材库'}`)
-    setUploading(false)
   }
 
-  const beginDrag = (event: DragEvent, item: DragItem) => {
+  const handleUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    if (files.length > 0) await uploadFiles(files)
+  }
+
+  const handleExternalDragEnter = (event: DragEvent) => {
+    if (!isExternalFileDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    setFileDragActive(true)
+  }
+
+  const handleExternalDragOver = (event: DragEvent) => {
+    if (!isExternalFileDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+    setFileDragActive(true)
+  }
+
+  const handleExternalDragLeave = (event: DragEvent) => {
+    if (!isExternalFileDrag(event)) return
+    event.stopPropagation()
+    const nextTarget = event.relatedTarget
+    if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return
+    setFileDragActive(false)
+  }
+
+  const handleExternalDrop = async (event: DragEvent) => {
+    if (!isExternalFileDrag(event)) return
+    event.preventDefault()
+    event.stopPropagation()
+    setFileDragActive(false)
+    await uploadFiles(Array.from(event.dataTransfer.files))
+  }
+
+  const beginDrag = (event: DragEvent, item: DragItem, resource?: ProjectResource) => {
     dragItemRef.current = item
-    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.effectAllowed = resource?.kind === 'material' ? 'copyMove' : 'move'
     event.dataTransfer.setData('application/x-project-resource', JSON.stringify(item))
+    if (resource?.kind === 'material') {
+      event.dataTransfer.setData(PROJECT_MATERIAL_DRAG_MIME, JSON.stringify({
+        projectId,
+        id: resource.id,
+        name: resource.name,
+        sourceAssetId: resource.sourceAssetId,
+        previewAssetId: resource.previewAssetId,
+        width: resource.width,
+        height: resource.height
+      }))
+    }
   }
 
   const readDragItem = (event: DragEvent): DragItem | null => {
@@ -515,7 +619,9 @@ export const ProjectResourceLibrary = ({
     <>
       <aside
         data-project-resource-library
-        className={`absolute bottom-4 left-3 top-24 z-40 flex overflow-visible rounded-xl border border-gray-200 bg-white/95 shadow-[0_14px_40px_rgba(15,23,42,0.12)] backdrop-blur transition-[width] ${
+        className={`absolute bottom-4 left-3 top-24 z-40 flex overflow-visible rounded-xl border bg-white/95 shadow-[0_14px_40px_rgba(15,23,42,0.12)] backdrop-blur transition-[width] ${
+          fileDragActive ? 'border-orange-400 ring-2 ring-orange-200' : 'border-gray-200'
+        } ${
           expanded ? 'w-[280px]' : 'w-11'
         }`}
       >
@@ -551,13 +657,21 @@ export const ProjectResourceLibrary = ({
             className="mt-auto grid h-8 w-8 place-items-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-950"
             onClick={() => uploadInputRef.current?.click()}
             title={`上传到${kind === 'subject' ? '主体库' : '素材库'}`}
+            disabled={uploading}
           >
             {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
           </button>
         </nav>
 
         {expanded && (
-          <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <div
+            data-project-resource-dropzone
+            className="flex min-w-0 flex-1 flex-col overflow-hidden"
+            onDragEnter={handleExternalDragEnter}
+            onDragOver={handleExternalDragOver}
+            onDragLeave={handleExternalDragLeave}
+            onDrop={handleExternalDrop}
+          >
             <div className="flex h-11 shrink-0 items-center justify-between border-b border-gray-100 px-3">
               <div>
                 <div className="text-xs font-black text-gray-950">{kind === 'subject' ? '项目主体' : '项目素材'}</div>
@@ -612,7 +726,7 @@ export const ProjectResourceLibrary = ({
                   onClick={() => uploadInputRef.current?.click()}
                 >
                   <Upload className="mb-2 h-5 w-5" />
-                  上传第一张{kind === 'subject' ? '主体图' : '素材'}
+                  点击上传或拖入第一张{kind === 'subject' ? '主体图' : '素材'}
                 </button>
               ) : (
                 <div className="grid grid-cols-3 gap-1.5">
@@ -623,7 +737,7 @@ export const ProjectResourceLibrary = ({
                       tabIndex={0}
                       className="group relative min-w-0 rounded-md border border-gray-200 bg-white p-1 outline-none transition hover:border-orange-300 focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
                       title={resource.name}
-                      onDragStart={event => beginDrag(event, { type: 'resource', id: resource.id })}
+                      onDragStart={event => beginDrag(event, { type: 'resource', id: resource.id }, resource)}
                       onDragOver={event => event.preventDefault()}
                       onDrop={event => dropBeforeResource(event, resource)}
                       onMouseEnter={event => showPreviewLater(resource, event.currentTarget)}
@@ -697,12 +811,22 @@ export const ProjectResourceLibrary = ({
             )}
           </div>
         )}
+        {expanded && fileDragActive && (
+          <div className="pointer-events-none absolute inset-y-0 left-11 right-0 z-50 grid place-items-center rounded-r-xl bg-white/90 px-4 text-center backdrop-blur-sm">
+            <div>
+              <Upload className="mx-auto h-6 w-6 text-orange-600" />
+              <div className="mt-2 text-xs font-black text-gray-950">松开以加入{kind === 'subject' ? '主体库' : '素材库'}</div>
+              <div className="mt-1 text-[10px] text-gray-500">支持批量拖入图片</div>
+            </div>
+          </div>
+        )}
         <input
           ref={uploadInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp,image/bmp,image/tiff,image/gif,image/heic,image/heif"
           multiple
           className="hidden"
+          disabled={uploading}
           onChange={event => void handleUpload(event)}
         />
       </aside>

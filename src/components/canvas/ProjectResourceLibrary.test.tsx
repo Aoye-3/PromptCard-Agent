@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getSnapshot: vi.fn(),
-  updateLayout: vi.fn()
+  updateLayout: vi.fn(),
+  importImage: vi.fn(),
+  createResource: vi.fn()
 }))
 
 vi.mock('@/storage/storage-service-client', async importOriginal => {
@@ -12,10 +14,15 @@ vi.mock('@/storage/storage-service-client', async importOriginal => {
     ...original,
     storageServiceClient: {
       ...original.storageServiceClient,
+      imageAssets: {
+        ...original.storageServiceClient.imageAssets,
+        import: mocks.importImage
+      },
       projectResources: {
         ...original.storageServiceClient.projectResources,
         getSnapshot: mocks.getSnapshot,
-        updateLayout: mocks.updateLayout
+        updateLayout: mocks.updateLayout,
+        createResource: mocks.createResource
       }
     }
   }
@@ -52,6 +59,21 @@ describe('ProjectResourceLibrary', () => {
     })
     mocks.getSnapshot.mockResolvedValue({ folders: [], resources: [subject] })
     mocks.updateLayout.mockResolvedValue({ folders: [], resources: [subject] })
+    mocks.importImage.mockResolvedValue({
+      originalAsset: { id: 'source-upload', contentType: 'image/png' },
+      previewAsset: { id: 'preview-upload' },
+      providerInputAsset: { id: 'provider-upload' },
+      width: 800,
+      height: 600
+    })
+    mocks.createResource.mockResolvedValue({
+      ...subject,
+      id: 'subject-upload',
+      name: 'Dragged subject',
+      sourceAssetId: 'source-upload',
+      previewAssetId: 'preview-upload',
+      providerAssetId: 'provider-upload'
+    })
   })
 
   afterEach(() => {
@@ -122,5 +144,45 @@ describe('ProjectResourceLibrary', () => {
     expect(renderer!.root.findAllByProps({ role: 'tooltip' })).toHaveLength(1)
     act(() => { vi.advanceTimersByTime(1) })
     expect(renderer!.root.findAllByProps({ role: 'tooltip' })).toHaveLength(0)
+  })
+
+  test('imports supported image files dropped onto the expanded library', async () => {
+    mocks.getSnapshot.mockResolvedValue({ folders: [], resources: [] })
+    let renderer: ReactTestRenderer
+    await act(async () => {
+      renderer = create(
+        <ProjectResourceLibrary
+          projectId="project-1"
+          expanded
+          onExpandedChange={vi.fn()}
+          onPlaceMaterial={vi.fn()}
+          onAddSubject={vi.fn(() => ({ reason: null }))}
+        />
+      )
+    })
+    const file = new File(['image'], 'Dragged subject.png', { type: 'image/png' })
+    const dropzone = renderer!.root.findByProps({ 'data-project-resource-dropzone': true })
+    const preventDefault = vi.fn()
+    const stopPropagation = vi.fn()
+
+    await act(async () => {
+      await dropzone.props.onDrop({
+        preventDefault,
+        stopPropagation,
+        dataTransfer: { files: [file], types: ['Files'], dropEffect: 'none' }
+      })
+    })
+
+    expect(preventDefault).toHaveBeenCalled()
+    expect(stopPropagation).toHaveBeenCalled()
+    expect(mocks.importImage).toHaveBeenCalledWith(file)
+    expect(mocks.createResource).toHaveBeenCalledWith('project-1', expect.objectContaining({
+      kind: 'subject',
+      name: 'Dragged subject',
+      sourceAssetId: 'source-upload',
+      previewAssetId: 'preview-upload',
+      providerAssetId: 'provider-upload'
+    }))
+    expect(renderer!.root.find(node => node.props.title === 'Dragged subject')).toBeTruthy()
   })
 })

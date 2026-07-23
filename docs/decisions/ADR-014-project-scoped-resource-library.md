@@ -18,6 +18,8 @@ Free Canvas needs reusable images without creating an implicit global media pool
 - Reject every resource read or write unless the owning project is active. Missing, trashed, and cross-project identifiers all surface as `404`.
 - Keep a subject as one image with no folder. A subject can be explicitly appended to the current Composer draft as a `reference-image`; this opens the image-generation panel but never submits a request.
 - Keep materials in an arbitrary-depth `parent_id` folder tree. Folders are metadata only: moving a resource changes visual organization and does not copy or move asset bytes.
+- Give material cards a project-scoped native drag payload in addition to the existing library-layout payload. Dropping a material from the active project onto the canvas copies its preview identity and saved dimensions into a normal image node at the pointer location; it does not upload another asset, move the resource row, or change folder layout. Subject cards never expose this canvas-placement payload.
+- Keep external-file drops partitioned into three independent surfaces: the expanded resource-list content imports into the active Subject/Material library location, the central canvas creates ordinary image nodes, and the right image-generation workbench appends reference images to the current Composer draft. A handled drop must not bubble into another surface, and no drop submits an image-generation request.
 - Preserve resource rows while a project is in Trash and cascade-delete their metadata only when the project row is permanently deleted.
 - Strongly reference original, preview, and provider-input assets. Deleting a resource removes only its metadata row.
 - Submit drag-and-drop layout changes in one optimistic-concurrency transaction. Any stale revision rejects and rolls back the entire layout.
@@ -41,4 +43,4 @@ Free Canvas needs reusable images without creating an implicit global media pool
 
 ## Consequences
 
-Projects cannot see or attach another project's resources, and there is no global sharing workflow. The frontend owns transient expansion, folder-collapse, hover-preview, and drag state; these reset when entering or switching projects. Cross-project sharing or multi-image subject groups require a separate decision.
+Projects cannot see, attach, or place another project's resources, and there is no global sharing workflow. The frontend owns transient expansion, folder-collapse, hover-preview, per-surface file-drop overlays, and internal resource-drag state; these reset when entering or switching projects and must also clear after a completed or cancelled drop. Cross-project sharing or multi-image subject groups require a separate decision.

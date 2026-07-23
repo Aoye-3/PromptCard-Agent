@@ -86,6 +86,10 @@ import {
 } from '@/domain/image-generation/composer-draft'
 import { appendSubjectReference } from '@/domain/project-resources/project-resource-library'
 import {
+  isProjectMaterialDrag,
+  readProjectMaterialDrag
+} from '@/domain/project-resources/project-resource-drag'
+import {
   rasterizeAnnotationDocument,
   type ImageAnnotationDocument
 } from '@/domain/image-generation/annotations'
@@ -136,10 +140,21 @@ type FreeCanvasFlowNodeData = {
 }
 
 type FreeCanvasFlowNode = Node<FreeCanvasFlowNodeData>
+type ProjectMaterialCanvasSource = Pick<
+  ProjectResource,
+  'id' | 'name' | 'sourceAssetId' | 'previewAssetId' | 'width' | 'height'
+>
 
 const TEXT_COLORS = ['#111827', '#ef4423', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#ffffff']
 const FONT_SIZES: IFreeCanvasTextNode['fontSize'][] = ['small', 'medium', 'large', 'extra-large', 'huge']
 const emptyQuickTextPresetDraft: QuickMessageDraft = { name: '', body: '' }
+const composerReferenceImageExtensions = /\.(?:jpe?g|png|webp|bmp|tiff?|gif|heic|heif)$/i
+
+const isComposerReferenceImage = (file: File): boolean =>
+  file.type.startsWith('image/') || composerReferenceImageExtensions.test(file.name)
+
+const isCanvasImageDrag = (dataTransfer: DataTransfer): boolean =>
+  isFileDrag(dataTransfer) || isProjectMaterialDrag(dataTransfer)
 
 const isTypingTarget = (target: EventTarget | null): boolean => {
   const element = target instanceof HTMLElement ? target : null
@@ -207,6 +222,7 @@ const FreeCanvasBuilderInner = ({
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [clipboardNotice, setClipboardNotice] = useState<string | null>(null)
   const [fileDragActive, setFileDragActive] = useState(false)
+  const [composerFileDragActive, setComposerFileDragActive] = useState(false)
   const [cropNodeId, setCropNodeId] = useState<string | null>(null)
   const [annotationEditorNodeId, setAnnotationEditorNodeId] = useState<string | null>(null)
   const [imageCatalogModels, setImageCatalogModels] = useState<ModelCatalogEntry[]>([])
@@ -244,6 +260,7 @@ const FreeCanvasBuilderInner = ({
   const selectedImageNodeRef = useRef<IFreeCanvasImageNode | null>(selectedImageNode)
   const copiedImageNodeRef = useRef<IFreeCanvasImageNode | null>(null)
   const fileDragDepthRef = useRef(0)
+  const composerFileDragDepthRef = useRef(0)
   const activeProjectIdRef = useRef(activeProject.id)
   const placementProcessingRef = useRef(false)
   const unpersistedPlacementRunIdsRef = useRef(new Set<string>())
@@ -426,13 +443,10 @@ const FreeCanvasBuilderInner = ({
     }
   }, [freeCanvas, onChange])
 
-  const placeProjectMaterial = useCallback((resource: ProjectResource) => {
-    const leftInset = resourceLibraryExpanded && window.innerWidth >= 1440 ? 280 : 44
-    const rightInset = rightPanelCollapsed ? 56 : 456
-    const position = reactFlow.screenToFlowPosition({
-      x: leftInset + Math.max(0, window.innerWidth - leftInset - rightInset) / 2,
-      y: 56 + Math.max(0, window.innerHeight - 56) / 2
-    })
+  const placeProjectMaterialAt = useCallback((
+    resource: ProjectMaterialCanvasSource,
+    position: { x: number; y: number }
+  ) => {
     const size = fitImageNode(resource.width, resource.height)
     const media = {
       ...createFreeCanvasMediaNode('imageAsset', {
@@ -457,7 +471,16 @@ const FreeCanvasBuilderInner = ({
       nodes: [...freeCanvas.nodes, node],
       selectedNodeId: node.id
     })
-  }, [freeCanvas, onChange, reactFlow, resourceLibraryExpanded, rightPanelCollapsed])
+  }, [freeCanvas, onChange])
+
+  const placeProjectMaterial = useCallback((resource: ProjectResource) => {
+    const leftInset = resourceLibraryExpanded && window.innerWidth >= 1440 ? 280 : 44
+    const rightInset = rightPanelCollapsed ? 56 : 456
+    placeProjectMaterialAt(resource, reactFlow.screenToFlowPosition({
+      x: leftInset + Math.max(0, window.innerWidth - leftInset - rightInset) / 2,
+      y: 56 + Math.max(0, window.innerHeight - 56) / 2
+    }))
+  }, [placeProjectMaterialAt, reactFlow, resourceLibraryExpanded, rightPanelCollapsed])
 
   const addProjectSubjectToComposer = useCallback((resource: ProjectResource) => {
     const activeModel = imageCatalogModels.find(model => model.id === imageComposerDraft.modelId)
@@ -581,6 +604,7 @@ const FreeCanvasBuilderInner = ({
     model => model.id === imageComposerDraft.modelId
       && model.providerId === selectedImageConnection?.providerId
   ) || null
+  const maxComposerImages = selectedImageModel?.capabilities?.maxReferenceImages ?? 10
   const imageModelUsable = Boolean(
     selectedImageConnection?.enabled
     && selectedImageConnection.credentialConfigured
@@ -716,6 +740,10 @@ const FreeCanvasBuilderInner = ({
   }, [imageComposerDraft, selectedNodeIds])
 
   const uploadImageComposerReference = useCallback(async (file: File) => {
+    if (imageComposerDraft.inputs.length >= maxComposerImages) {
+      setUploadError(`已达到当前模型的 ${maxComposerImages} 张参考图上限。`)
+      return
+    }
     if (file.size > 30 * 1024 * 1024) {
       setUploadError('参考图不能超过 30 MB。')
       return
@@ -723,7 +751,7 @@ const FreeCanvasBuilderInner = ({
     try {
       const imported = await storageServiceClient.imageAssets.import(file)
       setImageComposerDraft(current => {
-        if (current.inputs.length >= 10) return current
+        if (current.inputs.length >= maxComposerImages) return current
         const input: ProjectImageGenerationInput = {
           referenceId: `upload-${imported.originalAsset.id}`,
           assetId: imported.providerInputAsset.id,
@@ -742,7 +770,62 @@ const FreeCanvasBuilderInner = ({
     } catch {
       setUploadError('参考图上传失败，请检查本地存储服务。')
     }
-  }, [])
+  }, [imageComposerDraft.inputs.length, maxComposerImages])
+
+  const uploadImageComposerReferences = useCallback(async (files: File[]) => {
+    const imageFiles = files.filter(isComposerReferenceImage)
+    if (imageFiles.length === 0) {
+      setUploadError('仅支持拖入图片作为本轮参考图。')
+      return
+    }
+    const available = Math.max(0, maxComposerImages - imageComposerDraft.inputs.length)
+    if (available === 0) {
+      setUploadError(`已达到当前模型的 ${maxComposerImages} 张参考图上限。`)
+      return
+    }
+    for (const file of imageFiles.slice(0, available)) {
+      await uploadImageComposerReference(file)
+    }
+    if (imageFiles.length > available) {
+      setUploadError(`已加入 ${available} 张图片，其余图片超过当前模型的参考图上限。`)
+    }
+  }, [imageComposerDraft.inputs.length, maxComposerImages, uploadImageComposerReference])
+
+  const clearComposerFileDragState = () => {
+    composerFileDragDepthRef.current = 0
+    setComposerFileDragActive(false)
+  }
+
+  const handleComposerDragEnter = (event: ReactDragEvent<Element>) => {
+    if (!isFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    composerFileDragDepthRef.current += 1
+    setComposerFileDragActive(true)
+  }
+
+  const handleComposerDragOver = (event: ReactDragEvent<Element>) => {
+    if (!isFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'copy'
+  }
+
+  const handleComposerDragLeave = (event: ReactDragEvent<Element>) => {
+    if (!isFileDrag(event.dataTransfer)) return
+    event.stopPropagation()
+    composerFileDragDepthRef.current = Math.max(0, composerFileDragDepthRef.current - 1)
+    if (composerFileDragDepthRef.current === 0) setComposerFileDragActive(false)
+  }
+
+  const handleComposerDrop = (event: ReactDragEvent<Element>) => {
+    if (!isFileDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    clearComposerFileDragState()
+    setRightPanelMode('image-generation')
+    void uploadImageComposerReferences(Array.from(event.dataTransfer.files))
+  }
 
   const processPendingImagePlacements = useCallback(async (projectId: string) => {
     if (placementProcessingRef.current) return
@@ -1374,11 +1457,34 @@ const FreeCanvasBuilderInner = ({
     setSelectedNodeId(null)
   }
 
-  const handleDrop = async (event: ReactDragEvent<Element>) => {
-    if (!isFileDrag(event.dataTransfer)) return
+  const clearFileDragState = () => {
     fileDragDepthRef.current = 0
     setFileDragActive(false)
+  }
+
+  const handleRootDropCapture = (event: ReactDragEvent<Element>) => {
+    if (!isCanvasImageDrag(event.dataTransfer)) return
+    clearFileDragState()
+    clearComposerFileDragState()
+  }
+
+  const handleDrop = async (event: ReactDragEvent<Element>) => {
+    if (!isCanvasImageDrag(event.dataTransfer)) return
+    clearFileDragState()
     event.preventDefault()
+    const material = readProjectMaterialDrag(event.dataTransfer)
+    if (material) {
+      if (material.projectId !== activeProject.id) {
+        setUploadError('不能把其他项目的素材拖入当前画布。')
+        return
+      }
+      placeProjectMaterialAt(
+        material,
+        reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      )
+      setUploadError(null)
+      return
+    }
     await addImageFiles(
       Array.from(event.dataTransfer.files),
       reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY })
@@ -1386,14 +1492,14 @@ const FreeCanvasBuilderInner = ({
   }
 
   const handleDragEnter = (event: ReactDragEvent<Element>) => {
-    if (!isFileDrag(event.dataTransfer)) return
+    if (!isCanvasImageDrag(event.dataTransfer)) return
     event.preventDefault()
     fileDragDepthRef.current += 1
     setFileDragActive(true)
   }
 
   const handleDragLeave = (event: ReactDragEvent<Element>) => {
-    if (!isFileDrag(event.dataTransfer)) return
+    if (!isCanvasImageDrag(event.dataTransfer)) return
     fileDragDepthRef.current = Math.max(0, fileDragDepthRef.current - 1)
     if (fileDragDepthRef.current === 0) setFileDragActive(false)
   }
@@ -1475,8 +1581,7 @@ const FreeCanvasBuilderInner = ({
     <section
       data-free-canvas-screen
       className="fixed inset-x-0 bottom-0 top-14 z-20 overflow-hidden bg-[#f7f8fb]"
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
+      onDropCapture={handleRootDropCapture}
     >
       <header className="absolute left-4 top-4 z-40 flex items-center gap-2 rounded-full border border-gray-200 bg-white/95 px-2 py-2 shadow-sm">
         <ToolbarButton title="Back" onClick={onBack}><ArrowLeft className="h-4 w-4" /></ToolbarButton>
@@ -1499,47 +1604,59 @@ const FreeCanvasBuilderInner = ({
         className={`relative h-full transition-[padding] ${
           rightPanelCollapsed ? 'pr-14' : 'pr-[456px]'
         } ${resourceLibraryExpanded ? 'xl:pl-[292px]' : ''}`}
-        onDragOver={event => {
-          if (!isFileDrag(event.dataTransfer)) return
-          event.preventDefault()
-          event.dataTransfer.dropEffect = 'copy'
-        }}
-        onDrop={handleDrop}
       >
-        <ReactFlow
-          nodes={flowNodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          deleteKeyCode={editingNodeId || isCanvasKeyboardLocked ? null : ['Backspace', 'Delete']}
-          onNodesChange={handleNodesChange}
-          onNodeClick={handleNodeClick}
-          onNodeDoubleClick={handleNodeDoubleClick}
-          onNodeDragStop={handleNodeDragStop}
-          onSelectionChange={({ nodes: selection }) => setSelectedNodeIds(selection.map(node => node.id))}
-          onConnect={handleConnect}
-          isValidConnection={isValidConnection}
-          onEdgeClick={handleEdgeClick}
-          onPaneClick={() => {
-            setSelectedNodeIds([])
-            setSelectedNodeId(null)
-            setSelectedEdgeId(null)
-            setEditingNodeId(null)
-            if (window.innerWidth < 1440) setResourceLibraryExpanded(false)
+        <div
+          data-free-canvas-dropzone
+          className={`relative h-full ${resourceLibraryExpanded ? 'ml-[292px] xl:ml-0' : ''}`}
+          onDragEnter={handleDragEnter}
+          onDragOver={event => {
+            if (!isCanvasImageDrag(event.dataTransfer)) return
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'copy'
           }}
-          panOnScroll
-          panOnDrag={false}
-          selectionOnDrag
-          autoPanOnSelection={false}
-          panActivationKeyCode="Space"
-          selectionMode={SelectionMode.Partial}
-          fitView
-          minZoom={0.2}
-          maxZoom={2}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         >
-          <Background variant={BackgroundVariant.Lines} gap={28} size={1} color="#e2e8f0" />
-          <MiniMap pannable zoomable className="!bottom-6 !left-auto !right-16" />
-          <Controls className="!bottom-6 !left-auto !right-4" />
-        </ReactFlow>
+          <ReactFlow
+            nodes={flowNodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            deleteKeyCode={editingNodeId || isCanvasKeyboardLocked ? null : ['Backspace', 'Delete']}
+            onNodesChange={handleNodesChange}
+            onNodeClick={handleNodeClick}
+            onNodeDoubleClick={handleNodeDoubleClick}
+            onNodeDragStop={handleNodeDragStop}
+            onSelectionChange={({ nodes: selection }) => setSelectedNodeIds(selection.map(node => node.id))}
+            onConnect={handleConnect}
+            isValidConnection={isValidConnection}
+            onEdgeClick={handleEdgeClick}
+            onPaneClick={() => {
+              setSelectedNodeIds([])
+              setSelectedNodeId(null)
+              setSelectedEdgeId(null)
+              setEditingNodeId(null)
+              if (window.innerWidth < 1440) setResourceLibraryExpanded(false)
+            }}
+            panOnScroll
+            panOnDrag={false}
+            selectionOnDrag
+            autoPanOnSelection={false}
+            panActivationKeyCode="Space"
+            selectionMode={SelectionMode.Partial}
+            fitView
+            minZoom={0.2}
+            maxZoom={2}
+          >
+            <Background variant={BackgroundVariant.Lines} gap={28} size={1} color="#e2e8f0" />
+            <MiniMap pannable zoomable className="!bottom-6 !left-auto !right-16" />
+            <Controls className="!bottom-6 !left-auto !right-4" />
+          </ReactFlow>
+          {fileDragActive && (
+            <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-[18px] border-2 border-dashed border-sky-300 bg-sky-50/75 text-sm font-black text-sky-700">
+              松开以添加图片
+            </div>
+          )}
+        </div>
 
         <CanvasBottomToolbar
           positionClassName={
@@ -1593,11 +1710,6 @@ const FreeCanvasBuilderInner = ({
             {clipboardNotice}
           </div>
         )}
-        {fileDragActive && (
-          <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-[18px] border-2 border-dashed border-sky-300 bg-sky-50/75 text-sm font-black text-sky-700">
-            松开以添加图片
-          </div>
-        )}
         {cropNode && (
           <ImageCropEditor
             media={imageNodeToMedia(cropNode)}
@@ -1626,7 +1738,23 @@ const FreeCanvasBuilderInner = ({
           <Bot className="h-4 w-4" />
         </button>
       ) : (
-        <aside className="absolute bottom-0 right-0 top-0 z-30 flex w-[456px] max-w-[calc(100%_-_56px)] flex-col overflow-hidden border-l border-[#e5e7eb] bg-white">
+        <aside
+          data-free-canvas-composer-dropzone
+          className="absolute bottom-0 right-0 top-0 z-30 flex w-[456px] max-w-[calc(100%_-_56px)] flex-col overflow-hidden border-l border-[#e5e7eb] bg-white"
+          onDragEnter={handleComposerDragEnter}
+          onDragOver={handleComposerDragOver}
+          onDragLeave={handleComposerDragLeave}
+          onDrop={handleComposerDrop}
+        >
+          {composerFileDragActive && (
+            <div className="pointer-events-none absolute inset-2 z-[70] grid place-items-center rounded-xl border-2 border-dashed border-violet-300 bg-violet-50/90 px-5 text-center backdrop-blur-sm">
+              <div>
+                <ImageIcon className="mx-auto h-6 w-6 text-violet-600" />
+                <div className="mt-2 text-xs font-black text-gray-950">松开以加入本轮参考图</div>
+                <div className="mt-1 text-[10px] text-gray-500">仅加入草稿，不会自动发送</div>
+              </div>
+            </div>
+          )}
           <div className="shrink-0 border-b border-[#e5e7eb] bg-white">
             <div className="flex h-11 items-center justify-between gap-2 px-3">
               <div className="flex min-w-0 items-center gap-2">
@@ -1733,6 +1861,7 @@ const FreeCanvasBuilderInner = ({
                     role: input.role,
                     order: input.order
                   })),
+                  maxImages: maxComposerImages,
                   onMentionReference: referenceId => setImageComposerDraft(current => {
                     const input = current.inputs.find(candidate => candidate.referenceId === referenceId)
                     if (!input) return current

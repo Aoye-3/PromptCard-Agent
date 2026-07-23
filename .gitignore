@@ -163,6 +163,7 @@ NewVison/Prompt Guide/
 !tests/fixtures/image-generation-status.json
 tests/.runtime/
 .cache/
+/remotion-video/
 public/prompt-library-presets.json
 *.xml
 *.yaml

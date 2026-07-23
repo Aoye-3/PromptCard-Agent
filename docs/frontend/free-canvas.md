@@ -71,15 +71,19 @@ The browser reaches the local Runtime through `/agent-api/promptcard/runtime/ima
 
 The bottom toolbar action is `打开图片生成`. It only opens the project Image Generation tab and starts an in-memory blank draft; it never creates an `image-generator` node and is not draggable. A conversation row is created only when the first queued run is persisted.
 
-The Image Generation tab contains a model-readiness header, new-conversation and project-history actions, chronological turn cards, and a fixed composer. The composer supports structured prompt/reference tokens, local uploads, explicit injection of the current React Flow selection, capability-driven workflow/model/ratio/resolution/format/watermark controls, and the point/bounding-box region dialog.
+The Image Generation tab contains a model-readiness header, new-conversation and project-history actions, chronological turn cards, and a fixed 520 px right-rail Composer. The Composer is one visual surface: an attachment strip, one textarea, and one bottom toolbar. Workflow, ready model, ratio/resolution/custom size, output format, prompt optimization, and watermark settings open in anchored popovers instead of occupying permanent vertical space. It supports local uploads, explicit injection of the current React Flow selection, and the point/bounding-box region dialog.
 
 Canvas nodes are injected only after the user clicks `加入所选节点`. Visible ordered text is appended to the draft and image nodes with local `assetId` values become references. Selection, dragging, connecting, restoring a project, or editing node properties never injects content or invokes the provider. Rejected selections report a concrete reason.
 
 The same asset may occupy source and reference roles, but each role counts toward the ten-image limit. Composer inputs keep stable `referenceId` values and explicit order. Provider-side `图1`/`图2` labels are derived from that order rather than persisted into the prompt.
 
-The prompt editor stores `{ type: "text" }` and `{ type: "reference" }` segments, never `contentEditable` HTML. Visible text nodes enter the draft only through the explicit selection-injection action.
+The prompt editor stores `{ type: "text" }` and `{ type: "reference" }` segments, never `contentEditable` HTML. The visible textarea and mention ranges are reconciled by pure functions in `reference-prompt-document.ts`; persisted data remains `PromptDocument`. Visible text nodes enter the draft only through the explicit selection-injection action.
 
-Typing `@` opens a keyboard-accessible reference picker. A mention persists `referenceId`, not a display number. The reference strip shows thumbnail, compiled number, label, and token usage; removing an input also removes its token and bound draft regions.
+Typing ASCII `@` outside IME composition opens a keyboard-accessible picker containing only images already added to the current draft. The picker supports filtering, pointer selection, Arrow Up/Down, Enter/Tab, and Escape. The toolbar `@` button opens the same flow. A mention displays readable `@label` text but persists `referenceId`, not a display number. Repeated mentions may reference the same image. Editing through a mention degrades it to ordinary text. Removing an input preserves its token as unresolved and blocks generation until the user removes or rebinds it; regions bound to the removed input are still removed.
+
+The attachment strip shows the compiled `图N`, source/reference role, and mention usage. Its per-image menu owns reordering, role changes, visual annotations, and removal. Visual-annotation actions identify the image by stable `referenceId`; region edit separately exposes the current region count and opens the point/bounding-box editor.
+
+Composer validation separates submission blocking from inline presentation. Empty prompt, model readiness, and connection readiness still disable Generate, but an untouched empty prompt does not render a red error and model remediation remains in the header. Actionable draft errors such as unresolved mentions, invalid custom dimensions, missing source/reference inputs, and missing regions render near the send button.
 
 The user-facing workflow is distinct from the provider mode:
 
@@ -190,6 +194,34 @@ The Free Canvas right panel has an `Agent` / `图片生成` / `Prompt库` segmen
 - Management functions such as edit mode, add-to-library, Trash, and Agent ingestion are intentionally hidden in the embedded preview.
 - `previewMode` still disables Agent Runtime, while Prompt library preview can read locally available presets.
 
+## Image Generation Placeholder Lifecycle
+
+An Image Generation send is represented by one durable ordinary image node from submission through completion. The frontend creates a run ID in the form `image-run-<32 lowercase hex>` and uses it for the optimistic conversation turn, Runtime request, Storage run, placement, and node metadata. The node ID is `free-image-generation-${runId}`; reconciliation must use `meta.generationRunId` as the semantic identity and must never create a second node for the same run.
+
+Submission order is part of the provider-call safety boundary:
+
+1. Validate the draft and persist any reference-image or annotation derivatives.
+2. Create a placeholder at the next visible canvas position. Fit the requested aspect ratio inside a 320 px box; `smart` uses 320 x 320.
+3. Persist the project containing the placeholder.
+4. Call the Runtime only after that save succeeds.
+
+The placeholder carries this generation metadata:
+
+| Field | Contract |
+| --- | --- |
+| `generationRunId` | Stable run identity shared with Runtime and Storage. |
+| `conversationId` | Owning project image-generation conversation. |
+| `generationState` | `running`, `succeeded`, or `failed`. |
+| `generationErrorCode` | Safe normalized code, present only for failed nodes. |
+| `source` | Always `image-generation-conversation`. |
+| `generatedResult` | Present and `true` only after success. |
+
+A running node renders a busy placeholder with `aria-busy`, permits selection, movement, and resizing, and suppresses crop, annotation, secondary-creation, and deletion actions. Deletion is blocked both in the node UI and in the shared canvas deletion path. A terminal node is deletable.
+
+Success updates only `assetId`, the local asset URL, and generation metadata on the matching node. It must preserve node ID, position, width, height, selection, and other canvas changes made while the request was in flight. Failure retains the same node at the user's chosen frame and stores only a safe error code; retry remains a right-panel history action and creates a new run.
+
+On project load, running nodes are reconciled against Storage by `generationRunId`. `queued` or `running` records keep the busy state and are polled; `failed` records restore a failed placeholder; `succeeded` records hydrate from the first output asset. A missing run or missing successful output becomes a stable failed placeholder. Pending placement processing hydrates an existing node first and marks the placement `placed` only after project persistence. Creating a new result node remains a compatibility fallback for successful runs that predate placeholders.
+
 ## Verification
 
 ```powershell
@@ -213,4 +245,4 @@ Quick-message manual checks should confirm the drawer and lightweight dialog hav
 and that clicking a quick message inserts only a red preset text node even when the preset has
 reference media in Prompt Library.
 
-Image-generation manual checks should confirm connection/assignment selection, explicit canvas text/image injection, stable multi-reference `@` binding after reorder, source/reference role switching, 1K/2K/custom validation, point/bbox save and undo, visual-markup rasterization, failed-run retry as a new row, generated-result placement and Media reuse, reload recovery, and history retention after project deletion. Node selection, edge changes, project reload, and result-node continuation must not call the provider until the user presses Generate. Do not perform a live Ark smoke test unless the user has configured a keyring credential and explicitly enabled the server rollout flag.
+Image-generation manual checks should confirm connection/assignment selection, explicit canvas text/image injection, stable multi-reference `@` binding after reorder, source/reference role switching, 1K/2K/custom validation, point/bbox save and undo, visual-markup rasterization, placeholder appearance before the delayed Runtime response, running-node movement/resizing and deletion blocking, in-place success without frame reset, retained failure, failed-run retry as a new row, generated-result placement and Media reuse, reload recovery, and history retention after project deletion. A failed placeholder save must not call the provider. Node selection, edge changes, project reload, and result-node continuation must not call the provider until the user presses Generate. Do not perform a live Ark smoke test unless the user has configured a keyring credential and explicitly enabled the server rollout flag.

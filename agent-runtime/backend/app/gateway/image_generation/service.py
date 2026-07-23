@@ -258,7 +258,7 @@ class ImageGenerationService:
             if provider_request_id:
                 success_patch["providerRequestId"] = provider_request_id
             if provider_result.usage:
-                success_patch["providerUsage"] = provider_result.usage
+                success_patch["usage"] = provider_result.usage
             self._storage.update_run(command.run_id, success_patch)
             outcome = GenerationOutcome(
                 run_id=command.run_id,

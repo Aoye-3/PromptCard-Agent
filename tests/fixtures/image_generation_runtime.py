@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import base64
 import os
+import time
+from pathlib import Path
 from typing import Any
 
 import uvicorn
@@ -19,9 +20,7 @@ from app.gateway.routers import image_generation
 
 MODEL_ID = "doubao-seedream-5-0-pro-260628"
 CONNECTION_ID = "e2e-ark-image"
-ONE_PIXEL_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII="
-)
+GENERATED_IMAGE_BYTES = (Path(__file__).resolve().parents[2] / "public" / "app-icon.png").read_bytes()
 
 
 class FakeConnections:
@@ -59,6 +58,7 @@ class RecordingProvider:
                 "aspectRatio": request.aspect_ratio,
             }
         )
+        time.sleep(1.2)
         return ImageGenerationResult(
             image=ProviderImage(url="https://e2e.invalid/generated.png"),
             request_id=f"e2e-provider-{len(self._requests)}",
@@ -68,10 +68,10 @@ class RecordingProvider:
 class FakeResultFetcher:
     def fetch(self, _url: str) -> FetchedImage:
         return FetchedImage(
-            content=ONE_PIXEL_PNG,
+            content=GENERATED_IMAGE_BYTES,
             content_type="image/png",
-            width=1,
-            height=1,
+            width=512,
+            height=512,
             extension=".png",
         )
 

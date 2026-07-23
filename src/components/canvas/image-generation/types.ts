@@ -99,13 +99,16 @@ export interface ImageGenerationComposerProps {
   watermark: boolean
   onWatermarkChange: (value: boolean) => void
   selectedNode?: { id: string; label: string }
+  selectedNodeCount?: number
   onInjectSelectedNode?: (nodeId: string) => void
   onUpload: (file: File) => void
+  regionCount?: number
   onEditRegions?: () => void
-  onEditAnnotations?: () => void
+  onEditAnnotations?: (referenceId: string) => void
   onSubmit: () => void
   disabled?: boolean
   missingRequirements?: string[]
+  blockingRequirements?: string[]
 }
 
 export interface ImageGenerationConversationPanelProps {

@@ -67,6 +67,11 @@ type RegionBody = Annotated[PointRegionBody | BBoxRegionBody, Field(discriminato
 
 
 class ImageGenerationBody(RequestModel):
+    run_id: str | None = Field(
+        default=None,
+        alias="runId",
+        pattern=r"^image-run-[0-9a-f]{32}$",
+    )
     project_id: str = Field(alias="projectId")
     conversation_id: str | None = Field(default=None, alias="conversationId", min_length=1)
     node_id: str | None = Field(default=None, alias="nodeId", min_length=1)
@@ -153,7 +158,7 @@ def _command(body: ImageGenerationBody) -> GenerationCommand:
         for region in body.regions
     )
     return GenerationCommand(
-        run_id=f"image-run-{uuid4().hex}",
+        run_id=body.run_id or f"image-run-{uuid4().hex}",
         project_id=body.project_id,
         node_id=body.node_id,
         conversation_id=body.conversation_id,

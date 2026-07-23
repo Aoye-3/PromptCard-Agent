@@ -253,10 +253,11 @@ The browser client normalizes this to `{code, message, action, retryable, field?
 
 ### `POST /agent-api/promptcard/runtime/image-generations`
 
-The frontend sends normalized intent and local asset IDs. The Runtime creates the run ID, localizes the provider result, and returns no provider URL:
+The frontend sends normalized intent, local asset IDs, and may supply a stable run ID. The Runtime localizes the provider result and returns no provider URL:
 
 ```json
 {
+  "runId": "image-run-0123456789abcdef0123456789abcdef",
   "projectId": "project-1",
   "conversationId": "image-conversation-1",
   "connectionId": "uuid",
@@ -289,6 +290,8 @@ The frontend sends normalized intent and local asset IDs. The Runtime creates th
 }
 ```
 
+`runId` is optional for compatibility. When supplied, it must match `^image-run-[0-9a-f]{32}$`; Runtime uses that exact ID for the durable run and returns the same value. When omitted, Runtime generates the ID as before. An invalid supplied value is rejected during request validation before run creation or provider access.
+
 `conversationId` identifies a project-level Image Generation Agent conversation and does not require `nodeId`. Legacy node-bound callers may send `nodeId` instead; at least one identity is required. When a conversation already exists, Runtime verifies that it belongs to `projectId` before provider access and maps a mismatch to a sanitized not-found response. Runtime compiles only this request's prompt, inputs, regions, and settings; it never reads or appends earlier conversation runs.
 
 For `aspectRatio: "custom"`, positive integer `width` and `height` are required and must satisfy 921600–4624220 total pixels and `1:16–16:1`. The total image count includes the source image and cannot exceed ten. At most one input may use `role: "source-image"`. `edit` and `region-edit` require a source image; `region-edit` also requires at least one point or bounding box.
@@ -299,7 +302,7 @@ Success:
 
 ```json
 {
-  "runId": "image-run-generated-id",
+  "runId": "image-run-0123456789abcdef0123456789abcdef",
   "state": "succeeded",
   "assetId": "generated-local-asset.png",
   "captureId": "generated-result-capture",
@@ -308,6 +311,8 @@ Success:
   "height": 2048
 }
 ```
+
+If the request supplied `runId`, the browser treats a different response `runId` as an invalid Runtime response rather than associating the result with another canvas placeholder.
 
 New requests require `PROMPTCARD_IMAGE_GENERATION_NODE_V1=true`; otherwise the endpoint returns `403 image_generation_disabled` before creating a run or reading a credential. Validation/provider/storage failures use a sanitized `detail` object with `code`, `message`, `retryable`, and, after run creation, `runId`. Capacity and rate-limit errors return `429`; retryable infrastructure errors return `503`; other request/provider errors return `422`.
 

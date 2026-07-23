@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  createImageGenerationRunId,
   ImageGenerationController,
   requestImageGeneration,
   type ImageGenerationRequest
@@ -64,9 +65,10 @@ describe('image generation client', () => {
     expect(fetcher).not.toHaveBeenCalled()
   })
 
-  it('posts the camelCase runtime contract without inventing a run id and keeps only local result fields', async () => {
+  it('posts the stable client run id and keeps only local result fields', async () => {
+    const runId = 'image-run-0123456789abcdef0123456789abcdef'
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      runId: 'image-run-backend',
+      runId,
       state: 'succeeded',
       assetId: 'asset-local.png',
       captureId: 'capture-local',
@@ -76,17 +78,17 @@ describe('image generation client', () => {
       remoteUrl: 'https://provider.example/secret.png',
       apiKey: 'raw-secret'
     }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
-    const unsafeRequest = { ...request(), width: 999, height: 999, runId: 'frontend-run', remoteUrl: 'https://bad.example' } as ImageGenerationRequest
+    const unsafeRequest = { ...request(), width: 999, height: 999, runId, remoteUrl: 'https://bad.example' } as ImageGenerationRequest
 
     const result = await requestImageGeneration(unsafeRequest, fetcher)
 
     expect(fetcher).toHaveBeenCalledWith('/agent-api/promptcard/runtime/image-generations', expect.objectContaining({
       method: 'POST',
-      credentials: 'include',
-      body: JSON.stringify(request())
+      credentials: 'include'
     }))
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({ ...request(), runId })
     expect(result).toEqual({
-      runId: 'image-run-backend',
+      runId,
       state: 'succeeded',
       assetId: 'asset-local.png',
       captureId: 'capture-local',
@@ -96,6 +98,27 @@ describe('image generation client', () => {
     })
     expect(JSON.stringify(result)).not.toContain('provider.example')
     expect(JSON.stringify(result)).not.toContain('raw-secret')
+  })
+
+  it('creates run ids accepted by the runtime contract', () => {
+    expect(createImageGenerationRunId()).toMatch(/^image-run-[0-9a-f]{32}$/)
+  })
+
+  it('rejects a response that does not preserve the requested run id', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      runId: 'image-run-fedcba9876543210fedcba9876543210',
+      state: 'succeeded',
+      assetId: 'asset-local.png',
+      captureId: 'capture-local',
+      contentType: 'image/png',
+      width: 1024,
+      height: 1024
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(requestImageGeneration({
+      ...request(),
+      runId: 'image-run-0123456789abcdef0123456789abcdef'
+    }, fetcher)).rejects.toMatchObject({ code: 'invalid_runtime_response' })
   })
 
   it('sends the CSRF token required by the runtime gateway', async () => {

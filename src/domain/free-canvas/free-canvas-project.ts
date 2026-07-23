@@ -27,6 +27,17 @@ import type { ImageRegion } from '@/domain/image-generation/image-generation'
 const DEFAULT_USER_COLOR = '#111827'
 const DEFAULT_PRESET_COLOR = '#ef4423'
 
+export type FreeCanvasImageGenerationState = 'running' | 'succeeded' | 'failed'
+
+export interface FreeCanvasImageGenerationPlaceholderInput {
+  runId: string
+  conversationId: string
+  prompt: string
+  position: IFreeCanvasPosition
+  width: number
+  height: number
+}
+
 export const createFreeCanvasProject = (
   timestamp = Date.now(),
   overrides: Partial<IFreeCanvasProject> = {}
@@ -106,6 +117,72 @@ export const createFreeCanvasImageNodeFromMedia = (
   annotations: [],
   meta: { ...media.meta, legacyMediaNodeId: media.id }
 })
+
+export const createFreeCanvasImageGenerationPlaceholder = (
+  input: FreeCanvasImageGenerationPlaceholderInput
+): IFreeCanvasImageNode => ({
+  id: `free-image-generation-${input.runId}`,
+  kind: 'image',
+  title: '生成图片',
+  position: normalizePosition(input.position),
+  width: Math.max(1, Number(input.width)),
+  height: Math.max(1, Number(input.height)),
+  assetId: null,
+  imageUrl: '',
+  imagePrompt: input.prompt,
+  sourceNodeId: null,
+  crop: null,
+  annotations: [],
+  meta: {
+    generationRunId: input.runId,
+    conversationId: input.conversationId,
+    generationState: 'running',
+    source: 'image-generation-conversation'
+  }
+})
+
+export const completeFreeCanvasImageGeneration = (
+  project: IFreeCanvasProject,
+  runId: string,
+  assetId: string,
+  imageUrl: string
+): IFreeCanvasProject => ({
+  ...project,
+  nodes: project.nodes.map(node => {
+    if (node.kind !== 'image' || node.meta?.generationRunId !== runId) return node
+    const meta: Record<string, unknown> = {
+      ...node.meta,
+      generationState: 'succeeded' satisfies FreeCanvasImageGenerationState,
+      generatedResult: true
+    }
+    delete meta.generationErrorCode
+    return { ...node, assetId, imageUrl, meta }
+  })
+})
+
+export const failFreeCanvasImageGeneration = (
+  project: IFreeCanvasProject,
+  runId: string,
+  errorCode: string
+): IFreeCanvasProject => ({
+  ...project,
+  nodes: project.nodes.map(node => (
+    node.kind === 'image' && node.meta?.generationRunId === runId
+      ? {
+          ...node,
+          meta: {
+            ...node.meta,
+            generationState: 'failed' satisfies FreeCanvasImageGenerationState,
+            generationErrorCode: errorCode
+          }
+        }
+      : node
+  ))
+})
+
+export const isRunningFreeCanvasImageGeneration = (node: IFreeCanvasNode): boolean => (
+  node.kind === 'image' && node.meta?.generationState === 'running'
+)
 
 export const createFreeCanvasImageAnnotation = (
   kind: FreeCanvasImageAnnotationKind,
@@ -350,7 +427,10 @@ export const removeFreeCanvasProjectNodes = (
   project: IFreeCanvasProject,
   nodeIds: string[]
 ): IFreeCanvasProject => {
-  const removed = new Set(nodeIds)
+  const requested = new Set(nodeIds)
+  const removed = new Set(project.nodes
+    .filter(node => requested.has(node.id) && !isRunningFreeCanvasImageGeneration(node))
+    .map(node => node.id))
   return {
     ...project,
     nodes: project.nodes.filter(node => !removed.has(node.id)),

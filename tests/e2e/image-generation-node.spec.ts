@@ -21,16 +21,24 @@ test('project image conversation uses real Runtime and SQLite while canvas conti
   await expect(page.locator('[data-free-canvas-image-generation-panel]')).toBeVisible()
   await expect(page.getByText('默认图片模型已就绪')).toBeVisible()
 
-  await page.getByRole('button', { name: '注入当前节点' }).click()
+  await page.getByRole('button', { name: '添加图片输入' }).click()
+  await page.getByRole('button', { name: /注入已选节点/ }).click()
   const prompt = page.getByRole('form', { name: '图片生成输入' }).getByRole('textbox').first()
   await expect(prompt).toHaveValue('银色机械装置，干净产品摄影')
   await prompt.fill('第一轮：银色机械装置，电影感产品摄影')
   const firstGenerationResponse = page.waitForResponse(response => response.url().includes('/image-generations'))
-  await page.getByRole('button', { name: '生成图片' }).click()
+  await page.getByRole('button', { name: '生成图片', exact: true }).click()
+  const runningNode = page.locator('[data-image-generation-state="running"]')
+  await expect(runningNode).toBeVisible()
+  const placeholderFlowNode = runningNode.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " react-flow__node ")]')
+  const placeholderNodeId = await placeholderFlowNode.getAttribute('data-id')
+  expect(placeholderNodeId).toMatch(/^free-image-generation-image-run-[0-9a-f]{32}$/)
   const firstGeneration = await firstGenerationResponse
   expect(firstGeneration.ok(), await firstGeneration.text()).toBe(true)
 
   await expect(page.locator('[data-image-generation-turn]')).toHaveCount(1)
+  await expect(page.locator(`[data-id="${placeholderNodeId}"] [data-image-generation-state]`))
+    .toHaveAttribute('data-image-generation-state', 'succeeded')
   await expect(page.locator('[data-image-generation-turn] img[src*="/storage-api/assets/"]')).toBeVisible()
   await expect.poll(async () => generatedCanvasNodes(request, projectId)).toBe(1)
 
@@ -46,7 +54,7 @@ test('project image conversation uses real Runtime and SQLite while canvas conti
   await expect(prompt).toHaveValue('第一轮：银色机械装置，电影感产品摄影')
   await prompt.fill('第二轮：只生成蓝色玻璃装置')
   const secondGenerationResponse = page.waitForResponse(response => response.url().includes('/image-generations'))
-  await page.getByRole('button', { name: '生成图片' }).click()
+  await page.getByRole('button', { name: '生成图片', exact: true }).click()
   const secondGeneration = await secondGenerationResponse
   expect(secondGeneration.ok(), await secondGeneration.text()).toBe(true)
   await expect(page.locator('[data-image-generation-turn]')).toHaveCount(2)
@@ -71,11 +79,24 @@ test('project image conversation uses real Runtime and SQLite while canvas conti
   await page.locator('[data-image-node]').last().evaluate(element => {
     element.closest('.react-flow__node')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
   })
-  await page.getByTitle('智能改图').click({ timeout: 5_000 })
-  await expect(page.getByRole('combobox', { name: '生成方式' })).toHaveValue('smart-edit')
-  await expect(page.getByLabel('本轮参考图')).toBeVisible()
+  await page.getByTitle('智能改图').evaluate(element => (element as HTMLButtonElement).click())
+  await expect(page.getByRole('button', { name: '选择生成方式' })).toContainText('智能改图')
+  await expect(page.getByLabel('本轮图片输入')).toBeVisible()
   const afterContinuation = await runtimeJson(request, '/__test__/provider-requests')
   expect(afterContinuation.requests).toHaveLength(requestCountBeforeContinuation)
+
+  await prompt.fill('使用 @')
+  const referencePicker = page.getByRole('listbox', { name: '选择已添加图片引用' })
+  await expect(referencePicker).toBeVisible()
+  await referencePicker.getByRole('option').first().click()
+  await expect(prompt).toHaveValue(/使用 @.+/)
+  const referencedGenerationResponse = page.waitForResponse(response => response.url().includes('/image-generations'))
+  await page.getByRole('button', { name: '生成图片', exact: true }).click()
+  const referencedGeneration = await referencedGenerationResponse
+  expect(referencedGeneration.ok(), await referencedGeneration.text()).toBe(true)
+  const afterReferencedGeneration = await runtimeJson(request, '/__test__/provider-requests')
+  expect(afterReferencedGeneration.requests).toHaveLength(requestCountBeforeContinuation + 1)
+  expect(afterReferencedGeneration.requests[2].segments.some((segment: { type: string }) => segment.type === 'reference')).toBe(true)
 })
 
 async function seedProject(request: APIRequestContext, projectId: string, title: string) {

@@ -14,3 +14,4 @@ Architecture Decision Records capture durable product and engineering decisions 
 - [ADR-010: Project Image Generation Conversations And Durable Canvas Placements](./ADR-010-project-image-generation-conversations.md)
 - [ADR-011: Preserve Original Images And Use Permanent Provider Derivatives](./ADR-011-original-and-derived-image-assets.md)
 - [ADR-012: Replace DeerFlow With A Focused pi Text Agent And Extensible Provider Boundary](./ADR-012-pi-text-agent-and-ark-runtime.md)
+- [ADR-013: Use Stable Run IDs For Recoverable Image Generation Placeholders](./ADR-013-recoverable-image-generation-placeholders.md)

@@ -5,10 +5,13 @@ import {
   addFreeCanvasImageAnnotation,
   appendFreeCanvasUserText,
   createFreeCanvasImageGeneratorNode,
+  createFreeCanvasImageGenerationPlaceholder,
   createFreeCanvasImageNodeFromMedia,
   createFreeCanvasProject,
   createQuickTextNode,
   freeCanvasTextSegmentsToPlainText,
+  failFreeCanvasImageGeneration,
+  completeFreeCanvasImageGeneration,
   migrateLegacyThreeStageFreeCanvasProject,
   replaceFreeCanvasTextRange,
   replaceFreeCanvasImageAnnotations,
@@ -16,6 +19,7 @@ import {
   removeFreeCanvasProjectNodes,
   updateFreeCanvasImageAnnotation,
   updateFreeCanvasImageNodeFrame,
+  updateFreeCanvasNodePosition as updateFreeCanvasProjectNodePosition,
   updateFreeCanvasTextNodeStyle,
   updateFreeCanvasTextNodeUserText
 } from './free-canvas-project'
@@ -49,6 +53,85 @@ describe('free canvas project domain', () => {
       kind: 'image',
       annotations: []
     })
+  })
+
+  test('creates a stable running image generation placeholder', () => {
+    const node = createFreeCanvasImageGenerationPlaceholder({
+      runId: 'image-run-0123456789abcdef0123456789abcdef',
+      conversationId: 'conversation-1',
+      prompt: 'A red apple',
+      position: { x: 120, y: 240 },
+      width: 320,
+      height: 180
+    })
+
+    expect(node).toMatchObject({
+      id: 'free-image-generation-image-run-0123456789abcdef0123456789abcdef',
+      kind: 'image',
+      position: { x: 120, y: 240 },
+      width: 320,
+      height: 180,
+      assetId: null,
+      imagePrompt: 'A red apple',
+      meta: {
+        generationRunId: 'image-run-0123456789abcdef0123456789abcdef',
+        conversationId: 'conversation-1',
+        generationState: 'running',
+        source: 'image-generation-conversation'
+      }
+    })
+  })
+
+  test('completes a placeholder without overwriting its moved and resized frame', () => {
+    const runId = 'image-run-0123456789abcdef0123456789abcdef'
+    const placeholder = createFreeCanvasImageGenerationPlaceholder({
+      runId,
+      conversationId: 'conversation-1',
+      prompt: 'A red apple',
+      position: { x: 120, y: 240 },
+      width: 320,
+      height: 180
+    })
+    const moved = updateFreeCanvasProjectNodePosition(
+      updateFreeCanvasImageNodeFrame(createFreeCanvasProject(1, { nodes: [placeholder] }), placeholder.id, {
+        width: 480,
+        height: 270
+      }),
+      placeholder.id,
+      { x: 400, y: 500 }
+    )
+
+    const completed = completeFreeCanvasImageGeneration(moved, runId, 'asset-output.png', '/asset-output.png')
+
+    expect(completed.nodes[0]).toMatchObject({
+      id: placeholder.id,
+      position: { x: 400, y: 500 },
+      width: 480,
+      height: 270,
+      assetId: 'asset-output.png',
+      imageUrl: '/asset-output.png',
+      meta: { generationState: 'succeeded', generatedResult: true }
+    })
+    expect(completed.nodes[0].meta).not.toHaveProperty('generationErrorCode')
+  })
+
+  test('keeps running generation nodes when removal is requested and allows failed nodes to be removed', () => {
+    const runId = 'image-run-0123456789abcdef0123456789abcdef'
+    const placeholder = createFreeCanvasImageGenerationPlaceholder({
+      runId,
+      conversationId: 'conversation-1',
+      prompt: 'A red apple',
+      position: { x: 0, y: 0 },
+      width: 320,
+      height: 320
+    })
+    const running = createFreeCanvasProject(1, { nodes: [placeholder], selectedNodeId: placeholder.id })
+
+    expect(removeFreeCanvasProjectNodes(running, [placeholder.id]).nodes).toHaveLength(1)
+
+    const failed = failFreeCanvasImageGeneration(running, runId, 'rate_limited')
+    expect(failed.nodes[0]).toMatchObject({ meta: { generationState: 'failed', generationErrorCode: 'rate_limited' } })
+    expect(removeFreeCanvasProjectNodes(failed, [placeholder.id]).nodes).toHaveLength(0)
   })
 
   test('creates a generator bound to the current image.primary assignment', () => {

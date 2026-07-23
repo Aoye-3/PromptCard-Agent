@@ -391,11 +391,12 @@ def test_base64_provider_result_is_validated_and_saved_without_remote_fetch() ->
     assert upload[1] == "image/png"
     assert upload[2] == png_bytes()
     succeeded = storage.operations[-1][1][1]
-    assert succeeded["providerUsage"] == {
+    assert succeeded["usage"] == {
         "generatedImages": 1,
         "outputTokens": 4,
         "totalTokens": 4,
     }
+    assert "providerUsage" not in succeeded
     assert result.width == 4
     assert result.height == 3
 
@@ -999,6 +1000,7 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
     response = TestClient(app).post(
         "/api/promptcard/runtime/image-generations",
         json={
+            "runId": "image-run-0123456789abcdef0123456789abcdef",
             "projectId": "project-1",
             "nodeId": "node-1",
             "connectionId": "connection-1",
@@ -1033,6 +1035,7 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
 
     assert response.status_code == 200
     payload = response.json()
+    assert received[0].run_id == "image-run-0123456789abcdef0123456789abcdef"
     assert payload == {
         "runId": received[0].run_id,
         "state": "succeeded",
@@ -1049,6 +1052,38 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
     assert received[0].prompt_optimization == "fast"
     assert received[0].inputs[0].role == "source-image"
     assert received[0].inputs[0].source_asset_id == "asset-original.heic"
+
+
+def test_router_rejects_invalid_client_generated_run_id(monkeypatch) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
+
+    class UncalledService:
+        def generate(self, _generation_command: GenerationCommand) -> GenerationOutcome:
+            raise AssertionError("Invalid runId reached the service")
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: UncalledService()
+    response = TestClient(app).post(
+        "/api/promptcard/runtime/image-generations",
+        json={
+            "runId": "pending/run",
+            "projectId": "project-1",
+            "conversationId": "conversation-1",
+            "connectionId": "connection-1",
+            "modelId": "doubao-seedream-5-0-pro-260628",
+            "mode": "generate",
+            "promptDocument": {"segments": [{"type": "text", "text": "snow"}]},
+            "resolution": "1K",
+            "aspectRatio": "smart",
+            "outputFormat": "png",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_router_accepts_project_conversation_without_node_and_preserves_legacy_node_request(monkeypatch) -> None:

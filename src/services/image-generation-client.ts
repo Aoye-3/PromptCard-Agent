@@ -16,6 +16,7 @@ export type ImageGenerationRegion =
   | { type: 'bbox'; referenceId: string; x1: number; y1: number; x2: number; y2: number }
 
 export interface ImageGenerationRequest {
+  runId?: string
   projectId: string
   conversationId?: string
   nodeId?: string
@@ -89,7 +90,11 @@ export const requestImageGeneration = async (
       error.runId
     )
   }
-  return parseResult(payload)
+  const result = parseResult(payload)
+  if (request.runId && result.runId !== request.runId) {
+    throw new ImageGenerationClientError('invalid_runtime_response', false)
+  }
+  return result
 }
 
 export type ImageGenerationControllerState =
@@ -155,7 +160,16 @@ export const imageGenerationClient = {
   generate: requestImageGeneration
 }
 
+export const createImageGenerationRunId = (): string => {
+  const uuid = globalThis.crypto?.randomUUID?.().replace(/-/g, '')
+  const hex = uuid && /^[0-9a-f]{32}$/.test(uuid)
+    ? uuid
+    : Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('')
+  return `image-run-${hex}`
+}
+
 const cloneRequest = (input: ImageGenerationRequest): ImageGenerationRequest => ({
+  ...(input.runId ? { runId: input.runId } : {}),
   projectId: input.projectId,
   ...(input.conversationId ? { conversationId: input.conversationId } : {}),
   ...(input.nodeId ? { nodeId: input.nodeId } : {}),

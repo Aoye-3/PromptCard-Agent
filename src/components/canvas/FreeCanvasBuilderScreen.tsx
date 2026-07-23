@@ -25,7 +25,7 @@ import {
   useReactFlow
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { ArrowLeft, ArrowRight, Bot, BookOpen, Brush, ChevronRight, Copy, Hash, Image as ImageIcon, MessageSquare, MousePointer2, Palette, Pencil, Plus, Redo2, Save, Scissors, Square, Trash2, Type, Undo2, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Bot, BookOpen, Brush, ChevronRight, Copy, Hash, Image as ImageIcon, Loader2, MessageSquare, MousePointer2, Palette, Pencil, Plus, Redo2, Save, Scissors, Square, Trash2, Type, Undo2, X } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { PromptLibraryPreviewPanel } from '@/components/PromptLibraryPreviewMode'
 import { PromptPresetPreviewDialog } from '@/components/prompt-media/PromptPresetPreviewDialog'
@@ -41,10 +41,14 @@ import { canvasImageAssetUrl, getClipboardImageFiles, isFileDrag, isSupportedIma
 import { createFreeCanvasCroppedNodes, type FreeCanvasCropLines, type FreeCanvasMediaNode } from '@/domain/free-canvas/free-canvas'
 import {
   createFreeCanvasImageNodeFromMedia,
+  createFreeCanvasImageGenerationPlaceholder,
   createFreeCanvasImageAnnotation,
   createFreeCanvasTextNode,
   createQuickTextNode,
   freeCanvasTextSegmentsToPlainText,
+  completeFreeCanvasImageGeneration,
+  failFreeCanvasImageGeneration,
+  isRunningFreeCanvasImageGeneration,
   replaceFreeCanvasTextRange,
   replaceFreeCanvasImageAnnotations,
   removeFreeCanvasProjectNodes,
@@ -84,9 +88,9 @@ import {
   type ImageAnnotationDocument
 } from '@/domain/image-generation/annotations'
 import { compileImageGeneratorPrompt } from '@/domain/image-generation/prompt-compiler'
-import type { ModelAssignment, ModelCatalogEntry, ModelConnection } from '@/domain/models/model-management'
+import { getRuntimeErrorPresentation, type ModelAssignment, type ModelCatalogEntry, type ModelConnection } from '@/domain/models/model-management'
 import { modelManagementClient } from '@/services/model-management-client'
-import { ImageGenerationClientError, requestImageGeneration } from '@/services/image-generation-client'
+import { createImageGenerationRunId, ImageGenerationClientError, requestImageGeneration } from '@/services/image-generation-client'
 import {
   storageServiceClient,
   type ImageGenerationConversationSummary,
@@ -239,6 +243,10 @@ const FreeCanvasBuilderInner = ({
   const activeProjectIdRef = useRef(activeProject.id)
   const placementProcessingRef = useRef(false)
   const unpersistedPlacementRunIdsRef = useRef(new Set<string>())
+  const emitGenerationCanvas = useCallback((next: IFreeCanvasProject) => {
+    freeCanvasRef.current = next
+    onChangeRef.current(next)
+  }, [])
 
   useEffect(() => {
     if (!presetsInitialized) initPresets()
@@ -429,7 +437,7 @@ const FreeCanvasBuilderInner = ({
       if (annotationEditorNodeId || cropNodeId) return
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'c' || isTypingTarget(event.target)) return
       const imageNode = selectedImageNodeRef.current
-      if (!imageNode) return
+      if (!imageNode || isRunningFreeCanvasImageGeneration(imageNode)) return
       event.preventDefault()
       copiedImageNodeRef.current = imageNode
       setClipboardNotice('已复制图片节点')
@@ -503,18 +511,14 @@ const FreeCanvasBuilderInner = ({
   }, [])
 
   const resizeImageNode = useCallback((nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => {
-    onChange(updateFreeCanvasImageNodeFrame(freeCanvas, nodeId, frame))
-  }, [freeCanvas, onChange])
+    emitGenerationCanvas(updateFreeCanvasImageNodeFrame(freeCanvasRef.current, nodeId, frame))
+  }, [emitGenerationCanvas])
 
   const saveImageAnnotations = useCallback((nodeId: string, annotations: IFreeCanvasImageAnnotation[]) => {
     onChange(replaceFreeCanvasImageAnnotations(freeCanvas, nodeId, annotations))
     setAnnotationEditorNodeId(null)
   }, [freeCanvas, onChange])
 
-  const emitGenerationCanvas = useCallback((next: IFreeCanvasProject) => {
-    freeCanvasRef.current = next
-    onChangeRef.current(next)
-  }, [])
   const readyImageBindings = imageConnections.flatMap(connection => {
     if (!connection.enabled || !connection.credentialConfigured || !connection.lastTest?.ok) return []
     return imageCatalogModels
@@ -706,9 +710,22 @@ const FreeCanvasBuilderInner = ({
       })
       const additions: IFreeCanvasImageNode[] = []
       placements.forEach((placement, index) => {
-        const existing = current.nodes.find(node => node.meta?.generationRunId === placement.runId)
+        const existing = current.nodes.find((node): node is IFreeCanvasImageNode => (
+          node.kind === 'image' && node.meta?.generationRunId === placement.runId
+        ))
         if (existing) {
           const target = { runId: placement.runId, nodeId: existing.id }
+          const alreadyHydrated = existing.assetId === placement.assetId
+            && existing.meta?.generationState === 'succeeded'
+          if (!alreadyHydrated) {
+            current = completeFreeCanvasImageGeneration(
+              current,
+              placement.runId,
+              placement.assetId,
+              canvasImageAssetUrl(placement.assetId)
+            )
+            unpersistedPlacementRunIdsRef.current.add(placement.runId)
+          }
           if (unpersistedPlacementRunIdsRef.current.has(placement.runId)) awaitingPersistence.push(target)
           else persisted.push(target)
           return
@@ -732,6 +749,7 @@ const FreeCanvasBuilderInner = ({
             generatedResult: true,
             generationRunId: placement.runId,
             conversationId: placement.conversationId,
+            generationState: 'succeeded',
             source: 'image-generation-conversation'
           }
         })
@@ -739,8 +757,8 @@ const FreeCanvasBuilderInner = ({
         awaitingPersistence.push({ runId: placement.runId, nodeId: node.id })
         unpersistedPlacementRunIdsRef.current.add(placement.runId)
       })
-      if (additions.length > 0) {
-        current = { ...current, nodes: [...current.nodes, ...additions] }
+      if (additions.length > 0) current = { ...current, nodes: [...current.nodes, ...additions] }
+      if (additions.length > 0 || awaitingPersistence.length > 0) {
         emitGenerationCanvas(current)
       }
       if (awaitingPersistence.length > 0) {
@@ -761,6 +779,67 @@ const FreeCanvasBuilderInner = ({
   useEffect(() => {
     void processPendingImagePlacements(activeProject.id).catch(() => undefined)
   }, [activeProject.id, processPendingImagePlacements])
+
+  useEffect(() => {
+    let cancelled = false
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+    const reconcile = async () => {
+      const projectId = activeProject.id
+      const runningNodes = freeCanvasRef.current.nodes.filter(isRunningFreeCanvasImageGeneration)
+      if (runningNodes.length === 0) return
+      setImageGenerationBusy(true)
+      const runs = await Promise.all(runningNodes.map(async node => {
+        const runId = String(node.meta?.generationRunId || '')
+        try {
+          const run = runId ? await storageServiceClient.imageGenerationRuns.getById(runId, projectId) : null
+          return { runId, run, lookupFailed: false }
+        } catch {
+          return { runId, run: null, lookupFailed: true }
+        }
+      }))
+      if (cancelled || activeProjectIdRef.current !== projectId) return
+
+      let current = freeCanvasRef.current
+      let changed = false
+      runs.forEach(({ runId, run, lookupFailed }) => {
+        if (lookupFailed) return
+        if (!run) {
+          current = failFreeCanvasImageGeneration(current, runId, 'generation_run_missing')
+          changed = true
+          return
+        }
+        if (run.state === 'failed') {
+          current = failFreeCanvasImageGeneration(current, runId, safeGenerationErrorCode(run.error?.code))
+          changed = true
+          return
+        }
+        if (run.state === 'succeeded') {
+          const assetId = run.outputAssetIds[0]
+          if (!assetId) {
+            current = failFreeCanvasImageGeneration(current, runId, 'generation_output_missing')
+          } else {
+            current = completeFreeCanvasImageGeneration(current, runId, assetId, canvasImageAssetUrl(assetId))
+            unpersistedPlacementRunIdsRef.current.add(runId)
+          }
+          changed = true
+        }
+      })
+      if (changed) {
+        emitGenerationCanvas(current)
+        await onPersistCanvas?.(current)
+      }
+      await processPendingImagePlacements(projectId).catch(() => undefined)
+      if (cancelled || activeProjectIdRef.current !== projectId) return
+      const stillRunning = freeCanvasRef.current.nodes.some(isRunningFreeCanvasImageGeneration)
+      setImageGenerationBusy(stillRunning)
+      if (stillRunning) timeoutId = setTimeout(() => { void reconcile().catch(() => undefined) }, 1500)
+    }
+    void reconcile().catch(() => undefined)
+    return () => {
+      cancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
+    }
+  }, [activeProject.id, emitGenerationCanvas, onPersistCanvas, processPendingImagePlacements])
 
   const prepareAnnotatedComposerDraft = useCallback(async (
     draft: ImageGenerationComposerDraft
@@ -816,11 +895,26 @@ const FreeCanvasBuilderInner = ({
       setUploadError('视觉标记栅格化或派生资产保存失败，请检查本地存储。')
       return
     }
-    const optimisticId = `pending-${conversationId}-${Date.now()}`
+    const runId = createImageGenerationRunId()
+    const frame = imageGenerationPlaceholderFrame(snapshot)
+    const current = freeCanvasRef.current
+    const placeholder = createFreeCanvasImageGenerationPlaceholder({
+      runId,
+      conversationId,
+      prompt: promptDocumentPlainText(snapshot.promptDocument),
+      position: nextNodePosition(reactFlow, current.nodes.length),
+      ...frame
+    })
+    const canvasWithPlaceholder = {
+      ...current,
+      nodes: [...current.nodes, placeholder],
+      selectedNodeId: placeholder.id
+    }
+    emitGenerationCanvas(canvasWithPlaceholder)
     setActiveImageConversationId(conversationId)
     setImageGenerationBusy(true)
     setOptimisticImageTurn({
-      id: optimisticId,
+      id: runId,
       createdAt: Date.now(),
       prompt: promptDocumentPlainText(snapshot.promptDocument),
       state: 'running',
@@ -833,6 +927,24 @@ const FreeCanvasBuilderInner = ({
         watermark: snapshot.watermark
       }
     })
+    let placeholderSaved = false
+    try {
+      placeholderSaved = Boolean(await onPersistCanvas?.(canvasWithPlaceholder))
+    } catch {
+      placeholderSaved = false
+    }
+    if (!placeholderSaved) {
+      const failedCanvas = failFreeCanvasImageGeneration(freeCanvasRef.current, runId, 'storage_write_failed')
+      emitGenerationCanvas(failedCanvas)
+      const presentation = getRuntimeErrorPresentation('storage_write_failed')
+      setOptimisticImageTurn(currentTurn => currentTurn?.id === runId ? {
+        ...currentTurn,
+        state: 'failed',
+        error: { message: presentation.message, action: presentation.action }
+      } : currentTurn)
+      setImageGenerationBusy(false)
+      return
+    }
     setImageComposerDraft(createEmptyConversationDraft({
       connectionId: snapshot.connectionId,
       modelId: snapshot.modelId,
@@ -846,8 +958,21 @@ const FreeCanvasBuilderInner = ({
     }))
     setImageAnnotationDocuments({})
     try {
-      await requestImageGeneration(buildConversationGenerationRequest(activeProject.id, conversationId, snapshot))
+      const result = await requestImageGeneration({
+        ...buildConversationGenerationRequest(activeProject.id, conversationId, snapshot),
+        runId
+      })
       if (activeProjectIdRef.current === activeProject.id) {
+        const completedCanvas = completeFreeCanvasImageGeneration(
+          freeCanvasRef.current,
+          runId,
+          result.assetId,
+          canvasImageAssetUrl(result.assetId)
+        )
+        unpersistedPlacementRunIdsRef.current.add(runId)
+        emitGenerationCanvas(completedCanvas)
+        const completedSaved = await onPersistCanvas?.(completedCanvas)
+        if (completedSaved) unpersistedPlacementRunIdsRef.current.delete(runId)
         await loadImageConversations(activeProject.id)
         await loadImageConversationRuns(activeProject.id, conversationId)
         setOptimisticImageTurn(null)
@@ -856,11 +981,15 @@ const FreeCanvasBuilderInner = ({
     } catch (error) {
       if (activeProjectIdRef.current === activeProject.id) {
         const clientError = error instanceof ImageGenerationClientError ? error : null
-        setOptimisticImageTurn(current => current?.id === optimisticId ? {
-          ...current,
+        const errorCode = safeGenerationErrorCode(clientError?.code)
+        const failedCanvas = failFreeCanvasImageGeneration(freeCanvasRef.current, runId, errorCode)
+        emitGenerationCanvas(failedCanvas)
+        await onPersistCanvas?.(failedCanvas).catch(() => false)
+        setOptimisticImageTurn(currentTurn => currentTurn?.id === runId ? {
+          ...currentTurn,
           state: 'failed',
           error: { message: clientError?.message || '图片生成失败，请稍后重试。', action: clientError?.action }
-        } : current)
+        } : currentTurn)
         await Promise.all([
           loadImageConversations(activeProject.id),
           loadImageConversationRuns(activeProject.id, conversationId)
@@ -869,7 +998,7 @@ const FreeCanvasBuilderInner = ({
     } finally {
       if (activeProjectIdRef.current === activeProject.id) setImageGenerationBusy(false)
     }
-  }, [activeImageConversationId, activeProject.id, imageComposerDraft, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversationRuns, loadImageConversations, prepareAnnotatedComposerDraft, processPendingImagePlacements, selectedImageModel?.displayName])
+  }, [activeImageConversationId, activeProject.id, emitGenerationCanvas, imageComposerDraft, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversationRuns, loadImageConversations, onPersistCanvas, prepareAnnotatedComposerDraft, processPendingImagePlacements, reactFlow, selectedImageModel?.displayName])
 
   const imageComposerMissingRequirements = useMemo(() => {
     const missing: string[] = []
@@ -904,6 +1033,14 @@ const FreeCanvasBuilderInner = ({
     }
     return missing
   }, [imageAssignment, imageComposerDraft, imageGenerationNodeV1, imageRuntimeReady, previewMode, selectedImageConnection])
+  const imageComposerVisibleRequirements = useMemo(() => imageComposerMissingRequirements.filter(requirement => ![
+    '图片生成 Runtime 或 Ark SDK 尚未就绪。',
+    '尚未配置默认图片模型。',
+    '所选图片连接已停用。',
+    '所选图片连接尚未配置凭据。',
+    '所选图片连接尚未测试成功。',
+    '请输入本轮图片描述。'
+  ].includes(requirement)), [imageComposerMissingRequirements])
 
   const selectedComposerNodes = selectedNodeIds.length > 0
     ? selectedNodeIds
@@ -911,8 +1048,11 @@ const FreeCanvasBuilderInner = ({
   const selectedComposerDescriptor = selectedComposerNodes.length > 0
     ? { id: '__current-selection__', label: `加入所选节点（${selectedComposerNodes.length}）` }
     : undefined
-  const openImageAnnotationEditor = useCallback(async () => {
-    const input = imageComposerDraft.inputs.find(candidate => candidate.role === 'source-image')
+  const openImageAnnotationEditor = useCallback(async (referenceId?: string) => {
+    const input = (referenceId
+      ? imageComposerDraft.inputs.find(candidate => candidate.referenceId === referenceId)
+      : undefined)
+      || imageComposerDraft.inputs.find(candidate => candidate.role === 'source-image')
       || imageComposerDraft.inputs[0]
     if (!input) {
       setUploadError('请先添加一张需要视觉标记的图片。')
@@ -1055,6 +1195,7 @@ const FreeCanvasBuilderInner = ({
     type: node.kind === 'image-generator' ? 'imageGeneratorNode' : 'freeCanvasNode',
     position: node.position,
     selected: node.id === freeCanvas.selectedNodeId,
+    deletable: !isRunningFreeCanvasImageGeneration(node),
     style: node.kind === 'image' ? { width: node.width, height: node.height } : undefined,
     data: {
       canvasNode: node,
@@ -1112,7 +1253,7 @@ const FreeCanvasBuilderInner = ({
     }
     const removedNodeIds = changes.filter(change => change.type === 'remove').map(change => change.id)
     if (removedNodeIds.length > 0 && !isCanvasKeyboardLocked) {
-      onChange(removeFreeCanvasProjectNodes(freeCanvas, removedNodeIds))
+      emitGenerationCanvas(removeFreeCanvasProjectNodes(freeCanvasRef.current, removedNodeIds))
       setEditingNodeId(current => current && removedNodeIds.includes(current) ? null : current)
     }
   }
@@ -1145,7 +1286,7 @@ const FreeCanvasBuilderInner = ({
   }
 
   const handleNodeDragStop: OnNodeDrag<FreeCanvasFlowNode> = (_event, node) => {
-    onChange(updateFreeCanvasNodePosition(freeCanvas, node.id, node.position))
+    emitGenerationCanvas(updateFreeCanvasNodePosition(freeCanvasRef.current, node.id, node.position))
   }
 
   const handleConnect: OnConnect = (connection: Connection) => {
@@ -1591,13 +1732,16 @@ const FreeCanvasBuilderInner = ({
                   watermark: imageComposerDraft.watermark,
                   onWatermarkChange: watermark => setImageComposerDraft(current => ({ ...current, watermark })),
                   selectedNode: selectedComposerDescriptor,
+                  selectedNodeCount: selectedComposerNodes.length,
                   onInjectSelectedNode: injectSelectedCanvasNodes,
                   onUpload: file => { void uploadImageComposerReference(file) },
+                  regionCount: imageComposerDraft.regions.length,
                   onEditRegions: () => setImageRegionEditorOpen(true),
-                  onEditAnnotations: () => { void openImageAnnotationEditor() },
+                  onEditAnnotations: referenceId => { void openImageAnnotationEditor(referenceId) },
                   onSubmit: () => { void submitImageConversationTurn() },
                   disabled: imageGenerationBusy,
-                  missingRequirements: imageComposerMissingRequirements
+                  missingRequirements: imageComposerVisibleRequirements,
+                  blockingRequirements: imageComposerMissingRequirements
                 }}
               />
               {imageRegionEditorOpen && (
@@ -1901,6 +2045,9 @@ const FreeCanvasImageNodeView = ({
   onContinueCreation: (nodeId: string, workflow: ProjectImageGenerationWorkflow) => void
 }) => {
   const selectedNodeCount = useStore(state => state.nodes.filter(candidate => candidate.selected).length)
+  const generationState = node.meta?.generationState
+  const generationErrorCode = safeGenerationErrorCode(node.meta?.generationErrorCode)
+  const failurePresentation = getRuntimeErrorPresentation(generationErrorCode)
   const imageUrl = node.assetId ? canvasImageAssetUrl(node.assetId) : node.imageUrl
   const crop = node.crop
   const imageStyle = crop ? {
@@ -1911,7 +2058,12 @@ const FreeCanvasImageNodeView = ({
   } : undefined
 
   return (
-    <div data-image-node className={`group relative h-full w-full overflow-visible ${selected ? 'ring-2 ring-[#c96442]' : ''}`}>
+    <div
+      data-image-node
+      data-image-generation-state={generationState || undefined}
+      aria-busy={generationState === 'running' || undefined}
+      className={`group relative h-full w-full overflow-visible ${selected ? 'ring-2 ring-[#c96442]' : ''}`}
+    >
       <NodeResizer
         isVisible={selected && selectedNodeCount === 1}
         keepAspectRatio
@@ -1928,7 +2080,7 @@ const FreeCanvasImageNodeView = ({
           })
         }}
       />
-      <NodeToolbar isVisible={selected && selectedNodeCount === 1} position={Position.Top} offset={10}>
+      <NodeToolbar isVisible={selected && selectedNodeCount === 1 && generationState !== 'running' && Boolean(node.assetId)} position={Position.Top} offset={10}>
         <ImageNodeToolbar
           canCrop={Boolean(node.assetId && !node.crop)}
           onEdit={() => onStartAnnotationEdit(node.id)}
@@ -1939,7 +2091,18 @@ const FreeCanvasImageNodeView = ({
       </NodeToolbar>
       <Handle type="target" position={Position.Left} className="!bg-gray-950 !opacity-0 group-hover:!opacity-100" />
       <div className="relative h-full w-full overflow-hidden">
-        {imageUrl ? (
+        {generationState === 'running' ? (
+          <div role="status" className="flex h-full w-full flex-col items-center justify-center gap-3 border border-gray-200 bg-gradient-to-br from-gray-50 via-white to-gray-100 text-gray-600">
+            <Loader2 className="h-7 w-7 animate-spin text-[#c96442]" aria-hidden="true" />
+            <span className="text-xs font-bold">图片生成中</span>
+          </div>
+        ) : generationState === 'failed' ? (
+          <div role="status" className="flex h-full w-full flex-col items-center justify-center gap-2 border border-red-200 bg-red-50 px-4 text-center text-red-700">
+            <AlertTriangle className="h-6 w-6" aria-hidden="true" />
+            <span className="text-xs font-black">图片生成失败</span>
+            <span className="text-[11px] font-medium">{failurePresentation.message}</span>
+          </div>
+        ) : imageUrl ? (
           <img
             src={imageUrl}
             alt={node.title}
@@ -1953,10 +2116,12 @@ const FreeCanvasImageNodeView = ({
             Drop image
           </div>
         )}
-        <ImageAnnotationsLayer
-          annotations={node.annotations || []}
-          mode="display"
-        />
+        {generationState !== 'running' && generationState !== 'failed' && (
+          <ImageAnnotationsLayer
+            annotations={node.annotations || []}
+            mode="display"
+          />
+        )}
       </div>
       <Handle id="image-output" type="source" position={Position.Right} className="!bg-gray-950 !opacity-0 group-hover:!opacity-100" />
     </div>
@@ -3716,6 +3881,26 @@ const mergeById = <T extends { id: string }>(current: readonly T[], incoming: re
   incoming.forEach(item => merged.set(item.id, item))
   return Array.from(merged.values())
 }
+
+const imageGenerationPlaceholderFrame = (
+  draft: Pick<ImageGenerationComposerDraft, 'aspectRatio' | 'width' | 'height'>
+): { width: number; height: number } => {
+  let ratio = 1
+  if (draft.aspectRatio === 'custom' && draft.width && draft.height) {
+    ratio = draft.width / draft.height
+  } else {
+    const match = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(draft.aspectRatio)
+    if (match) ratio = Number(match[1]) / Number(match[2])
+  }
+  if (!Number.isFinite(ratio) || ratio <= 0) ratio = 1
+  return ratio >= 1
+    ? { width: 320, height: Math.max(1, Math.round(320 / ratio)) }
+    : { width: Math.max(1, Math.round(320 * ratio)), height: 320 }
+}
+
+const safeGenerationErrorCode = (value: unknown): string => (
+  typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : 'generation_failed'
+)
 
 const nextNodePosition = (reactFlow: ReturnType<typeof useReactFlow<FreeCanvasFlowNode>>, count: number) => (
   reactFlow.screenToFlowPosition({ x: window.innerWidth / 2 + count * 20, y: window.innerHeight / 2 + count * 16 })

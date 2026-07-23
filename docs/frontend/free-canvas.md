@@ -81,7 +81,11 @@ The browser reaches the local Runtime through `/agent-api/promptcard/runtime/ima
 
 The bottom toolbar action is `打开图片生成`. It only opens the project Image Generation tab and starts an in-memory blank draft; it never creates an `image-generator` node and is not draggable. A conversation row is created only when the first queued run is persisted.
 
-The Image Generation tab contains a model-readiness header, new-conversation and project-history actions, chronological turn cards, and a fixed 520 px right-rail Composer. The Composer is one visual surface: an attachment strip, one textarea, and one bottom toolbar. Workflow, ready model, ratio/resolution/custom size, output format, prompt optimization, and watermark settings open in anchored popovers instead of occupying permanent vertical space. It supports local uploads, explicit injection of the current React Flow selection, and the point/bounding-box region dialog.
+The shared right workbench is 456 px wide and reserves 56 px when collapsed. Canvas viewport-center calculations, material placement, pending generation placement, quick-message dialogs, and the bottom toolbar use those same insets; changing the visual width without updating those calculations is a layout bug. The workbench uses one 44 px title/status row and one 32 px peer-tab switcher instead of repeating page and feature titles inside each mode. Its full-height surface and both Composer surrounds are pure white; neutral gray is reserved for tab tracks, hover states, controls, and separators.
+
+The Image Generation tab contains one compact project/conversation row with icon-only new-conversation and project-history actions, chronological turn cards, and a fixed bottom Composer. Model readiness appears in the shared workbench header; the conversation row exposes only the remediation action when configuration is required. Empty conversations keep starter actions near the top rather than vertically centering a large placeholder.
+
+The Composer is one compact visual surface: a 40 px attachment strip, a 56 px prompt editor, and one 28–32 px bottom toolbar. Workflow, ready model, ratio/resolution/custom size, output format, prompt optimization, and watermark settings open in anchored popovers instead of occupying permanent vertical space. It supports local uploads, explicit injection of the current React Flow selection, and the point/bounding-box region dialog.
 
 Canvas nodes are injected only after the user clicks `加入所选节点`. Visible ordered text is appended to the draft and image nodes with local `assetId` values become references. Selection, dragging, connecting, restoring a project, or editing node properties never injects content or invokes the provider. Rejected selections report a concrete reason.
 
@@ -195,7 +199,7 @@ The current pi policy is selection-driven:
 
 The Free Canvas right panel has an `Agent` / `图片生成` / `Prompt库` segmented switcher.
 
-- `Agent` keeps the existing `free-canvas-workspace` Agent chat flow.
+- `Agent` keeps the existing `free-canvas-workspace` Agent chat flow inside the shared compact shell. Its context/runtime state uses a 40 px strip, empty-state commands stay near the top, and the bottom Composer embeds context and send controls in one bordered surface. Enter sends; Shift+Enter inserts a newline.
 - `图片生成` owns project conversations, explicit canvas injection, generation turns, result actions, and the history dialog.
 - `Prompt库` embeds the reusable prompt library preview panel.
 - Prompt library preview supports search, category filters, preset/media preview, and copy actions.
@@ -236,8 +240,10 @@ On project load, running nodes are reconciled against Storage by `generationRunI
 
 ```powershell
 npm.cmd test -- --run src/domain/free-canvas/free-canvas-project.test.ts src/utils/agent-workspace.test.ts src/services/agent-runtime-service.test.ts src/utils/storage.test.ts
+npm.cmd test -- --run src/components/AgentCollaborationPanel.test.tsx src/components/canvas/image-generation/ImageGenerationConversationPanel.test.tsx src/components/canvas/image-generation/ImageGenerationComposer.test.tsx
 npm.cmd run test:e2e -- free-canvas-image-crop.spec.ts
 npm.cmd run test:e2e -- free-canvas-text-node.spec.ts
+npx.cmd playwright test tests/e2e/free-canvas-dense-right-panel.spec.ts --project=chromium
 npx.cmd playwright test tests/e2e/model-management.spec.ts tests/e2e/image-generation-node.spec.ts --workers=1
 npm.cmd run build
 ```

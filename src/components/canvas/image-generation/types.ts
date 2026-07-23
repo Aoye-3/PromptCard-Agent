@@ -117,6 +117,7 @@ export interface ImageGenerationConversationPanelProps {
   statusLabel?: string
   statusReady?: boolean
   onConfigureModel?: () => void
+  onOpenSubjectLibrary?: () => void
   turns: ImageGenerationTurn[]
   composer: ImageGenerationComposerProps
   conversations: ImageGenerationConversationSummary[]

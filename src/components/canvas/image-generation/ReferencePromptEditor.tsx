@@ -176,9 +176,9 @@ export const ReferencePromptEditor = forwardRef<ReferencePromptEditorHandle, Ref
         aria-activedescendant={mentionTarget && filteredReferences.length > 0
           ? `image-reference-option-${filteredReferences[Math.min(mentionTarget.activeIndex, filteredReferences.length - 1)].referenceId}`
           : undefined}
-        className="nodrag block min-h-[76px] max-h-40 w-full resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400"
+        className="nodrag block min-h-14 max-h-32 w-full resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-[13px] leading-5 text-[#141413] outline-none placeholder:text-[#87867f]"
         value={serialized.text}
-        placeholder="描述你想生成或修改的图片，输入 @ 引用已添加图片"
+        placeholder="描述你想生成或修改的图片，输入 @ 引用图片"
         onChange={changeText}
         onKeyDown={handleKeyDown}
         onCompositionStart={handleCompositionStart}

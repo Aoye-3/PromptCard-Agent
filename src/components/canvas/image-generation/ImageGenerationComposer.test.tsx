@@ -47,6 +47,21 @@ const open = (renderer: ReactTestRenderer, ariaLabel: string) => {
 }
 
 describe('ImageGenerationComposer', () => {
+  it('uses the dense attachment strip and compact inline send control', () => {
+    const props = createProps()
+    let renderer!: ReactTestRenderer
+    act(() => { renderer = create(<ImageGenerationComposer {...props} />) })
+
+    const attachmentStrip = renderer.root.findByProps({ 'aria-label': '本轮图片输入' })
+    const addButton = renderer.root.findByProps({ 'aria-label': '添加图片输入' })
+    const sendButton = renderer.root.findByProps({ 'aria-label': '生成图片' })
+
+    expect(attachmentStrip.props.className).toContain('min-h-11')
+    expect(addButton.props.className).toContain('h-10')
+    expect(sendButton.props.className).toContain('h-8')
+    expect(renderer.root.findAllByType('span').some(node => node.children.join('') === '参考图 0/10')).toBe(true)
+  })
+
   it('uses compact capability-driven popovers for workflow, model, size, and advanced settings', () => {
     const props = createProps()
     let renderer!: ReactTestRenderer

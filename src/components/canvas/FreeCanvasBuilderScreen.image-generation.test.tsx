@@ -205,6 +205,12 @@ describe('project-level free canvas image generation entry', () => {
     expect(tabLabels).toContain('Agent')
     expect(tabLabels).toContain('图片生成')
     expect(tabLabels).toContain('Prompt库')
+    expect(renderer.root.findAllByType('aside').some(node => (
+      String(node.props.className).includes('w-[456px]')
+    ))).toBe(true)
+    expect(renderer.root.findAll(node => (
+      typeof node.props.className === 'string' && node.props.className.includes('pr-[456px]')
+    ))).not.toHaveLength(0)
 
     const imageTab = renderer.root.findAllByType('button').find(button => (
       button.findAll(node => node.type === 'span' && node.children.includes('图片生成')).length > 0

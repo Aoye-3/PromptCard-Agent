@@ -69,4 +69,24 @@ describe('ImageGenerationConversationPanel', () => {
     expect(panelProps.onNewConversation).toHaveBeenCalledTimes(1)
     expect(renderer.root.findByProps({ role: 'dialog' })).toBeTruthy()
   })
+
+  it('keeps the empty state compact and routes starter actions into the existing workflow', () => {
+    const panelProps = {
+      ...props(),
+      turns: [],
+      onOpenSubjectLibrary: vi.fn()
+    }
+    let renderer!: ReactTestRenderer
+    act(() => { renderer = create(<ImageGenerationConversationPanel {...panelProps} />) })
+
+    expect(renderer.root.findByProps({ 'aria-label': '图片生成会话' })).toBeTruthy()
+    expect(renderer.root.findByProps({ 'aria-label': '开始一次图片生成' })).toBeTruthy()
+    act(() => renderer.root.findByProps({ 'aria-label': '生成一张新图' }).props.onClick())
+    act(() => renderer.root.findByProps({ 'aria-label': '编辑选中图片' }).props.onClick())
+    act(() => renderer.root.findByProps({ 'aria-label': '从主体库添加' }).props.onClick())
+
+    expect(panelProps.composer.onPromptChange).toHaveBeenCalledWith('生成一张新图片：')
+    expect(panelProps.composer.onWorkflowChange).toHaveBeenCalledWith('smart-edit')
+    expect(panelProps.onOpenSubjectLibrary).toHaveBeenCalledTimes(1)
+  })
 })

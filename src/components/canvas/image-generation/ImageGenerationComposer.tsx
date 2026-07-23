@@ -114,20 +114,20 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
     <form
       ref={formRef}
       aria-label="图片生成输入"
-      className="relative border-t border-gray-200 bg-[#f7f7f5] p-3"
+      className="relative border-t border-[#e5e7eb] bg-white p-2.5"
       onSubmit={submit}
     >
-      <div className="relative rounded-[24px] border border-gray-200/90 bg-white px-3 pb-2.5 pt-3 shadow-[0_12px_36px_rgba(15,23,42,0.08)] transition-shadow focus-within:shadow-[0_16px_44px_rgba(15,23,42,0.12)]">
-        <div className="flex min-h-[58px] gap-2 overflow-x-auto pb-1" aria-label="本轮图片输入">
+      <div className="relative rounded-[10px] border border-[#d1d5db] bg-white px-2.5 pb-2 pt-2 shadow-[0_0_0_1px_rgba(20,20,19,0.02)] transition-colors focus-within:border-[#87867f]">
+        <div className="flex min-h-11 items-center gap-1.5 overflow-x-auto pb-1" aria-label="本轮图片输入">
           <div className="relative shrink-0">
             <button
               type="button"
               aria-label="添加图片输入"
               aria-expanded={openPopover === 'assets'}
-              className="group flex h-14 w-12 -rotate-2 items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 text-gray-400 transition hover:rotate-0 hover:border-gray-400 hover:bg-white hover:text-gray-800"
+              className="group flex h-10 w-10 items-center justify-center rounded-lg border border-dashed border-[#d1d5db] bg-[#f9fafb] text-[#87867f] transition hover:border-[#87867f] hover:bg-white hover:text-[#141413]"
               onClick={() => togglePopover('assets')}
             >
-              <Plus size={18} className="transition-transform group-hover:scale-110" aria-hidden="true" />
+              <Plus size={16} className="transition-transform group-hover:scale-110" aria-hidden="true" />
             </button>
             {openPopover === 'assets' && (
               <ComposerMenu className="left-0 top-[calc(100%+8px)] w-64">
@@ -155,10 +155,10 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
                 type="button"
                 aria-label={`管理图${index + 1} ${reference.label}`}
                 aria-expanded={referenceMenuId === reference.referenceId}
-                className={`group relative block h-14 w-14 overflow-hidden rounded-xl border-2 bg-gray-100 transition ${
+                className={`group relative block h-10 w-10 overflow-hidden rounded-lg border bg-gray-100 transition ${
                   reference.mentioned
-                    ? 'border-cyan-400 shadow-[0_0_0_2px_rgba(34,211,238,0.12)]'
-                    : 'border-white ring-1 ring-gray-200 hover:ring-gray-400'
+                    ? 'border-[#c96442] shadow-[0_0_0_1px_rgba(201,100,66,0.16)]'
+                    : 'border-white ring-1 ring-[#e5e7eb] hover:ring-[#87867f]'
                 }`}
                 onClick={() => {
                   setOpenPopover(null)
@@ -166,18 +166,18 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
                 }}
               >
                 <img src={reference.imageUrl} alt={reference.label} className="h-full w-full object-cover" />
-                <span className="absolute left-1 top-1 rounded-md bg-black/70 px-1.5 py-0.5 text-[9px] font-black text-white backdrop-blur">
+                <span className="absolute left-0.5 top-0.5 rounded bg-black/70 px-1 py-0.5 text-[8px] font-bold text-white">
                   图{index + 1}
                 </span>
-                <span className={`absolute bottom-1 left-1 max-w-[48px] truncate rounded-md px-1.5 py-0.5 text-[8px] font-bold backdrop-blur ${
+                <span className={`absolute bottom-0.5 left-0.5 max-w-[34px] truncate rounded px-1 py-0.5 text-[7px] font-bold ${
                   reference.role === 'source-image'
                     ? 'bg-amber-300/95 text-amber-950'
                     : 'bg-white/90 text-gray-700'
                 }`}>
                   {reference.role === 'source-image' ? '主图' : '参考'}
                 </span>
-                <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white/90 text-gray-700 opacity-0 shadow transition group-hover:opacity-100">
-                  <MoreHorizontal size={11} aria-hidden="true" />
+                <span className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/90 text-gray-700 opacity-0 shadow transition group-hover:opacity-100">
+                  <MoreHorizontal size={9} aria-hidden="true" />
                 </span>
               </button>
               {referenceMenuId === reference.referenceId && (
@@ -253,6 +253,9 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
               )}
             </div>
           ))}
+          <span className="shrink-0 pl-1 text-[10px] font-semibold tabular-nums text-[#87867f]">
+            参考图 {references.length}/{maxImages}
+          </span>
         </div>
 
         {props.promptDocument && props.onPromptDocumentChange ? (
@@ -280,8 +283,8 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
         ) : (
           <textarea
             aria-label="图片描述"
-            className="min-h-[76px] max-h-40 w-full resize-none overflow-y-auto border-0 bg-transparent px-1 py-2 text-sm leading-6 text-gray-900 outline-none placeholder:text-gray-400"
-            placeholder="描述你想生成或修改的图片"
+            className="min-h-14 max-h-32 w-full resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-[13px] leading-5 text-[#141413] outline-none placeholder:text-[#87867f]"
+            placeholder="描述你想生成或修改的图片，输入 @ 引用图片"
             value={props.prompt}
             onChange={event => props.onPromptChange(event.target.value)}
             onKeyDown={submitFromKeyboard}
@@ -318,7 +321,7 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
           </details>
         )}
 
-        <div className="flex min-w-0 items-center gap-1.5 border-t border-gray-100 pt-2">
+        <div className="flex min-w-0 items-center gap-1 border-t border-[#f3f4f6] pt-1.5">
           <ToolbarPopover
             open={openPopover === 'workflow'}
             align="left"
@@ -357,7 +360,7 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
                 label={selectedModel?.label || '选择模型'}
                 ariaLabel="选择图片模型"
                 title={selectedModel?.label}
-                className="max-w-[132px]"
+                className="max-w-[112px]"
                 icon={<Settings2 size={13} />}
                 expanded={openPopover === 'model'}
                 onClick={() => togglePopover('model')}
@@ -450,7 +453,7 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
           <button
             type="button"
             aria-label="引用已添加图片"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-600 transition hover:border-cyan-300 hover:bg-cyan-50 hover:text-cyan-700"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#e5e7eb] text-[#5e5d59] transition hover:bg-[#f9fafb] hover:text-[#141413]"
             onClick={() => {
               setOpenPopover(null)
               setReferenceMenuId(null)
@@ -469,7 +472,7 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
                 type="button"
                 aria-label="更多图片设置"
                 aria-expanded={openPopover === 'more'}
-                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-gray-200 text-gray-600 transition hover:bg-gray-50 hover:text-gray-950"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#e5e7eb] text-[#5e5d59] transition hover:bg-[#f9fafb] hover:text-[#141413]"
                 onClick={() => togglePopover('more')}
               >
                 <MoreHorizontal size={15} aria-hidden="true" />
@@ -517,14 +520,11 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
             )}
           </ToolbarPopover>
 
-          <span className="ml-auto shrink-0 text-[10px] font-semibold tabular-nums text-gray-400">
-            {references.length}/{maxImages}
-          </span>
           <button
             type="submit"
             aria-label="生成图片"
             title={blocked ? blockingRequirements[0] : '生成图片（Ctrl/⌘ + Enter）'}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-950 text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-black disabled:translate-y-0 disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none"
+            className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#141413] text-white transition hover:bg-[#30302e] disabled:bg-[#d1cfc5] disabled:text-[#87867f]"
             disabled={blocked}
           >
             <Send size={15} aria-hidden="true" />
@@ -551,7 +551,7 @@ const ComposerMenu = ({
   children: React.ReactNode
   className?: string
 }) => (
-  <div className={`absolute z-[60] rounded-2xl border border-gray-200 bg-white p-2 shadow-[0_20px_55px_rgba(15,23,42,0.16)] ${className}`}>
+  <div className={`absolute z-[60] rounded-xl border border-[#e8e6dc] bg-white p-2 shadow-[0_16px_40px_rgba(20,20,19,0.14)] ${className}`}>
     {children}
   </div>
 )
@@ -632,10 +632,10 @@ const SummaryPill = ({
     aria-label={ariaLabel}
     title={title}
     aria-expanded={expanded}
-    className={`flex h-8 min-w-0 items-center gap-1.5 rounded-xl border px-2.5 text-[11px] font-bold transition ${
+    className={`flex h-7 min-w-0 items-center gap-1 rounded-lg border px-2 text-[10px] font-semibold transition ${
       expanded
-        ? 'border-gray-300 bg-gray-100 text-gray-950'
-        : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+        ? 'border-[#d1d5db] bg-[#f3f4f6] text-[#141413]'
+        : 'border-[#e5e7eb] bg-white text-[#5e5d59] hover:bg-[#f9fafb] hover:text-[#141413]'
     } ${className}`}
     onClick={onClick}
   >
@@ -661,7 +661,7 @@ const ToolbarPopover = ({
   <div className="relative shrink-0">
     {button}
     {open && (
-      <div className={`absolute bottom-[calc(100%+10px)] z-50 rounded-2xl border border-gray-200 bg-white p-3 shadow-[0_20px_60px_rgba(15,23,42,0.16)] ${align === 'left' ? 'left-0' : 'right-0'} ${className}`}>
+      <div className={`absolute bottom-[calc(100%+8px)] z-50 rounded-xl border border-[#e8e6dc] bg-white p-3 shadow-[0_16px_44px_rgba(20,20,19,0.14)] ${align === 'left' ? 'left-0' : 'right-0'} ${className}`}>
         {children}
       </div>
     )}

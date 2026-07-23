@@ -428,7 +428,7 @@ const FreeCanvasBuilderInner = ({
 
   const placeProjectMaterial = useCallback((resource: ProjectResource) => {
     const leftInset = resourceLibraryExpanded && window.innerWidth >= 1440 ? 280 : 44
-    const rightInset = rightPanelCollapsed ? 80 : 520
+    const rightInset = rightPanelCollapsed ? 56 : 456
     const position = reactFlow.screenToFlowPosition({
       x: leftInset + Math.max(0, window.innerWidth - leftInset - rightInset) / 2,
       y: 56 + Math.max(0, window.innerHeight - 56) / 2
@@ -754,7 +754,7 @@ const FreeCanvasBuilderInner = ({
       const persisted: Array<{ runId: string; nodeId: string }> = []
       const awaitingPersistence: Array<{ runId: string; nodeId: string }> = []
       const leftInset = resourceLibraryExpanded && window.innerWidth >= 1440 ? 292 : 0
-      const rightInset = rightPanelCollapsed ? 80 : 520
+      const rightInset = rightPanelCollapsed ? 56 : 456
       const base = reactFlow.screenToFlowPosition({
         x: Math.max(180, leftInset + (window.innerWidth - leftInset - rightInset) / 2),
         y: window.innerHeight / 2
@@ -1497,7 +1497,7 @@ const FreeCanvasBuilderInner = ({
 
       <div
         className={`relative h-full transition-[padding] ${
-          rightPanelCollapsed ? 'pr-20' : 'pr-[520px]'
+          rightPanelCollapsed ? 'pr-14' : 'pr-[456px]'
         } ${resourceLibraryExpanded ? 'xl:pl-[292px]' : ''}`}
         onDragOver={event => {
           if (!isFileDrag(event.dataTransfer)) return
@@ -1545,11 +1545,11 @@ const FreeCanvasBuilderInner = ({
           positionClassName={
             resourceLibraryExpanded
               ? rightPanelCollapsed
-                ? 'left-[calc(50%_-_40px)] xl:left-[calc(50%_+_106px)]'
-                : 'left-[calc(50%_-_260px)] xl:left-[calc(50%_-_114px)]'
+                ? 'left-[calc(50%_-_28px)] xl:left-[calc(50%_+_118px)]'
+                : 'left-[calc(50%_-_228px)] xl:left-[calc(50%_-_82px)]'
               : rightPanelCollapsed
-                ? 'left-[calc(50%_-_40px)]'
-                : 'left-[calc(50%_-_260px)]'
+                ? 'left-[calc(50%_-_28px)]'
+                : 'left-[calc(50%_-_228px)]'
           }
           quickDrawerOpen={quickDrawerOpen}
           quickPresets={quickPresets}
@@ -1575,7 +1575,7 @@ const FreeCanvasBuilderInner = ({
           <QuickMessageDialog
             draft={quickPresetDraft}
             editing={Boolean(quickEditingPresetId)}
-            rightOffset={rightPanelCollapsed ? 80 : 520}
+            rightOffset={rightPanelCollapsed ? 56 : 456}
             onDraftChange={setQuickPresetDraft}
             onClose={closeQuickPresetComposer}
             onDelete={quickEditingPresetId ? () => { void deleteQuickPresetDraft() } : undefined}
@@ -1619,22 +1619,43 @@ const FreeCanvasBuilderInner = ({
       {rightPanelCollapsed ? (
         <button
           type="button"
-          className="absolute bottom-6 right-6 top-6 z-40 flex w-12 flex-col items-center justify-center gap-3 rounded-[18px] border border-gray-200 bg-white/95 text-gray-500 shadow-[0_18px_55px_rgba(15,23,42,0.14)] transition hover:text-gray-950"
+          className="absolute right-2 top-2 z-40 flex h-10 w-10 items-center justify-center rounded-[10px] border border-[#e5e7eb] bg-white/95 text-[#5e5d59] shadow-[0_4px_18px_rgba(20,20,19,0.08)] transition hover:bg-[#f9fafb] hover:text-[#141413]"
           onClick={() => setRightPanelCollapsed(false)}
           title="Open Agent panel"
         >
-          <Bot className="h-5 w-5" />
-          <span className="[writing-mode:vertical-rl] text-xs font-black uppercase tracking-wide">Agent</span>
+          <Bot className="h-4 w-4" />
         </button>
       ) : (
-        <aside className="absolute bottom-0 right-0 top-0 z-30 flex w-[520px] flex-col overflow-hidden border-l border-gray-200 bg-white">
-          <div className="shrink-0 border-b border-gray-100 px-4 py-3">
-            <button type="button" className="absolute right-3 top-3 rounded-full p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-950" onClick={() => setRightPanelCollapsed(true)} title="Collapse Agent panel">
-              <ChevronRight className="h-4 w-4" />
-            </button>
-            <h2 className="pr-8 text-sm font-black text-gray-950">{rightPanelMode === 'image-generation' ? '图片生成 Agent' : selectedNode?.title || 'Free Canvas'}</h2>
-            <p className="mt-1 pr-8 text-[11px] leading-4 text-gray-500">{rightPanelMode === 'image-generation' ? '每轮都是独立图片请求；历史不会自动成为下一轮上下文。' : 'Agent can read the canvas and only update user text segments on text nodes.'}</p>
-            <div className="mt-3 grid grid-cols-3 gap-1 rounded-full bg-gray-100 p-1" data-free-canvas-panel-switcher>
+        <aside className="absolute bottom-0 right-0 top-0 z-30 flex w-[456px] max-w-[calc(100%_-_56px)] flex-col overflow-hidden border-l border-[#e5e7eb] bg-white">
+          <div className="shrink-0 border-b border-[#e5e7eb] bg-white">
+            <div className="flex h-11 items-center justify-between gap-2 px-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate text-[13px] font-bold text-[#141413]">
+                  {rightPanelMode === 'image-generation'
+                    ? '图片生成'
+                    : rightPanelMode === 'prompt-library'
+                      ? 'Prompt 库'
+                      : selectedNode?.title || 'Free Canvas'}
+                </h2>
+                {rightPanelMode === 'image-generation' && (
+                  <span className={`inline-flex shrink-0 items-center gap-1 text-[10px] font-semibold ${
+                    imageModelUsable ? 'text-emerald-700' : 'text-amber-700'
+                  }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${imageModelUsable ? 'bg-emerald-600' : 'bg-amber-500'}`} />
+                    {imageModelUsable ? '模型已就绪' : '待配置'}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[#87867f] transition hover:bg-[#f3f4f6] hover:text-[#141413]"
+                onClick={() => setRightPanelCollapsed(true)}
+                title="Collapse Agent panel"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="mx-2 mb-2 grid h-8 grid-cols-3 gap-0.5 rounded-[9px] bg-[#f3f4f6] p-0.5" data-free-canvas-panel-switcher>
               <PanelModeButton
                 active={rightPanelMode === 'agent'}
                 label="Agent"
@@ -1663,6 +1684,7 @@ const FreeCanvasBuilderInner = ({
                 statusLabel={imageModelUsable ? '默认图片模型已就绪' : '图片模型待配置'}
                 statusReady={imageModelUsable}
                 onConfigureModel={onConfigureImageModel ? () => onConfigureImageModel({ projectId: activeProject.id, returnTarget: 'free-canvas' }) : undefined}
+                onOpenSubjectLibrary={() => setResourceLibraryExpanded(true)}
                 turns={currentImageTurns}
                 conversations={imageConversationViews}
                 onNewConversation={resetImageConversation}
@@ -1900,6 +1922,8 @@ const FreeCanvasBuilderInner = ({
               workspaceContext={workspaceContext}
               onApplyWorkspaceProposal={handleApplyAgentProposal}
               compact
+              embedded
+              contextLabel={`已读取画布 · ${freeCanvas.nodes.length} 个节点`}
             />
           ) : (
             <div className="p-5 text-sm font-semibold text-gray-400">Preview mode disables Agent Runtime.</div>
@@ -3924,8 +3948,10 @@ const PanelModeButton = ({
 }) => (
   <button
     type="button"
-    className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full px-3 py-2 text-xs font-black transition ${
-      active ? 'bg-white text-gray-950 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+    className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-[7px] px-2 py-1 text-[11px] font-semibold transition ${
+      active
+        ? 'bg-white text-[#141413] shadow-[0_0_0_1px_rgba(20,20,19,0.05)]'
+        : 'text-[#87867f] hover:bg-white/60 hover:text-[#4d4c48]'
     }`}
     onClick={onClick}
   >

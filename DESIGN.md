@@ -207,6 +207,7 @@ What makes Claude's design truly distinctive is its warm neutral palette. Every 
 - **Reserve generous whitespace for reading pages, not tools**: Operational panes should use tighter headers, smaller labels, and compact controls so conversation history, editable fields, node lists, and canvas content remain visible together.
 - **Fixed sidebars should earn their width**: When a sidebar is expanded, it should behave as a full-height work area rather than a floating card; at least 70-75% of the sidebar body should be available for the primary task such as Agent context, chat history, or form editing.
 - **Remove inactive placeholders from dense modes**: Empty proposal lists, repeated labels, and decorative status blocks should be hidden or collapsed when they do not help the current workflow.
+- **Use neutral workbench surfaces**: Full-height operational panes may use Pure White (`#ffffff`) when they sit beside an already tinted canvas or board. Reserve neutral grays for tab tracks, controls, hover states, and separators; do not tint the entire task surface with Parchment or Ivory when that reduces visual clarity.
 
 ### Border Radius Scale
 - Sharp (4px): Minimal inline elements
@@ -252,7 +253,7 @@ What makes Claude's design truly distinctive is its warm neutral palette. Every 
 - Don't introduce saturated colors beyond Terracotta — the palette is deliberately muted
 - Don't use sharp corners (< 6px radius) on buttons or cards — softness is core to the identity
 - Don't apply heavy drop shadows — depth comes from ring shadows and background color shifts
-- Don't use pure white (`#ffffff`) as a page background — Parchment (`#f5f4ed`) or Ivory (`#faf9f5`) are always warmer
+- Don't use pure white (`#ffffff`) as an editorial or reading-page background — Parchment (`#f5f4ed`) or Ivory (`#faf9f5`) remain the default there; dedicated operational workbench panes are the exception
 - Don't use geometric/tech-style illustrations — Claude's illustrations are organic and hand-drawn-feeling
 - Don't reduce body line-height below 1.40 — the generous spacing supports the editorial personality
 - Don't use monospace fonts for non-code content — Anthropic Mono is strictly for code

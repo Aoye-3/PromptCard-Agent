@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Bot, Check, Loader2, RefreshCw, Send, Wand2, X } from 'lucide-react'
+import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { Bot, Check, Loader2, MoreHorizontal, RefreshCw, Send, Wand2, X } from 'lucide-react'
 import { useAgentStore } from '@/stores/agent.store'
 import { usePresetStore } from '@/stores/preset.store'
 import type {
@@ -17,7 +17,24 @@ interface AgentCollaborationPanelProps {
   onApplyWorkspaceProposal: (proposal: AgentWorkspaceProposal) => Promise<void> | void
   autoApplyWorkspaceChanges?: boolean
   compact?: boolean
+  embedded?: boolean
+  contextLabel?: string
 }
+
+const agentQuickPrompts = [
+  {
+    label: '补全选中卡片',
+    prompt: '请读取当前选中的卡片和页面上下文，直接补全选中卡片的内容。'
+  },
+  {
+    label: '改写当前页',
+    prompt: '请把当前页所有提示词卡片改写得更具体、更适合视频生成，并直接更新相关卡片。'
+  },
+  {
+    label: '新增卡片',
+    prompt: '请根据当前页面缺失的信息，新增一张最有帮助的提示词卡片。'
+  }
+] as const
 
 export function AgentCollaborationPanel({
   title,
@@ -26,7 +43,9 @@ export function AgentCollaborationPanel({
   sessionKey: sessionKeyProp,
   onApplyWorkspaceProposal,
   autoApplyWorkspaceChanges = false,
-  compact = false
+  compact = false,
+  embedded = false,
+  contextLabel = '已读取工作区'
 }: AgentCollaborationPanelProps) {
   const sessionKey = sessionKeyProp || `workspace:${mode.replace('-workspace', '')}:${workspaceContext.projectId}`
   const {
@@ -44,7 +63,7 @@ export function AgentCollaborationPanel({
   const pendingProposals = session.proposals.filter(proposal => proposal.status === 'pending')
   const visibleRuntimeError = session.runtimeError || runtimeError
   const { presets, initialized, init } = usePresetStore()
-  const [draft, setDraft] = useState('告诉 Agent 你想怎么修改当前选中的提示词卡片。')
+  const [draft, setDraft] = useState(embedded ? '' : '告诉 Agent 你想怎么修改当前选中的提示词卡片。')
   const [appliedMessages, setAppliedMessages] = useState<AgentMessage[]>([])
 
   useEffect(() => {
@@ -88,8 +107,35 @@ export function AgentCollaborationPanel({
     setDraft('')
   }
 
+  const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    if (runtimeStatus !== 'connected' || running || !draft.trim()) return
+    void handleSend()
+  }
+
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white">
+    <div aria-label={title} className="flex h-full min-h-0 flex-col bg-white">
+      {embedded ? (
+        <div className="flex h-10 shrink-0 items-center justify-between border-b border-[#e5e7eb] px-3">
+          <div className="flex min-w-0 items-center gap-2 text-[11px]">
+            <Bot className="h-3.5 w-3.5 shrink-0 text-[#5e5d59]" aria-hidden="true" />
+            <span className="truncate font-semibold text-[#4d4c48]">{contextLabel}</span>
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${runtimeStatus === 'connected' ? 'bg-emerald-600' : 'bg-amber-500'}`} />
+            <span className="shrink-0 text-[#87867f]">
+              {runtimeStatus === 'connected' ? authStatusText(authStatus) : statusText(runtimeStatus)}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[#87867f] transition hover:bg-[#f3f4f6] hover:text-[#141413]"
+            onClick={() => checkRuntime()}
+            title="Reconnect runtime"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : (
       <div className={`shrink-0 border-b border-gray-100 ${compact ? 'p-3' : 'p-5'}`}>
         <div className={`${compact ? 'mb-2' : 'mb-3'} flex items-center justify-between gap-3`}>
           <div className="flex items-center gap-2">
@@ -118,12 +164,46 @@ export function AgentCollaborationPanel({
           </div>
         )}
       </div>
+      )}
 
-      <div className={`${compact ? 'flex-[3_1_0%] space-y-2 p-3' : 'flex-1 space-y-3 p-5'} min-h-0 overflow-y-auto`}>
+      {embedded && visibleRuntimeError && (
+        <div className="mx-3 mt-2 rounded-lg bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">
+          {visibleRuntimeError}
+        </div>
+      )}
+
+      <div className={`${embedded ? 'flex-1 space-y-2 p-3' : compact ? 'flex-[3_1_0%] space-y-2 p-3' : 'flex-1 space-y-3 p-5'} min-h-0 overflow-y-auto`}>
         {conversationMessages.length === 0 ? (
-          <div className={`${compact ? 'rounded-xl px-3 py-2 text-xs leading-5' : 'rounded-2xl px-4 py-3 text-sm'} bg-gray-50 font-semibold text-gray-400`}>
-            还没有 Agent 对话。选中左侧卡片后，可以直接让 Agent 补全、改写或新增卡片。
-          </div>
+          embedded ? (
+            <div className="rounded-[10px] border border-[#e5e7eb] bg-white p-3">
+              <div className="flex items-start gap-2">
+                <Wand2 className="mt-0.5 h-4 w-4 shrink-0 text-[#c96442]" aria-hidden="true" />
+                <div>
+                  <h3 className="text-[13px] font-bold text-[#141413]">可以直接修改当前画布</h3>
+                  <p className="mt-0.5 text-[11px] leading-4 text-[#87867f]">选中节点后，让 Agent 补全、改写或新增内容。</p>
+                </div>
+              </div>
+              <div className="mt-3 overflow-hidden rounded-lg border border-[#f3f4f6]">
+                {agentQuickPrompts.map((item, index) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    className={`flex h-9 w-full items-center gap-2 px-3 text-left text-[11px] font-semibold text-[#4d4c48] transition hover:bg-[#f9fafb] ${
+                      index > 0 ? 'border-t border-[#f3f4f6]' : ''
+                    }`}
+                    onClick={() => setDraft(item.prompt)}
+                  >
+                    <Wand2 className="h-3 w-3 text-[#87867f]" aria-hidden="true" />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className={`${compact ? 'rounded-xl px-3 py-2 text-xs leading-5' : 'rounded-2xl px-4 py-3 text-sm'} bg-gray-50 font-semibold text-gray-400`}>
+              还没有 Agent 对话。选中左侧卡片后，可以直接让 Agent 补全、改写或新增卡片。
+            </div>
+          )
         ) : (
           conversationMessages.slice(-8).map(message => (
             <div
@@ -177,20 +257,59 @@ export function AgentCollaborationPanel({
         </div>
       )}
 
+      {embedded ? (
+        <div className="shrink-0 border-t border-[#e5e7eb] bg-white p-2.5">
+          <div className="mb-2 flex min-w-0 items-center gap-1.5">
+            {agentQuickPrompts.slice(0, 2).map(item => (
+              <QuickPrompt
+                key={item.label}
+                label={item.label}
+                onClick={() => setDraft(item.prompt)}
+                dense
+              />
+            ))}
+            <button
+              type="button"
+              aria-label={agentQuickPrompts[2].label}
+              title={agentQuickPrompts[2].label}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#e5e7eb] bg-white text-[#5e5d59] transition hover:bg-[#f9fafb] hover:text-[#141413]"
+              onClick={() => setDraft(agentQuickPrompts[2].prompt)}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="rounded-[10px] border border-[#d1d5db] bg-white p-2 shadow-[0_0_0_1px_rgba(20,20,19,0.02)] focus-within:border-[#87867f]">
+            <textarea
+              className="min-h-[58px] max-h-32 w-full resize-none border-0 bg-transparent px-1 py-0.5 text-[13px] leading-5 text-[#141413] outline-none placeholder:text-[#87867f]"
+              value={draft}
+              onChange={event => setDraft(event.target.value)}
+              onKeyDown={handleComposerKeyDown}
+              placeholder="描述你想修改的内容，Enter 发送，Shift+Enter 换行"
+            />
+            <div className="mt-1 flex items-center justify-between">
+              <span className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#f3f4f6] px-2 text-[10px] font-semibold text-[#5e5d59]">
+                <Bot className="h-3 w-3" aria-hidden="true" />
+                画布上下文
+              </span>
+              <button
+                type="button"
+                aria-label="发送给 Agent"
+                title="发送给 Agent"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#141413] text-white transition hover:bg-[#30302e] disabled:bg-[#d1cfc5]"
+                onClick={() => handleSend()}
+                disabled={runtimeStatus !== 'connected' || running || !draft.trim()}
+              >
+                {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : (
       <div className={`${compact ? 'shrink-0 p-3' : 'p-5'} border-t border-gray-100`}>
         <div className={`${compact ? 'mb-2 gap-1.5' : 'mb-3 gap-2'} flex flex-wrap`}>
-          <QuickPrompt
-            label="补全选中卡片"
-            onClick={() => setDraft('请读取当前选中的卡片和页面上下文，直接补全选中卡片的内容。')}
-          />
-          <QuickPrompt
-            label="改写当前页"
-            onClick={() => setDraft('请把当前页所有提示词卡片改写得更具体、更适合视频生成，并直接更新相关卡片。')}
-          />
-          <QuickPrompt
-            label="新增卡片"
-            onClick={() => setDraft('请根据当前页面缺失的信息，新增一张最有帮助的提示词卡片。')}
-          />
+          {agentQuickPrompts.map(item => (
+            <QuickPrompt key={item.label} label={item.label} onClick={() => setDraft(item.prompt)} />
+          ))}
         </div>
         <textarea
           className={`${compact ? 'min-h-[86px] rounded-xl text-[13px] leading-5' : 'min-h-[112px] rounded-2xl text-sm leading-relaxed'} w-full resize-none border border-gray-200 bg-gray-50 px-3 py-2 text-gray-900 placeholder:text-gray-400 focus:border-gray-300 focus:bg-white focus:ring-2 focus:ring-gray-100`}
@@ -208,20 +327,23 @@ export function AgentCollaborationPanel({
           发送给 Agent
         </button>
       </div>
+      )}
 
     </div>
   )
 }
 
-function QuickPrompt({ label, onClick }: { label: string; onClick: () => void }) {
+function QuickPrompt({ label, onClick, dense = false }: { label: string; onClick: () => void; dense?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-black text-amber-800 transition hover:bg-amber-100"
+      className={dense
+        ? 'inline-flex h-7 min-w-0 items-center gap-1 rounded-lg border border-[#e5e7eb] bg-white px-2 text-[10px] font-semibold text-[#5e5d59] transition hover:bg-[#f9fafb] hover:text-[#141413]'
+        : 'inline-flex items-center gap-1 rounded-full bg-amber-50 px-3 py-1.5 text-xs font-black text-amber-800 transition hover:bg-amber-100'}
     >
-      <Wand2 className="h-3.5 w-3.5" />
-      {label}
+      <Wand2 className={dense ? 'h-3 w-3 shrink-0' : 'h-3.5 w-3.5'} />
+      <span className="truncate">{label}</span>
     </button>
   )
 }

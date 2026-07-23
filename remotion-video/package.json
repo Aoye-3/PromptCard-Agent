@@ -1,0 +1,36 @@
+{
+  "name": "remotion-video",
+  "version": "1.0.0",
+  "description": "My Remotion video",
+  "repository": {},
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@remotion/cli": "4.0.494",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.494"
+  },
+  "devDependencies": {
+    "@remotion/eslint-config-flat": "4.0.494",
+    "@types/react": "19.2.7",
+    "@types/web": "0.0.166",
+    "eslint": "9.19.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3"
+  },
+  "scripts": {
+    "dev": "remotion studio --no-open --browser-executable=../.playwright-browsers/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe",
+    "build": "remotion bundle",
+    "upgrade": "remotion upgrade",
+    "lint": "eslint src && tsc",
+    "render:review": "remotion render MasterReview out/promptcard-motion-v1.mp4 --codec=h264 --image-format=jpeg --pixel-format=yuv420p --browser-executable=../.playwright-browsers/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe",
+    "render:alpha": "remotion render MasterAlpha out/promptcard-motion-v1-alpha.mov --codec=prores --prores-profile=4444 --image-format=png --pixel-format=yuva444p10le --browser-executable=../.playwright-browsers/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe",
+    "render:overlays": "powershell -ExecutionPolicy Bypass -File scripts/render-overlays.ps1",
+    "render:overlay-showcase": "remotion render OverlayShowcase out/overlay-showcase.mp4 --codec=h264 --image-format=jpeg --pixel-format=yuv420p --browser-executable=../.playwright-browsers/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe",
+    "still:review": "remotion still MasterReview out/promptcard-motion-v1.png --frame=960 --browser-executable=../.playwright-browsers/chromium_headless_shell-1228/chrome-headless-shell-win64/chrome-headless-shell.exe"
+  },
+  "sideEffects": [
+    "*.css"
+  ]
+}

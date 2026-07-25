@@ -8,6 +8,7 @@
 - Scope owner: Free Canvas, Image Generation, Agent Runtime, PromptCard Storage
 - Current reference implementation: Seedream 5.0 Pro
 - Explicit UI freeze: this plan must not change or repurpose the existing right-side `Agent / 图片生成 / Prompt库` workspace
+- Staged backend acceptance: `Planned; execution has not started`
 - Review trigger: before the first implementation task, after any model-catalog contract change, and before enabling multi-view outside development
 
 ## Implementation Ledger
@@ -93,6 +94,342 @@ The original blank-canvas blocker is resolved. Broader frontend acceptance must 
 - selection, right-click, floating toolbar, model-catalog completion, autosave, and project reload do not discard React Flow measurements;
 - the domain node count and rendered visible-node count remain aligned for text and image nodes;
 - no change is made to the frozen right-side `Agent / 图片生成 / Prompt库` workspace.
+
+## Staged Backend Integration And Human Acceptance Gates
+
+### Purpose and current baseline
+
+Backend integration must be accepted as a sequence of small vertical slices rather than one large handoff. The user reviews each gate before work continues. Existing code already contains catalog normalization, contextual operation snapshots, durable run metadata, one Seedream adapter, and independent multi-view member scheduling. These gates verify that baseline, close only the gaps discovered in the current gate, and do not authorize a rewrite.
+
+The staged acceptance state is independent from implementation status:
+
+- code marked `Implemented + targeted verified` is not automatically accepted for the backend rollout;
+- a gate remains open until its automated evidence and human checks pass;
+- fixes discovered during a gate stay inside that gate;
+- one gate produces one reviewable commit and push;
+- do not squash gate commits before the user finishes staged acceptance;
+- stop after every gate and wait for explicit user approval.
+
+Every gate inherits these invariants:
+
+1. use the existing provider-neutral `POST /image-generations` boundary rather than adding Seedream-specific product endpoints;
+2. keep product operation, recipe, source identity, preservation intent, and group/member/view metadata provider-neutral;
+3. keep credentials inside the Gateway/keyring boundary and exclude them from browser responses, logs, snapshots, fixtures, and commits;
+4. persist placeholders and immutable run identity before provider invocation;
+5. localize provider URL/Base64 output into PromptCard Storage before terminal success;
+6. keep original source assets unchanged and create new assets for creative results;
+7. never change or repurpose the right-side `Agent / 图片生成 / Prompt库` workspace;
+8. never perform a paid live-provider call without a separate user approval that states model, fixture, request count, size, watermark choice, and expected cost;
+9. a model operation remains `experimental` until a dated evaluation record supports promotion;
+10. disabling either rollout gate must stop new work while leaving existing assets, runs, and nodes readable.
+
+### Evidence package for every gate
+
+Before requesting human acceptance, provide:
+
+- commit SHA and exact changed-file list;
+- targeted automated test command and result;
+- production build or backend health result when relevant;
+- sanitized request, run, and Storage evidence for the accepted path;
+- explicit confirmation that no credential, signed URL, local secret path, or raw provider body is present;
+- known limitations and rollback action;
+- live request count and cost record when a real provider was used.
+
+### Gate summary
+
+| Gate | Deliverable | Provider use | Human stop point |
+| --- | --- | --- | --- |
+| B0 | Runtime, Storage, connection, catalog, and rollout baseline | none | approve backend environment |
+| B1 | contextual operation contract and immutable snapshot acceptance | fake/none | approve request meaning and compatibility |
+| B2 | one fake-provider effect-render vertical slice | fake only | approve lifecycle and lineage |
+| B3 | one real effect-render recipe | explicit paid approval | approve first useful real operation |
+| B4 | outpaint recipe | explicit paid approval | approve expansion behavior |
+| B5 | point/bbox region redraw | explicit paid approval | approve spatial-guidance behavior |
+| B6 | generative erase | explicit paid approval | approve removal/fill behavior |
+| B7 | durable multi-view scheduling and recovery | fake only | approve group/member semantics |
+| B8 | two-view live multi-view smoke test | explicit paid approval | approve minimum real multi-view path |
+| B9 | five-view Beta evaluation and readiness decision | explicit paid approval | approve, limit, or reject Beta rollout |
+
+### Gate B0: Backend baseline without image generation
+
+**Description:** Verify the current Gateway, PromptCard Storage, connection, credential, assignment, catalog, and rollout boundaries without submitting an image request. This gate may add or correct focused diagnostics/tests only when the existing evidence is insufficient.
+
+**Acceptance criteria:**
+
+- [ ] Gateway and PromptCard Storage start and report health without a configured image credential.
+- [ ] Storage schema v7 is readable and no schema migration is introduced.
+- [ ] frontend and Runtime rollout flags are reported independently and fail closed.
+- [ ] a tested, enabled image connection can be assigned to `image.primary`.
+- [ ] catalog capabilities and disabled reasons agree and contain no frontend inference from a model ID.
+- [ ] credentials never appear in catalog, status, connection, exception, or log responses.
+- [ ] no provider request or image-generation run is created.
+
+**Verification:**
+
+- [ ] run backend health, model-connection, catalog, redaction, and Storage compatibility tests;
+- [ ] run `npm.cmd run agent:check`;
+- [ ] manually inspect the sanitized readiness response and connection state;
+- [ ] confirm ordinary existing image generation remains unchanged.
+
+**Human acceptance gate:** The user approves the backend environment and readiness evidence before B1.
+
+**Dependencies:** completed frontend acceptance checkpoint.
+
+**Likely files if a gap is found:** model-management diagnostics/catalog tests, image-generation status tests, and this Plan only.
+
+**Estimated scope:** Small.
+
+### Gate B1: Contextual operation request and immutable snapshot
+
+**Description:** Accept the provider-neutral operation payload as durable product meaning without invoking a provider. Structural validation already exists; this gate proves or adds the semantic cross-field rules needed to reject inconsistent recipes, sources, and multi-view member metadata before credential access.
+
+**Acceptance criteria:**
+
+- [ ] operation, recipe ID/version, source identities, preservation intents, parameters, and optional group/item/view fields round-trip unchanged.
+- [ ] invalid operations, recipes, identifiers, parameter shapes, and oversized values fail before credential access.
+- [ ] multi-view members cannot proceed with an incomplete group/item/view tuple.
+- [ ] operation meaning is not reconstructed by guessing from `generate`, `edit`, or `region-edit`.
+- [ ] legacy snapshots without operation metadata remain readable.
+- [ ] no Seedream-specific field enters the snapshot contract.
+
+**Verification:**
+
+- [ ] router contract tests cover valid and invalid single-operation snapshots;
+- [ ] service/Storage tests prove the exact immutable request snapshot;
+- [ ] fake credential/provider spies prove rejection happens before credential retrieval and invocation;
+- [ ] legacy request and history fixtures remain green.
+
+**Human acceptance gate:** The user inspects one sanitized single-operation snapshot and one multi-view member snapshot, then approves the contract before B2.
+
+**Dependencies:** B0.
+
+**Likely files if a gap is found:** `routers/image_generation.py`, `image_generation/service.py`, their focused tests, and frontend contract fixtures only when compatibility requires it.
+
+**Estimated scope:** Medium.
+
+### Gate B2: Fake-provider effect-render vertical slice
+
+**Description:** Run one effect-render recipe from an already persisted placeholder through Gateway, fake provider, output localization, Storage, terminal run state, and in-place canvas hydration. This gate proves lifecycle and lineage without cost.
+
+**Acceptance criteria:**
+
+- [ ] the stable placeholder and run exist before fake-provider invocation.
+- [ ] success creates a new local asset and fills the existing placeholder without replacing its frame.
+- [ ] original, visible canvas input, provider-ready input, run, recipe, and result identities remain traceable.
+- [ ] a normalized failure retains a terminal failed placeholder and safe retry metadata.
+- [ ] retry creates a new run and leaves the historical failed run immutable.
+- [ ] deleting a result does not delete or rewrite the source.
+- [ ] right-workspace tab and drafts remain unchanged.
+
+**Verification:**
+
+- [ ] fake-provider success, retryable failure, non-retryable failure, localization failure, and Storage failure tests pass;
+- [ ] reload/project-switch tests prove idempotent hydration and no duplicate placement;
+- [ ] manual fake-provider run proves success, failure, retry, reload, and source preservation.
+
+**Human acceptance gate:** The user accepts the complete fake effect-render lifecycle before any paid call is proposed.
+
+**Dependencies:** B1.
+
+**Likely files if a gap is found:** image-generation service/tests, Storage client/tests, contextual operation integration tests, and placement reconciliation tests.
+
+**Estimated scope:** Medium.
+
+### Gate B3: First live effect-render recipe
+
+**Description:** Connect and accept one useful real recipe, initially a narrowly defined effect render such as product sketch to render. The product Recipe compiles intent; the provider adapter translates only normalized inputs and never becomes the product-operation registry.
+
+**Acceptance criteria:**
+
+- [ ] the user explicitly approves the named model, fixture, request count, output size, watermark choice, and expected cost before invocation.
+- [ ] the adapter receives only the documented reference order, prompt, regions, size, and output options.
+- [ ] one request produces at most one localized result.
+- [ ] source silhouette, proportion, and requested material/style intent are reviewed against the fixture.
+- [ ] provider request IDs are sanitized and temporary URLs are not persisted or logged.
+- [ ] failure leaves a safe terminal run and does not corrupt the source or placeholder.
+
+**Verification:**
+
+- [ ] fake-adapter contract tests remain green;
+- [ ] one explicitly authorized live smoke run is recorded in a dated evaluation result;
+- [ ] the user reviews the source, output, lineage, run state, logs, and known limitations.
+
+**Human acceptance gate:** The user accepts, requests Recipe-only iteration, or rejects the first real operation. B4 does not start until acceptance.
+
+**Dependencies:** B2 and explicit cost authorization.
+
+**Likely files if a gap is found:** Recipe registry/tests, provider adapter/tests, evaluation result file, and this Plan.
+
+**Estimated scope:** Medium.
+
+### Gate B4: Outpaint
+
+**Description:** Accept outpaint as a separate recipe over the same neutral edit path. Test only expansion semantics and do not combine this gate with region redraw, erase, or multi-view.
+
+**Acceptance criteria:**
+
+- [ ] source input and requested expansion/aspect parameters are explicit and validated.
+- [ ] the original visible area remains unchanged as an asset and acceptably stable in the generated result.
+- [ ] invented unseen context and non-pixel-perfect limitations remain visible.
+- [ ] result, failure, retry, localization, and lineage follow B2.
+
+**Verification:**
+
+- [ ] fake-adapter parameter/order tests pass;
+- [ ] at least two user-approved expansion shapes are reviewed for seams, repeated structures, perspective continuity, and subject drift;
+- [ ] request counts and cost are recorded.
+
+**Human acceptance gate:** The user approves or rejects outpaint before B5.
+
+**Dependencies:** B3 and separate cost authorization.
+
+**Likely files if a gap is found:** outpaint Recipe/tests, adapter mapping tests, and dated evaluation results.
+
+**Estimated scope:** Small.
+
+### Gate B5: Point/bbox region redraw
+
+**Description:** Accept region redraw through documented point and bounding-box guidance. It must not be described or transported as a native binary-mask workflow.
+
+**Acceptance criteria:**
+
+- [ ] reference identity and normalized point/bbox coordinates are validated before credential access.
+- [ ] invalid, missing, reversed, or out-of-range regions are rejected before invocation.
+- [ ] Recipe text distinguishes the requested target from protected content.
+- [ ] UI, snapshot, backend, and evaluation language state that spatial guidance is soft generative guidance.
+
+**Verification:**
+
+- [ ] contract tests cover point, bbox, wrong reference, invalid coordinates, and exact prompt/reference ordering;
+- [ ] one authorized point and one authorized bbox live run are reviewed for target selection and changes outside the requested region.
+
+**Human acceptance gate:** The user approves the spatial-guidance behavior before B6.
+
+**Dependencies:** B4 and separate cost authorization.
+
+**Likely files if a gap is found:** region validation/compiler tests, adapter contract tests, and dated evaluation results.
+
+**Estimated scope:** Small.
+
+### Gate B6: Generative erase
+
+**Description:** Accept erase as its own Recipe while reusing the B5 region infrastructure. Do not infer that B5 acceptance proves erase quality.
+
+**Acceptance criteria:**
+
+- [ ] the removal target and protected content are explicit in the immutable snapshot.
+- [ ] the operation is described as generative removal/fill, not deterministic inpainting.
+- [ ] result and retry behavior remain non-destructive and independently traceable.
+
+**Verification:**
+
+- [ ] fake-adapter tests prove Recipe identity and region order;
+- [ ] authorized fixtures cover plain and textured backgrounds;
+- [ ] the user reviews fill continuity, seams, duplicated objects, and collateral changes.
+
+**Human acceptance gate:** The user approves or rejects erase before multi-view work begins.
+
+**Dependencies:** B5 and separate cost authorization.
+
+**Likely files if a gap is found:** erase Recipe/tests and dated evaluation results.
+
+**Estimated scope:** Small.
+
+### Gate B7: Fake-provider durable multi-view group
+
+**Description:** Accept application-batch multi-view semantics with no live provider. Multi-view is N independent durable member runs linked by one group ID, not one provider-native multi-output request.
+
+**Acceptance criteria:**
+
+- [ ] N visible views create N stable member IDs, run IDs, immutable snapshots, and persisted placeholders before the first invocation.
+- [ ] the displayed confirmation authorizes exactly N requests.
+- [ ] initial scheduling uses bounded concurrency within Runtime limits.
+- [ ] group state is derived from member runs and supports `queued`, `running`, `partial`, `succeeded`, and `failed`.
+- [ ] retrying one failed member creates one new run and leaves successful siblings untouched.
+- [ ] reload and project switching hydrate existing members without duplicate nodes.
+- [ ] moving or resizing a running placeholder is preserved on completion.
+- [ ] no schema v8 group table is added unless a separate accepted ADR proves it necessary.
+
+**Verification:**
+
+- [ ] fake-provider tests cover all-success, one failure, mixed terminal/running, bounded concurrency, one-member retry, reload, and project switching;
+- [ ] manual acceptance uses three members for success, partial failure, retry, and recovery;
+- [ ] right-workspace freeze assertions remain green.
+
+**Human acceptance gate:** The user accepts group/member persistence and recovery before any live multi-view request.
+
+**Dependencies:** B6 and ADR-015.
+
+**Likely files if a gap is found:** multi-view Recipe/scheduler tests, image-generation service tests, run snapshot tests, and placement recovery tests.
+
+**Estimated scope:** Medium.
+
+### Gate B8: Two-view live multi-view smoke test
+
+**Description:** Prove the minimum real multi-view path with exactly two explicitly approved independent requests. Keep the result experimental and do not treat two-view success as five-view readiness.
+
+**Acceptance criteria:**
+
+- [ ] the user approves the two named views, model, fixture, size, watermark choice, exact request count, and expected cost.
+- [ ] two placeholders and two independent runs exist before invocation.
+- [ ] each member localizes, succeeds, fails, and retries independently.
+- [ ] a single failure produces `partial` without hiding the successful member.
+- [ ] result language states that unseen areas are AI-inferred and not 3D reconstruction.
+
+**Verification:**
+
+- [ ] one authorized two-view run is recorded with member-level latency, cost, state, identity/proportion/material review, and contradictions;
+- [ ] a failure may be injected with the fake provider if causing a paid failure is unnecessary;
+- [ ] the user reviews both outputs and group evidence.
+
+**Human acceptance gate:** The user approves the minimum real multi-view path before B9.
+
+**Dependencies:** B7 and explicit cost authorization.
+
+**Likely files if a gap is found:** adapter/Recipe tests, group presentation/recovery tests, dated evaluation result, and this Plan.
+
+**Estimated scope:** Medium.
+
+### Gate B9: Five-view Beta evaluation and readiness decision
+
+**Description:** Run the agreed five-view set and create the first repeatable Beta evidence. A pass may still be limited by subject type, Recipe, model version, or background policy.
+
+**Acceptance criteria:**
+
+- [ ] product review chooses subject class, default view set, background policy, preservation constraints, fixture, and pass thresholds before invocation.
+- [ ] the exact five independent requests and estimated cost are approved.
+- [ ] evaluation records provider/model version, adapter/catalog revision, Recipe version, fixture identity, per-member result, latency, cost, retries, known failures, and reviewer/date.
+- [ ] identity, proportion, color/material, essential text/logo, view compliance, and cross-view contradictions are scored.
+- [ ] the final decision is explicitly `remain experimental`, `ready with limits`, or `ready`.
+- [ ] rollout flags remain reversible and disabling them preserves all existing data.
+
+**Verification:**
+
+- [ ] run the versioned manifest in `docs/references/image-operation-evaluations/`;
+- [ ] repeat reload, partial failure, single-view retry, and no-duplicate-placement checks against the accepted build;
+- [ ] run the full relevant frontend, backend, build, and browser gates.
+
+**Human acceptance gate:** The user approves the readiness decision and rollout boundary. This closes staged backend acceptance.
+
+**Dependencies:** B8, completed product open questions, and explicit cost authorization.
+
+**Likely files if a gap is found:** dated evaluation result, capability/readiness manifest, rollout documentation, and focused Recipe/adapter tests.
+
+**Estimated scope:** Medium.
+
+### Deferred operations
+
+The first staged backend acceptance does not automatically include:
+
+- exact text replacement;
+- subject extraction;
+- generative enhancement;
+- transparent-alpha output;
+- native mask upload;
+- provider-native grouped output;
+- video generation.
+
+Text edit, subject extraction, and enhancement keep their current experimental status and require independent gates based on the evaluation manifest. They must not inherit readiness from effect-render, region redraw, erase, or multi-view.
 
 ## Goal
 

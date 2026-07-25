@@ -2,7 +2,7 @@
 
 ## Scope and invariants
 
-PromptCard uses provider-neutral model connections and durable, local image-generation history. New work is submitted from the project-level Image Generation Agent tab; a conversation turn binds `connectionId + modelId` and is independent from every earlier turn. Legacy `image-generator` canvas nodes are read-only previews. The browser never receives a stored provider credential or talks directly to a provider SDK. [ADR-008](../decisions/ADR-008-provider-neutral-image-generation.md) records the provider boundary, [ADR-010](../decisions/ADR-010-project-image-generation-conversations.md) records the conversation and placement boundary, and [ADR-013](../decisions/ADR-013-recoverable-image-generation-placeholders.md) records the stable-run placeholder lifecycle.
+PromptCard uses provider-neutral model connections and durable, local image-generation history. New work may be submitted from the project-level Image Generation tab or from an explicit selected-image operation workbench. A conversation turn binds `connectionId + modelId` and is independent from every earlier turn. A contextual operation binds an immutable recipe snapshot to a source image node and does not enter or mutate the right-side conversation. Legacy `image-generator` canvas nodes are read-only previews. The browser never receives a stored provider credential or talks directly to a provider SDK. [ADR-008](../decisions/ADR-008-provider-neutral-image-generation.md) records the provider boundary, [ADR-010](../decisions/ADR-010-project-image-generation-conversations.md) records the conversation and placement boundary, [ADR-013](../decisions/ADR-013-recoverable-image-generation-placeholders.md) records the stable-run placeholder lifecycle, and [ADR-015](../decisions/ADR-015-explicit-multi-view-request-groups.md) records explicit multi-view member semantics.
 
 The Gateway must start, report health, and serve the model catalog without any configured credential. Credentials are read only for a valid model invocation. A valid request with no credential fails as `credential_missing`; keyring failure is `credential_store_unavailable`.
 
@@ -37,6 +37,24 @@ Connection deletion is dependency-aware. Assignment references are authoritative
 6. URL result localization accepts only the documented official Seedream HTTPS output hosts (`ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com` and `ark-acg-cn-beijing.tos-cn-beijing.volces.com`), revalidates and pins a public DNS address on every redirect hop, preserves Host/TLS SNI, limits downloads to the same 200 MB ceiling accepted by Storage and 40 megapixels, and verifies PNG/JPEG/WebP bytes with Pillow. Base64 results pass the same byte, MIME, decode, and pixel checks before Storage receives them. Localization failures log only the normalized error code, local run ID, provider request ID, and sanitized hostname; signed URL paths and query strings are never logged.
 7. PromptCard Storage stores the generated file as a local asset, creates a `generatedResult` Recent Capture, and commits the run as succeeded. Provider accounting is written through the Storage state-patch field `usage`; `providerUsage` is not part of that contract. Failures commit a normalized failed state. Provider URLs and credentials are never persisted.
 8. The frontend fills the matching placeholder in place after success, or retains it as a failed placeholder after failure. It changes only the asset and generation metadata, so movement and resizing performed while the request was running are preserved.
+
+## Contextual image-operation flow
+
+Contextual operations reuse the same catalog, adapter, Runtime request and durable run boundaries without reusing right-workspace UI state.
+
+1. Command availability is resolved only after selection narrows to one ready image node with an asset.
+2. Opening a workbench resolves the visible canvas image. Crop, flip and annotations produce a persistent provider-input derivative; otherwise the existing provider-safe asset is reused.
+3. The modal owns a transient `ImageOperationDraft`. Preset, reference, region and output changes do not call the provider.
+4. Explicit Generate compiles an `ImageOperationRecipeSnapshot` containing product operation, recipe ID/version, original/canvas/provider source identities, preservation intents, parameters and optional multi-view group/item/view IDs.
+5. The frontend creates and persists a `contextual-image-operation` placeholder before invoking Runtime. It has a stable run ID but no conversation ID.
+6. The browser submits the normal provider-neutral image request with `nodeId` ownership and the operation snapshot. The right-side `Agent / 图片生成 / Prompt库` active tab and drafts remain unchanged.
+7. Success fills the placeholder in place. Failure retains a terminal placeholder and safe error code. A retry creates a new run.
+
+Product reference roles (`identity`, `style`, `material`, `layout`, `content`) belong to PromptCard recipes. The compiler translates them into ordered images and prompt instructions; the provider request receives only documented source/reference input roles.
+
+Multi-view is N independent runs tied by one application group ID, not one native grouped-output request. The complete placeholder set is persisted before the first provider invocation and the scheduler uses bounded concurrency. Group state is derived from member runs/canvas metadata, so partial success is durable without a schema-v8 group table. Results are AI-inferred views, not exact 3D reconstruction.
+
+See [Contextual Image Actions](../frontend/contextual-image-actions.md) for frontend ownership, menus, workbenches, visible export and current verification state.
 
 The request may contain at most ten total input images. Each provider input is limited to 30 MB and 36 million pixels, both sides must be greater than 14 pixels, and its aspect ratio must be within `1:16–16:1`; ten maximum-sized inputs therefore have a 300 MB aggregate ceiling. The Runtime permits two concurrent generations per connection and four globally. These are trusted server limits; frontend validation is only an earlier usability check.
 

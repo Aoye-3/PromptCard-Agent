@@ -1,5 +1,7 @@
 # Free Canvas Workspace
 
+Selected-image toolbar, More/right-click menus, modal image-operation workbenches, visible export and multi-view result groups are documented in [Contextual Image Actions](./contextual-image-actions.md). These surfaces are independent from the existing right-side `Agent / 图片生成 / Prompt库` workspace.
+
 Free Canvas is a standalone builder project type: `IPromptProject.type === "free-canvas"`.
 It is no longer a three-stage template variant and does not use `threeStage.pages`,
 three-stage forms, Page constraints, or `threeStage.meta.freeCanvas` as its source of truth.

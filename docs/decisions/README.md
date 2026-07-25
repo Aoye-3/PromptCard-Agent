@@ -16,3 +16,4 @@ Architecture Decision Records capture durable product and engineering decisions 
 - [ADR-012: Replace DeerFlow With A Focused pi Text Agent And Extensible Provider Boundary](./ADR-012-pi-text-agent-and-ark-runtime.md)
 - [ADR-013: Use Stable Run IDs For Recoverable Image Generation Placeholders](./ADR-013-recoverable-image-generation-placeholders.md)
 - [ADR-014: Keep Subject And Material Libraries Project-Scoped](./ADR-014-project-scoped-resource-library.md)
+- [ADR-015: Treat Multi-View As An Explicit Group Of Independent Image Requests](./ADR-015-explicit-multi-view-request-groups.md)

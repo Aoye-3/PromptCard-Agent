@@ -8,3 +8,4 @@
 - [Builder Template Library](./builder-template-library.md)
 - [Three-stage Builder](./three-stage-builder.md)
 - [Free Canvas Workspace](./free-canvas.md)
+- [Contextual Image Actions](./contextual-image-actions.md)

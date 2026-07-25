@@ -355,7 +355,27 @@ describe('storageServiceClient', () => {
             sourceAssetId: 'asset-original',
             order: 0
           }],
-          regions: [], remoteUrl: 'https://provider.example/output'
+          regions: [],
+          operation: {
+            operation: 'multi-view',
+            recipeId: 'multi-view/default',
+            recipeVersion: '1',
+            source: {
+              nodeId: 'node 1',
+              originalAssetId: 'asset-original',
+              canvasAssetId: 'asset-derived',
+              providerAssetId: 'asset-provider'
+            },
+            preservationIntents: ['identity', 'style'],
+            parameters: {
+              viewCount: 5,
+              views: ['front', 'left', 'rear']
+            },
+            operationGroupId: 'group-1',
+            operationItemId: 'item-front',
+            viewSpec: 'front'
+          },
+          remoteUrl: 'https://provider.example/output'
         },
         outputAssetIds: [],
         error: { code: 'failed', message: 'Safe failure', retryable: false },
@@ -385,7 +405,26 @@ describe('storageServiceClient', () => {
         assetId: 'asset-derived',
         sourceAssetId: 'asset-original',
         order: 0
-      }]
+      }],
+      operation: {
+        operation: 'multi-view',
+        recipeId: 'multi-view/default',
+        recipeVersion: '1',
+        source: {
+          nodeId: 'node 1',
+          originalAssetId: 'asset-original',
+          canvasAssetId: 'asset-derived',
+          providerAssetId: 'asset-provider'
+        },
+        preservationIntents: ['identity', 'style'],
+        parameters: {
+          viewCount: 5,
+          views: ['front', 'left', 'rear']
+        },
+        operationGroupId: 'group-1',
+        operationItemId: 'item-front',
+        viewSpec: 'front'
+      }
     })
     expect(JSON.stringify(page)).not.toContain('provider.example')
     expect(JSON.stringify(page)).not.toContain('raw-secret')

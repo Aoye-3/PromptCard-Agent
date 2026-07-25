@@ -934,6 +934,7 @@ const normalizeRunSnapshot = (candidate: unknown): ImageGenerationRunSnapshot | 
     }]
   }) : []
   const regions = Array.isArray(candidate.regions) ? candidate.regions.flatMap(normalizeRunRegion) : []
+  const operation = normalizeOperationSnapshot(candidate.operation)
   return {
     mode: typeof candidate.mode === 'string' ? candidate.mode : 'generate',
     promptOptimization: candidate.promptOptimization === 'fast' ? 'fast' : 'standard',
@@ -948,7 +949,51 @@ const normalizeRunSnapshot = (candidate: unknown): ImageGenerationRunSnapshot | 
     ...(isPositiveInteger(candidate.width) ? { width: candidate.width } : {}),
     ...(isPositiveInteger(candidate.height) ? { height: candidate.height } : {}),
     outputFormat: typeof candidate.outputFormat === 'string' ? candidate.outputFormat : '',
-    watermark: candidate.watermark === true
+    watermark: candidate.watermark === true,
+    ...(operation ? { operation } : {})
+  }
+}
+
+const normalizeOperationSnapshot = (candidate: unknown): ImageOperationRecipeSnapshot | null => {
+  if (
+    !isRecord(candidate)
+    || !isImageProductOperation(candidate.operation)
+    || !hasStrings(candidate, ['recipeId', 'recipeVersion'])
+    || !isRecord(candidate.source)
+    || !hasStrings(candidate.source, ['nodeId', 'originalAssetId', 'canvasAssetId', 'providerAssetId'])
+    || !Array.isArray(candidate.preservationIntents)
+    || !candidate.preservationIntents.every(intent => typeof intent === 'string')
+    || !isRecord(candidate.parameters)
+  ) return null
+
+  const parameters: ImageOperationRecipeSnapshot['parameters'] = {}
+  for (const [key, value] of Object.entries(candidate.parameters)) {
+    if (typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) {
+      parameters[key] = value
+      continue
+    }
+    if (Array.isArray(value) && value.every(item => typeof item === 'string')) {
+      parameters[key] = [...value] as string[]
+      continue
+    }
+    return null
+  }
+
+  return {
+    operation: candidate.operation,
+    recipeId: candidate.recipeId as string,
+    recipeVersion: candidate.recipeVersion as string,
+    source: {
+      nodeId: candidate.source.nodeId as string,
+      originalAssetId: candidate.source.originalAssetId as string,
+      canvasAssetId: candidate.source.canvasAssetId as string,
+      providerAssetId: candidate.source.providerAssetId as string
+    },
+    preservationIntents: [...candidate.preservationIntents] as string[],
+    parameters,
+    ...(typeof candidate.operationGroupId === 'string' ? { operationGroupId: candidate.operationGroupId } : {}),
+    ...(typeof candidate.operationItemId === 'string' ? { operationItemId: candidate.operationItemId } : {}),
+    ...(typeof candidate.viewSpec === 'string' ? { viewSpec: candidate.viewSpec } : {})
   }
 }
 
@@ -977,4 +1022,16 @@ const isNonNegativeInteger = (value: unknown): value is number => Number.isInteg
 const isPositiveInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) > 0
 const isRunState = (value: unknown): value is ImageGenerationRunState => (
   value === 'queued' || value === 'running' || value === 'succeeded' || value === 'failed'
+)
+const isImageProductOperation = (value: unknown): value is ImageOperationRecipeSnapshot['operation'] => (
+  value === 'reference-generate'
+  || value === 'effect-render'
+  || value === 'global-edit'
+  || value === 'region-redraw'
+  || value === 'erase'
+  || value === 'outpaint'
+  || value === 'text-edit'
+  || value === 'multi-view'
+  || value === 'upscale'
+  || value === 'subject-extract'
 )

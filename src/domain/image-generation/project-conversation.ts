@@ -2,6 +2,7 @@ import type { ImageGenerationRequest, ImageGenerationRegion } from '@/services/i
 import type { ImageGenerationRun } from '@/storage/storage-service-client'
 import type { IFreeCanvasNode, PromptDocument } from '@/models/PromptHistory.model'
 import { freeCanvasTextSegmentsToPlainText } from '@/domain/free-canvas/free-canvas-project'
+import type { ImageOperationRecipeSnapshot } from '@/domain/image-actions/image-operations'
 
 export type ProjectImageGenerationWorkflow =
   | 'text-to-image'
@@ -32,6 +33,7 @@ export interface ImageGenerationComposerDraft {
   watermark: boolean
   inputs: ProjectImageGenerationInput[]
   regions: ImageGenerationRegion[]
+  operation?: ImageOperationRecipeSnapshot
 }
 
 export interface CanvasInjectionResult {
@@ -56,7 +58,8 @@ export const createEmptyConversationDraft = (
   outputFormat: preferences.outputFormat || 'png',
   watermark: preferences.watermark === true,
   inputs: [],
-  regions: []
+  regions: [],
+  operation: undefined
 })
 
 export const buildConversationGenerationRequest = (
@@ -92,7 +95,8 @@ export const buildConversationGenerationRequest = (
     : {}),
   outputFormat: draft.outputFormat,
   watermark: draft.watermark,
-  promptOptimization: draft.promptOptimization
+  promptOptimization: draft.promptOptimization,
+  ...(draft.operation ? { operation: cloneOperationSnapshot(draft.operation) } : {})
 })
 
 export const injectCanvasNodesIntoDraft = (
@@ -216,3 +220,15 @@ const modeWorkflow = (mode: string, inputCount: number): ProjectImageGenerationW
   if (mode === 'region-edit') return 'region-edit'
   return inputCount > 0 ? 'reference-generate' : 'text-to-image'
 }
+
+const cloneOperationSnapshot = (
+  operation: ImageOperationRecipeSnapshot
+): ImageOperationRecipeSnapshot => ({
+  ...operation,
+  source: { ...operation.source },
+  preservationIntents: [...operation.preservationIntents],
+  parameters: Object.fromEntries(Object.entries(operation.parameters).map(([key, value]) => [
+    key,
+    Array.isArray(value) ? [...value] : value
+  ]))
+})

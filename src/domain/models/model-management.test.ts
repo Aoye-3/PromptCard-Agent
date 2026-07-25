@@ -164,7 +164,32 @@ describe('model management domain', () => {
         regionInputs: ['point', 'bbox'],
         responseTransports: ['url', 'b64_json'],
         outputCount: 1,
-        streaming: false
+        streaming: false,
+        references: {
+          maxCount: 10,
+          ordering: 'positional',
+          nativeRoles: [],
+          acceptedSources: ['asset']
+        },
+        outputs: {
+          countMode: 'single',
+          countGuarantee: 'exact',
+          maxCount: 1,
+          formats: ['png', 'jpeg'],
+          alpha: 'unknown'
+        },
+        execution: {
+          submission: 'synchronous',
+          progress: ['none'],
+          completion: ['inline'],
+          cancellation: false
+        },
+        delivery: {
+          forms: ['temporary-url', 'base64'],
+          urlTtlSeconds: null,
+          browserReadable: 'unknown',
+          mustPersistImmediately: true
+        }
       }
     }
 
@@ -189,7 +214,32 @@ describe('model management domain', () => {
         maxAspectRatio: 16
       },
       annotationInputs: ['raster-markup'],
-      responseTransports: ['url', 'b64_json']
+      responseTransports: ['url', 'b64_json'],
+      references: {
+        maxCount: 10,
+        ordering: 'positional',
+        nativeRoles: [],
+        acceptedSources: ['asset']
+      },
+      outputs: {
+        countMode: 'single',
+        countGuarantee: 'exact',
+        maxCount: 1,
+        formats: ['png', 'jpeg'],
+        alpha: 'unknown'
+      },
+      execution: {
+        submission: 'synchronous',
+        progress: ['none'],
+        completion: ['inline'],
+        cancellation: false
+      },
+      delivery: {
+        forms: ['temporary-url', 'base64'],
+        urlTtlSeconds: null,
+        browserReadable: 'unknown',
+        mustPersistImmediately: true
+      }
     })
   })
 

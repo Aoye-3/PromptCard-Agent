@@ -1,6 +1,7 @@
 import type { ImageGenerationMode } from '@/domain/image-generation/image-generation'
 import { getRuntimeErrorPresentation } from '@/domain/models/model-management'
 import type { PromptDocument } from '@/models/PromptHistory.model'
+import type { ImageOperationRecipeSnapshot } from '@/domain/image-actions/image-operations'
 import { createRuntimeHttpClient, RuntimeHttpError } from './runtime-http-client'
 
 export type ImageGenerationInput = {
@@ -33,6 +34,7 @@ export interface ImageGenerationRequest {
   outputFormat: 'png' | 'jpeg'
   watermark: boolean
   promptOptimization: 'standard' | 'fast'
+  operation?: ImageOperationRecipeSnapshot
 }
 
 export interface ImageGenerationResult {
@@ -202,7 +204,18 @@ const cloneRequest = (input: ImageGenerationRequest): ImageGenerationRequest => 
     : {}),
   outputFormat: input.outputFormat,
   watermark: input.watermark,
-  promptOptimization: input.promptOptimization
+  promptOptimization: input.promptOptimization,
+  ...(input.operation ? {
+    operation: {
+      ...input.operation,
+      source: { ...input.operation.source },
+      preservationIntents: [...input.operation.preservationIntents],
+      parameters: Object.fromEntries(Object.entries(input.operation.parameters).map(([key, value]) => [
+        key,
+        Array.isArray(value) ? [...value] : value
+      ]))
+    }
+  } : {})
 })
 
 const parseResult = (payload: unknown): ImageGenerationResult => {

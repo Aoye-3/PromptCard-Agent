@@ -125,6 +125,82 @@ describe('model management client', () => {
     )
   })
 
+  it('normalizes image capabilities instead of trusting arbitrary provider fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      providers: [],
+      models: [{
+        id: 'image-model',
+        providerId: 'provider-one',
+        displayName: 'Image model',
+        modality: 'image',
+        capabilities: {
+          modes: ['generate', 'unsupported-mode'],
+          maxReferenceImages: 4,
+          references: {
+            maxCount: 4,
+            ordering: 'positional',
+            nativeRoles: ['style', 'invented-role'],
+            acceptedSources: ['asset', 'unsafe-source']
+          },
+          outputs: {
+            countMode: 'single',
+            countGuarantee: 'exact',
+            maxCount: 1,
+            formats: ['png', 'exe'],
+            alpha: 'unknown'
+          },
+          execution: {
+            submission: 'synchronous',
+            progress: ['none', 'fictional'],
+            completion: ['inline'],
+            cancellation: false
+          },
+          delivery: {
+            forms: ['temporary-url', 'executable'],
+            urlTtlSeconds: null,
+            browserReadable: 'unknown',
+            mustPersistImmediately: true
+          },
+          providerSecret: 'must-not-pass-through'
+        }
+      }]
+    }))
+    const client = createModelManagementClient(fetchMock as unknown as typeof fetch)
+
+    const catalog = await client.getCatalog()
+
+    expect(catalog.models[0].capabilities).toEqual({
+      modes: ['generate'],
+      maxReferenceImages: 4,
+      references: {
+        maxCount: 4,
+        ordering: 'positional',
+        nativeRoles: ['style'],
+        acceptedSources: ['asset']
+      },
+      outputs: {
+        countMode: 'single',
+        countGuarantee: 'exact',
+        maxCount: 1,
+        formats: ['png'],
+        alpha: 'unknown'
+      },
+      execution: {
+        submission: 'synchronous',
+        progress: ['none'],
+        completion: ['inline'],
+        cancellation: false
+      },
+      delivery: {
+        forms: ['temporary-url'],
+        urlTtlSeconds: null,
+        browserReadable: 'unknown',
+        mustPersistImmediately: true
+      }
+    })
+    expect(JSON.stringify(catalog)).not.toContain('providerSecret')
+  })
+
   it('loads and normalizes models for one connection', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       connectionId: 'connection/ark',

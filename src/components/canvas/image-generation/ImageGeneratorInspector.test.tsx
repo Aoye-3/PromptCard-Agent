@@ -9,18 +9,32 @@ import type {
   IFreeCanvasTextNode
 } from '@/models/PromptHistory.model'
 import { applyImageGeneratorConnection } from '../nodes/ImageGeneratorNode'
+import type { ImageSizeCapabilities } from '@/domain/image-generation/size-validation'
 import {
-  SEEDREAM_5_PRO_SIZE_CAPABILITIES,
-  type ImageSizeCapabilities
-} from '@/domain/image-generation/size-validation'
-import {
-  SEEDREAM_5_PRO_REGION_CAPABILITIES,
   type BoundImageRegion,
+  type ImageRegionCapabilities,
   type ImageRegionSource
 } from '@/domain/image-generation/regions'
 import { ImageGeneratorInspector } from './ImageGeneratorInspector'
 import { RegionEditorDialog } from './RegionEditorDialog'
 import type { ImageGeneratorPromptSnapshot, PromptCompilerValidationErrorCode } from '@/domain/image-generation/prompt-compiler'
+
+const SEEDREAM_5_PRO_SIZE_CAPABILITIES: ImageSizeCapabilities = {
+  modelId: 'doubao-seedream-5-0-pro-260628',
+  resolutions: ['1K', '2K'],
+  aspectRatios: ['smart', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', 'custom'],
+  customSize: {
+    minPixels: 921_600,
+    maxPixels: 4_624_220,
+    minAspectRatio: 1 / 16,
+    maxAspectRatio: 16
+  }
+}
+
+const SEEDREAM_5_PRO_REGION_CAPABILITIES: ImageRegionCapabilities = {
+  modelId: 'doubao-seedream-5-0-pro-260628',
+  regionInputs: ['point', 'bbox']
+}
 
 const ONE_K_SQUARE_CAPABILITIES: ImageSizeCapabilities = {
   modelId: 'model-one-k-square',

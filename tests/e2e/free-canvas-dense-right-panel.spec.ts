@@ -46,7 +46,31 @@ test('keeps the canvas primary while both right-panel modes remain compact', asy
   await expect(page.getByTitle('Open Agent panel')).toBeVisible()
 })
 
-async function seedProject(request: APIRequestContext, id: string, title: string) {
+test('keeps persisted canvas nodes visible after selection synchronization', async ({ page, request }) => {
+  const suffix = Date.now()
+  const projectId = `visible-nodes-${suffix}`
+  const title = `Visible nodes ${suffix}`
+  await seedProject(request, projectId, title, createPersistedTextNodes(11))
+
+  await page.goto('/', { waitUntil: 'networkidle' })
+  await openProject(page, title)
+
+  const nodes = page.locator('.react-flow__node')
+  await expect(nodes).toHaveCount(11)
+  await page.waitForTimeout(500)
+  await expect.poll(() => visibleNodeCount(nodes)).toBe(11)
+
+  await nodes.first().click()
+  await expect(nodes.first()).toHaveClass(/selected/)
+  await expect.poll(() => visibleNodeCount(nodes)).toBe(11)
+})
+
+async function seedProject(
+  request: APIRequestContext,
+  id: string,
+  title: string,
+  nodes: Record<string, unknown>[] = []
+) {
   const response = await request.post(`${storageUrl}/api/projects`, {
     data: {
       id,
@@ -56,7 +80,7 @@ async function seedProject(request: APIRequestContext, id: string, title: string
       currentPage: 0,
       meta: {},
       freeCanvas: {
-        nodes: [],
+        nodes,
         edges: [],
         selectedNodeId: null,
         viewport: { x: 0, y: 0, zoom: 1 },
@@ -65,6 +89,39 @@ async function seedProject(request: APIRequestContext, id: string, title: string
     }
   })
   expect(response.ok(), await response.text()).toBe(true)
+}
+
+function createPersistedTextNodes(count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const timestamp = 1_800_000_000_000 + index
+    return {
+      id: `persisted-text-${index}`,
+      kind: 'text',
+      title: `Persisted text ${index + 1}`,
+      position: {
+        x: 120 + (index % 4) * 460,
+        y: 120 + Math.floor(index / 4) * 260
+      },
+      width: 420,
+      height: 180,
+      fontSize: 'large',
+      segments: [{
+        id: `persisted-segment-${index}`,
+        source: 'user',
+        text: `Persisted canvas node ${index + 1}`,
+        color: '#111827',
+        createdAt: timestamp,
+        updatedAt: timestamp
+      }],
+      meta: {}
+    }
+  })
+}
+
+async function visibleNodeCount(nodes: ReturnType<Page['locator']>) {
+  return nodes.evaluateAll(elements => elements.filter(element => (
+    window.getComputedStyle(element).visibility === 'visible'
+  )).length)
 }
 
 async function openProject(page: Page, title: string) {

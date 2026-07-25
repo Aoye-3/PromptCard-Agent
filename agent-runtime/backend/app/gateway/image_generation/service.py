@@ -113,6 +113,7 @@ class GenerationCommand:
     output_format: str
     watermark: bool
     prompt_optimization: str = "standard"
+    operation_snapshot: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -791,6 +792,7 @@ def _queued_run(command: GenerationCommand) -> dict[str, Any]:
             "outputFormat": command.output_format,
             "watermark": command.watermark,
             "promptOptimization": command.prompt_optimization,
+            **({"operation": command.operation_snapshot} if command.operation_snapshot is not None else {}),
         },
         "outputAssetIds": [],
     }

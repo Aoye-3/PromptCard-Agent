@@ -38,6 +38,7 @@ from app.gateway.image_generation.service import (
     PromptCardStorageClient,
     StorageAsset,
     StorageGatewayError,
+    _queued_run,
 )
 
 REMOTE_URL = "https://ark-content-generation-v2-cn-beijing.tos-cn-beijing.volces.com/result.png?token=remote-secret"
@@ -185,6 +186,29 @@ def command(run_id: str = "run-1") -> GenerationCommand:
 
 def conversation_command(run_id: str = "run-conversation") -> GenerationCommand:
     return replace(command(run_id), node_id=None, conversation_id="conversation-1")
+
+
+def test_queued_run_preserves_product_operation_snapshot() -> None:
+    snapshot = {
+        "operation": "multi-view",
+        "recipeId": "multi-view/product-turntable",
+        "recipeVersion": "1",
+        "source": {
+            "nodeId": "node-source",
+            "originalAssetId": "asset-original",
+            "canvasAssetId": "asset-canvas",
+            "providerAssetId": "asset-provider",
+        },
+        "preservationIntents": ["keep identity"],
+        "parameters": {"view": "front-three-quarter"},
+        "operationGroupId": "group-1",
+        "operationItemId": "item-1",
+        "viewSpec": "front-three-quarter",
+    }
+
+    queued = _queued_run(replace(command("run-operation"), operation_snapshot=snapshot))
+
+    assert queued["requestSnapshot"]["operation"] == snapshot
 
 
 def make_service(
@@ -1021,6 +1045,19 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
             "outputFormat": "png",
             "watermark": False,
             "promptOptimization": "fast",
+            "operation": {
+                "operation": "effect-render",
+                "recipeId": "effect-render/product-sketch",
+                "recipeVersion": "1",
+                "source": {
+                    "nodeId": "node-source",
+                    "originalAssetId": "asset-original.heic",
+                    "canvasAssetId": "asset-canvas.png",
+                    "providerAssetId": "asset-input.png",
+                },
+                "preservationIntents": ["keep silhouette", "keep material"],
+                "parameters": {"preset": "product-sketch", "referenceOrder": ["source"]},
+            },
             "inputs": [
                 {
                     "referenceId": "subject",
@@ -1052,6 +1089,19 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
     assert received[0].prompt_optimization == "fast"
     assert received[0].inputs[0].role == "source-image"
     assert received[0].inputs[0].source_asset_id == "asset-original.heic"
+    assert received[0].operation_snapshot == {
+        "operation": "effect-render",
+        "recipeId": "effect-render/product-sketch",
+        "recipeVersion": "1",
+        "source": {
+            "nodeId": "node-source",
+            "originalAssetId": "asset-original.heic",
+            "canvasAssetId": "asset-canvas.png",
+            "providerAssetId": "asset-input.png",
+        },
+        "preservationIntents": ["keep silhouette", "keep material"],
+        "parameters": {"preset": "product-sketch", "referenceOrder": ["source"]},
+    }
 
 
 def test_router_rejects_invalid_client_generated_run_id(monkeypatch) -> None:

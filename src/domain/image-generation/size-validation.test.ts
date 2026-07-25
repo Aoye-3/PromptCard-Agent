@@ -1,20 +1,33 @@
 import { describe, expect, it } from 'vitest'
+import type { ModelCatalogEntry } from '@/domain/models/model-management'
 import {
-  SEEDREAM_5_PRO_SIZE_CAPABILITIES,
-  imageSizeCapabilitiesForModel,
+  imageSizeCapabilitiesFromModel,
   recommendedImageSizeSettings,
-  validateImageSizeSettings
+  validateImageSizeSettings,
+  type ImageSizeCapabilities
 } from './size-validation'
+
+const testSizeCapabilities: ImageSizeCapabilities = {
+  modelId: 'image-model',
+  resolutions: ['1K', '2K'],
+  aspectRatios: ['smart', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', 'custom'],
+  customSize: {
+    minPixels: 921_600,
+    maxPixels: 4_624_220,
+    minAspectRatio: 1 / 16,
+    maxAspectRatio: 16
+  }
+}
 
 const validationCodes = (
   settings: Parameters<typeof validateImageSizeSettings>[0]
-) => validateImageSizeSettings(settings, SEEDREAM_5_PRO_SIZE_CAPABILITIES)
+) => validateImageSizeSettings(settings, testSizeCapabilities)
   .map(error => error.code)
 
 describe('image size validation', () => {
-  it('defines every supported Seedream ratio and exposes only its catalog resolutions', () => {
-    expect(SEEDREAM_5_PRO_SIZE_CAPABILITIES).toEqual({
-      modelId: 'doubao-seedream-5-0-pro-260628',
+  it('uses every ratio and resolution from the selected catalog model', () => {
+    expect(testSizeCapabilities).toEqual({
+      modelId: 'image-model',
       resolutions: ['1K', '2K'],
       aspectRatios: ['smart', '1:1', '4:3', '3:4', '16:9', '9:16', '3:2', '2:3', '21:9', 'custom'],
       customSize: {
@@ -24,7 +37,7 @@ describe('image size validation', () => {
         maxAspectRatio: 16
       }
     })
-    expect(SEEDREAM_5_PRO_SIZE_CAPABILITIES.resolutions).not.toContain('4K')
+    expect(testSizeCapabilities.resolutions).not.toContain('4K')
   })
 
   it.each([
@@ -94,13 +107,33 @@ describe('image size validation', () => {
       modelId: 'custom-only',
       resolutions: ['1K'],
       aspectRatios: ['custom'],
-      customSize: SEEDREAM_5_PRO_SIZE_CAPABILITIES.customSize
+      customSize: testSizeCapabilities.customSize
     })).toBeNull()
   })
 
-  it('returns size capabilities only for a cataloged model', () => {
-    expect(imageSizeCapabilitiesForModel(SEEDREAM_5_PRO_SIZE_CAPABILITIES.modelId))
-      .toBe(SEEDREAM_5_PRO_SIZE_CAPABILITIES)
-    expect(imageSizeCapabilitiesForModel('unknown-image-model')).toBeNull()
+  it('derives size capabilities from a provider-neutral catalog entry', () => {
+    const model: ModelCatalogEntry = {
+      id: 'fake-size-model',
+      providerId: 'fake-provider',
+      displayName: 'Fake size model',
+      modality: 'image',
+      capabilities: {
+        resolutions: ['1K'],
+        aspectRatios: ['1:1'],
+        customSize: null
+      }
+    }
+
+    expect(imageSizeCapabilitiesFromModel(model)).toEqual({
+      modelId: 'fake-size-model',
+      resolutions: ['1K'],
+      aspectRatios: ['1:1'],
+      customSize: null
+    })
+    expect(imageSizeCapabilitiesFromModel({
+      ...model,
+      id: 'incomplete-size-model',
+      capabilities: { resolutions: ['1K'] }
+    })).toBeNull()
   })
 })

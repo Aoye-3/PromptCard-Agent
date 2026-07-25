@@ -21,11 +21,12 @@ import {
   type NodeProps,
   type OnConnect,
   type OnNodeDrag,
+  type OnSelectionChangeFunc,
   useStore,
   useReactFlow
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { AlertTriangle, ArrowLeft, ArrowRight, Bot, BookOpen, Brush, ChevronRight, Copy, Hash, Image as ImageIcon, Loader2, MessageSquare, MousePointer2, Palette, Pencil, Plus, Redo2, Save, Scissors, Square, Trash2, Type, Undo2, X } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ArrowRight, Bot, BookOpen, Brush, ChevronRight, Copy, Hash, Image as ImageIcon, Loader2, MessageSquare, MousePointer2, Palette, Pencil, Plus, Redo2, Save, Square, Trash2, Type, Undo2, X } from 'lucide-react'
 import { AIChatbotBox } from '@/components/AgentCollaborationPanel'
 import { PromptLibraryPreviewPanel } from '@/components/PromptLibraryPreviewMode'
 import { PromptPresetPreviewDialog } from '@/components/prompt-media/PromptPresetPreviewDialog'
@@ -37,6 +38,14 @@ import { ImageGenerationConversationPanel } from '@/components/canvas/image-gene
 import { AnnotationEditorDialog } from '@/components/canvas/image-generation/AnnotationEditorDialog'
 import { RegionEditorDialog } from '@/components/canvas/image-generation/RegionEditorDialog'
 import { ProjectResourceLibrary } from '@/components/canvas/ProjectResourceLibrary'
+import { ImageNodeActionBar } from '@/components/canvas/image-actions/ImageNodeActionBar'
+import { CanvasNodeContextMenu } from '@/components/canvas/image-actions/CanvasNodeContextMenu'
+import { ImageOperationWorkbenchDialog } from '@/components/canvas/image-actions/ImageOperationWorkbenchDialog'
+import { MultiViewWorkbenchDialog } from '@/components/canvas/image-actions/MultiViewWorkbenchDialog'
+import {
+  MultiViewGroupPanel,
+  type MultiViewGroupPanelMember
+} from '@/components/canvas/image-actions/MultiViewGroupPanel'
 import type { ImageGenerationConversationSummary as ImageGenerationConversationView, ImageGenerationTurn, ImageGenerationTurnAction } from '@/components/canvas/image-generation/types'
 import { canvasImageAssetUrl, fitImageNode, getClipboardImageFiles, isFileDrag, isSupportedImageFile, uploadFreeCanvasImageFiles } from '@/components/canvas/canvas-image-assets'
 import { createFreeCanvasCroppedNodes, createFreeCanvasMediaNode, type FreeCanvasCropLines, type FreeCanvasMediaNode } from '@/domain/free-canvas/free-canvas'
@@ -58,6 +67,35 @@ import {
   updateFreeCanvasTextNodeStyle,
   updateFreeCanvasTextNodeUserText
 } from '@/domain/free-canvas/free-canvas-project'
+import {
+  createCanvasCommandHistory,
+  duplicateCanvasImageNode,
+  executeCanvasLocalCommand,
+  redoCanvasLocalCommand,
+  undoCanvasLocalCommand,
+  type CanvasLocalCommand
+} from '@/domain/free-canvas/canvas-command-history'
+import {
+  resolveImageNodeCommands,
+  type ImageNodeCommandId,
+  type ResolvedImageNodeCommand
+} from '@/domain/image-actions/image-node-commands'
+import { resolveImageOperationAvailability } from '@/domain/image-actions/image-recipes'
+import {
+  compileImageOperationDraft,
+  type ImageOperationDraft,
+  type ImageOperationReference
+} from '@/domain/image-actions/image-operation-draft'
+import {
+  createMultiViewRequestMembers,
+  defaultMultiViewSpecs,
+  scheduleMultiViewMembers
+} from '@/domain/image-actions/multi-view-recipe'
+import type { ImageProductOperation } from '@/domain/image-actions/image-operations'
+import { renderVisibleImage } from '@/domain/image-actions/render-visible-image'
+import {
+  resolveCanvasImageInput
+} from '@/domain/image-generation/canvas-image-input'
 import { buildFreeCanvasWorkspaceContext } from '@/utils/agent-workspace'
 import { useI18n } from '@/i18n'
 import { usePresetStore } from '@/stores/preset.store'
@@ -129,13 +167,12 @@ type FreeCanvasFlowNodeData = {
   onTextRangeReplace: (nodeId: string, range: { start: number; end: number }, insertedText: string, color: string) => void
   onTextStyleChange: (nodeId: string, updates: Parameters<typeof updateFreeCanvasTextNodeStyle>[2]) => void
   onImageResize: (nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => void
-  onStartImageAnnotationEdit: (nodeId: string) => void
-  onStartImageCrop: (nodeId: string) => void
   resultThumbnailUrl?: string
   onOpenImageHistory: (nodeId: string) => void
   onConfigureImageModel?: (nodeId: string) => void
   onContinueLegacyImageCreation: (nodeId: string) => void
-  onContinueImageCreation: (nodeId: string, workflow: ProjectImageGenerationWorkflow) => void
+  imageCommands?: readonly ResolvedImageNodeCommand[]
+  onImageCommand: (nodeId: string, commandId: ImageNodeCommandId) => void
   imageGeneratorInputSummary?: { promptConnected: boolean; sourceConnected: boolean; referenceCount: number }
 }
 
@@ -230,6 +267,14 @@ const FreeCanvasBuilderInner = ({
   const [imageAssignment, setImageAssignment] = useState<ModelAssignment | null>(null)
   const [imageRuntimeReady, setImageRuntimeReady] = useState(false)
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const [nodeContextMenu, setNodeContextMenu] = useState<{
+    nodeId: string
+    x: number
+    y: number
+    returnFocus: HTMLElement | null
+  } | null>(null)
+  const [activeImageOperationDraft, setActiveImageOperationDraft] = useState<ImageOperationDraft | null>(null)
+  const [imageOperationPreparing, setImageOperationPreparing] = useState(false)
   const [activeImageConversationId, setActiveImageConversationId] = useState<string | null>(null)
   const [imageConversations, setImageConversations] = useState<ImageGenerationConversationSummary[]>([])
   const [imageConversationNextCursor, setImageConversationNextCursor] = useState<string | null>(null)
@@ -259,6 +304,7 @@ const FreeCanvasBuilderInner = ({
   const onChangeRef = useRef(onChange)
   const selectedImageNodeRef = useRef<IFreeCanvasImageNode | null>(selectedImageNode)
   const copiedImageNodeRef = useRef<IFreeCanvasImageNode | null>(null)
+  const canvasCommandHistoryRef = useRef(createCanvasCommandHistory())
   const fileDragDepthRef = useRef(0)
   const composerFileDragDepthRef = useRef(0)
   const activeProjectIdRef = useRef(activeProject.id)
@@ -361,6 +407,10 @@ const FreeCanvasBuilderInner = ({
     setImageConversationRuns({})
     setImageRunNextCursors({})
     setSelectedNodeIds([])
+    setNodeContextMenu(null)
+    setActiveImageOperationDraft(null)
+    setImageOperationPreparing(false)
+    canvasCommandHistoryRef.current = createCanvasCommandHistory()
     setOptimisticImageTurn(null)
     setImageGenerationBusy(false)
     setImageRegionEditorOpen(false)
@@ -675,28 +725,6 @@ const FreeCanvasBuilderInner = ({
     }
   }, [activeProject.id, imageAssignment?.connectionId, imageAssignment?.modelId, imageConversationRuns, loadImageConversationRuns])
 
-  const continueImageCreation = useCallback((nodeId: string, workflow: ProjectImageGenerationWorkflow) => {
-    const node = freeCanvasRef.current.nodes.find(candidate => candidate.id === nodeId)
-    if (!node || node.kind !== 'image' || !node.assetId) {
-      setUploadError('该图片节点没有可用于二次创作的本地资产。')
-      return
-    }
-    resetImageConversation()
-    setImageComposerDraft(current => ({
-      ...current,
-      workflow,
-      inputs: [{
-        referenceId: `source-${node.id}`,
-        assetId: node.assetId!,
-        order: 0,
-        role: workflow === 'reference-generate' ? 'reference-image' : 'source-image',
-        label: node.title
-      }]
-    }))
-    setRightPanelMode('image-generation')
-    setRightPanelCollapsed(false)
-  }, [resetImageConversation])
-
   const continueLegacyImageCreation = useCallback((nodeId: string) => {
     const current = freeCanvasRef.current
     const node = current.nodes.find((candidate): candidate is IFreeCanvasImageGeneratorNode => candidate.id === nodeId && candidate.kind === 'image-generator')
@@ -921,7 +949,6 @@ const FreeCanvasBuilderInner = ({
       const projectId = activeProject.id
       const runningNodes = freeCanvasRef.current.nodes.filter(isRunningFreeCanvasImageGeneration)
       if (runningNodes.length === 0) return
-      setImageGenerationBusy(true)
       const runs = await Promise.all(runningNodes.map(async node => {
         const runId = String(node.meta?.generationRunId || '')
         try {
@@ -965,7 +992,6 @@ const FreeCanvasBuilderInner = ({
       await processPendingImagePlacements(projectId).catch(() => undefined)
       if (cancelled || activeProjectIdRef.current !== projectId) return
       const stillRunning = freeCanvasRef.current.nodes.some(isRunningFreeCanvasImageGeneration)
-      setImageGenerationBusy(stillRunning)
       if (stillRunning) timeoutId = setTimeout(() => { void reconcile().catch(() => undefined) }, 1500)
     }
     void reconcile().catch(() => undefined)
@@ -1019,53 +1045,70 @@ const FreeCanvasBuilderInner = ({
     }
   }, [imageAnnotationDocuments])
 
-  const submitImageConversationTurn = useCallback(async () => {
-    if (imageGenerationBusy || !imageGenerationNodeV1 || !imageModelUsable) return
-    const conversationId = activeImageConversationId || createLocalId('image-conversation')
-    let snapshot: ImageGenerationComposerDraft
-    try {
-      snapshot = await prepareAnnotatedComposerDraft(imageComposerDraft)
-    } catch {
-      setUploadError('视觉标记栅格化或派生资产保存失败，请检查本地存储。')
-      return
+  const executeImageDraft = useCallback(async (
+    snapshot: ImageGenerationComposerDraft,
+    identity: {
+      conversationId?: string
+      nodeId?: string
+      activateConversation: boolean
+      runId?: string
+      placeholderPrepared?: boolean
     }
-    const runId = createImageGenerationRunId()
+  ): Promise<boolean> => {
+    if ((identity.activateConversation && imageGenerationBusy) || !imageGenerationNodeV1 || !imageModelUsable) return false
+    const runId = identity.runId || createImageGenerationRunId()
     const frame = imageGenerationPlaceholderFrame(snapshot)
     const current = freeCanvasRef.current
-    const placeholder = createFreeCanvasImageGenerationPlaceholder({
-      runId,
-      conversationId,
-      prompt: promptDocumentPlainText(snapshot.promptDocument),
-      position: nextNodePosition(reactFlow, current.nodes.length),
-      ...frame
-    })
-    const canvasWithPlaceholder = {
-      ...current,
-      nodes: [...current.nodes, placeholder],
-      selectedNodeId: placeholder.id
-    }
-    emitGenerationCanvas(canvasWithPlaceholder)
-    setActiveImageConversationId(conversationId)
-    setImageGenerationBusy(true)
-    setOptimisticImageTurn({
-      id: runId,
-      createdAt: Date.now(),
-      prompt: promptDocumentPlainText(snapshot.promptDocument),
-      state: 'running',
-      settings: {
-        workflow: snapshot.workflow,
-        modelLabel: selectedImageModel?.displayName || snapshot.modelId,
-        resolution: snapshot.resolution,
-        aspectRatio: snapshot.aspectRatio,
-        outputFormat: snapshot.outputFormat,
-        watermark: snapshot.watermark
+    const sourceNodeId = snapshot.operation?.source.nodeId
+    const sourceNode = sourceNodeId
+      ? current.nodes.find(node => node.id === sourceNodeId)
+      : null
+    const position = sourceNode
+      ? { x: sourceNode.position.x + sourceNode.width + 48, y: sourceNode.position.y }
+      : nextNodePosition(reactFlow, current.nodes.length)
+    let canvasWithPlaceholder = current
+    if (!identity.placeholderPrepared) {
+      const placeholder = createOperationPlaceholder({
+        snapshot,
+        runId,
+        conversationId: identity.conversationId || `image-operation-${runId}`,
+        position,
+        frame
+      })
+      canvasWithPlaceholder = {
+        ...current,
+        nodes: [...current.nodes, placeholder],
+        selectedNodeId: placeholder.id
       }
-    })
-    let placeholderSaved = false
-    try {
-      placeholderSaved = Boolean(await onPersistCanvas?.(canvasWithPlaceholder))
-    } catch {
-      placeholderSaved = false
+      emitGenerationCanvas(canvasWithPlaceholder)
+    }
+    if (identity.activateConversation && identity.conversationId) {
+      setActiveImageConversationId(identity.conversationId)
+    }
+    if (identity.activateConversation) setImageGenerationBusy(true)
+    if (identity.activateConversation) {
+      setOptimisticImageTurn({
+        id: runId,
+        createdAt: Date.now(),
+        prompt: promptDocumentPlainText(snapshot.promptDocument),
+        state: 'running',
+        settings: {
+          workflow: snapshot.workflow,
+          modelLabel: selectedImageModel?.displayName || snapshot.modelId,
+          resolution: snapshot.resolution,
+          aspectRatio: snapshot.aspectRatio,
+          outputFormat: snapshot.outputFormat,
+          watermark: snapshot.watermark
+        }
+      })
+    }
+    let placeholderSaved = identity.placeholderPrepared
+    if (!identity.placeholderPrepared) {
+      try {
+        placeholderSaved = Boolean(await onPersistCanvas?.(canvasWithPlaceholder))
+      } catch {
+        placeholderSaved = false
+      }
     }
     if (!placeholderSaved) {
       const failedCanvas = failFreeCanvasImageGeneration(freeCanvasRef.current, runId, 'storage_write_failed')
@@ -1076,26 +1119,34 @@ const FreeCanvasBuilderInner = ({
         state: 'failed',
         error: { message: presentation.message, action: presentation.action }
       } : currentTurn)
-      setImageGenerationBusy(false)
-      return
+      if (identity.activateConversation) setImageGenerationBusy(false)
+      return false
     }
-    setImageComposerDraft(createEmptyConversationDraft({
-      connectionId: snapshot.connectionId,
-      modelId: snapshot.modelId,
-      resolution: snapshot.resolution,
-      aspectRatio: snapshot.aspectRatio,
-      width: snapshot.width,
-      height: snapshot.height,
-      promptOptimization: snapshot.promptOptimization,
-      outputFormat: snapshot.outputFormat,
-      watermark: snapshot.watermark
-    }))
-    setImageAnnotationDocuments({})
+    if (identity.activateConversation) {
+      setImageComposerDraft(createEmptyConversationDraft({
+        connectionId: snapshot.connectionId,
+        modelId: snapshot.modelId,
+        resolution: snapshot.resolution,
+        aspectRatio: snapshot.aspectRatio,
+        width: snapshot.width,
+        height: snapshot.height,
+        promptOptimization: snapshot.promptOptimization,
+        outputFormat: snapshot.outputFormat,
+        watermark: snapshot.watermark
+      }))
+      setImageAnnotationDocuments({})
+    }
     try {
-      const result = await requestImageGeneration({
-        ...buildConversationGenerationRequest(activeProject.id, conversationId, snapshot),
-        runId
-      })
+      const request = buildConversationGenerationRequest(
+        activeProject.id,
+        identity.conversationId || 'image-operation',
+        snapshot
+      )
+      if (!identity.conversationId) {
+        delete request.conversationId
+        request.nodeId = identity.nodeId || snapshot.operation?.source.nodeId
+      }
+      const result = await requestImageGeneration({ ...request, runId })
       if (activeProjectIdRef.current === activeProject.id) {
         const completedCanvas = completeFreeCanvasImageGeneration(
           freeCanvasRef.current,
@@ -1107,11 +1158,14 @@ const FreeCanvasBuilderInner = ({
         emitGenerationCanvas(completedCanvas)
         const completedSaved = await onPersistCanvas?.(completedCanvas)
         if (completedSaved) unpersistedPlacementRunIdsRef.current.delete(runId)
-        await loadImageConversations(activeProject.id)
-        await loadImageConversationRuns(activeProject.id, conversationId)
-        setOptimisticImageTurn(null)
+        if (identity.activateConversation && identity.conversationId) {
+          await loadImageConversations(activeProject.id)
+          await loadImageConversationRuns(activeProject.id, identity.conversationId)
+          setOptimisticImageTurn(null)
+        }
         await processPendingImagePlacements(activeProject.id)
       }
+      return true
     } catch (error) {
       if (activeProjectIdRef.current === activeProject.id) {
         const clientError = error instanceof ImageGenerationClientError ? error : null
@@ -1119,20 +1173,40 @@ const FreeCanvasBuilderInner = ({
         const failedCanvas = failFreeCanvasImageGeneration(freeCanvasRef.current, runId, errorCode)
         emitGenerationCanvas(failedCanvas)
         await onPersistCanvas?.(failedCanvas).catch(() => false)
-        setOptimisticImageTurn(currentTurn => currentTurn?.id === runId ? {
-          ...currentTurn,
-          state: 'failed',
-          error: { message: clientError?.message || '图片生成失败，请稍后重试。', action: clientError?.action }
-        } : currentTurn)
-        await Promise.all([
-          loadImageConversations(activeProject.id),
-          loadImageConversationRuns(activeProject.id, conversationId)
-        ]).catch(() => undefined)
+        if (identity.activateConversation) {
+          setOptimisticImageTurn(currentTurn => currentTurn?.id === runId ? {
+            ...currentTurn,
+            state: 'failed',
+            error: { message: clientError?.message || '图片生成失败，请稍后重试。', action: clientError?.action }
+          } : currentTurn)
+          if (identity.conversationId) {
+            await Promise.all([
+              loadImageConversations(activeProject.id),
+              loadImageConversationRuns(activeProject.id, identity.conversationId)
+            ]).catch(() => undefined)
+          }
+        }
       }
+      return false
     } finally {
-      if (activeProjectIdRef.current === activeProject.id) setImageGenerationBusy(false)
+      if (identity.activateConversation && activeProjectIdRef.current === activeProject.id) {
+        setImageGenerationBusy(false)
+      }
     }
-  }, [activeImageConversationId, activeProject.id, emitGenerationCanvas, imageComposerDraft, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversationRuns, loadImageConversations, onPersistCanvas, prepareAnnotatedComposerDraft, processPendingImagePlacements, reactFlow, selectedImageModel?.displayName])
+  }, [activeProject.id, emitGenerationCanvas, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversationRuns, loadImageConversations, onPersistCanvas, processPendingImagePlacements, reactFlow, selectedImageModel?.displayName])
+
+  const submitImageConversationTurn = useCallback(async () => {
+    if (imageGenerationBusy || !imageGenerationNodeV1 || !imageModelUsable) return
+    const conversationId = activeImageConversationId || createLocalId('image-conversation')
+    let snapshot: ImageGenerationComposerDraft
+    try {
+      snapshot = await prepareAnnotatedComposerDraft(imageComposerDraft)
+    } catch {
+      setUploadError('视觉标记栅格化或派生资产保存失败，请检查本地存储。')
+      return
+    }
+    await executeImageDraft(snapshot, { conversationId, activateConversation: true })
+  }, [activeImageConversationId, executeImageDraft, imageComposerDraft, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, prepareAnnotatedComposerDraft])
 
   const imageComposerMissingRequirements = useMemo(() => {
     const missing: string[] = []
@@ -1324,6 +1398,489 @@ const FreeCanvasBuilderInner = ({
     }
   }, [emitGenerationCanvas, imageConversationRuns, onOpenMedia, reactFlow, restoreImageTurnToComposer])
 
+  const openImageOperationWorkbench = useCallback(async (
+    node: IFreeCanvasImageNode,
+    operation: ImageProductOperation,
+    options?: {
+      operationGroupId?: string
+      viewSpec?: string
+    }
+  ) => {
+    if (!node.assetId || !selectedImageModel || !selectedImageConnection) return
+    setImageOperationPreparing(true)
+    setUploadError(null)
+    try {
+      const source = await resolveCanvasImageInput(node, {
+        renderVisible: async target => {
+          const image = await loadImageElement(canvasImageAssetUrl(target.assetId!))
+          return renderVisibleImage(image, target)
+        },
+        persistProviderInput: async (blob, context) => {
+          const imported = await storageServiceClient.imageAssets.import(new File(
+            [blob],
+            context.filename,
+            { type: 'image/png' }
+          ))
+          await storageServiceClient.imageAssets.createDerivation({
+            sourceAssetId: context.sourceAssetId,
+            derivedAssetId: imported.providerInputAsset.id,
+            kind: context.derivationKind,
+            transform: context.transform
+          })
+          return {
+            providerAssetId: imported.providerInputAsset.id,
+            previewUrl: canvasImageAssetUrl(imported.providerInputAsset.id)
+          }
+        },
+        assetUrl: canvasImageAssetUrl
+      })
+      const resolutions = selectedImageModel.capabilities?.resolutions || ['2K']
+      const aspectRatios = selectedImageModel.capabilities?.aspectRatios || ['1:1']
+      setActiveImageOperationDraft({
+        operation,
+        source,
+        prompt: operation === 'upscale' ? '增强细节并尽量保持主体、构图与材质。' : '',
+        presetId: defaultImageOperationPreset(operation),
+        preservationIntents: defaultImageOperationPreservation(operation),
+        references: [],
+        resolution: resolutions.some(value => value === imageComposerDraft.resolution)
+          ? imageComposerDraft.resolution
+          : resolutions[0] || '2K',
+        aspectRatio: aspectRatios.includes(imageComposerDraft.aspectRatio)
+          ? imageComposerDraft.aspectRatio
+          : aspectRatios.find(value => value !== 'custom') || '1:1',
+        ...(options?.operationGroupId ? { operationGroupId: options.operationGroupId } : {}),
+        ...(options?.viewSpec ? { viewSpec: options.viewSpec } : {})
+      })
+    } catch {
+      setUploadError('无法准备当前画布图片的模型输入，请检查本地资产和存储服务。')
+    } finally {
+      setImageOperationPreparing(false)
+    }
+  }, [imageComposerDraft.aspectRatio, imageComposerDraft.resolution, selectedImageConnection, selectedImageModel])
+
+  const resolveCommandsForImageNode = useCallback((
+    node: IFreeCanvasImageNode,
+    selectionCount: number
+  ): ResolvedImageNodeCommand[] => {
+    const generationState = node.meta.generationState === 'running'
+      ? 'running'
+      : node.meta.generationState === 'failed' ? 'failed' : 'ready'
+    const operationAvailability = resolveImageOperationAvailability({
+      model: selectedImageModel,
+      runtimeReady: imageGenerationNodeV1 && imageRuntimeReady && !previewMode,
+      selection: {
+        nodeKind: 'image',
+        count: selectionCount,
+        assetId: node.assetId || null,
+        generationState
+      },
+      adapterImplementedOperations: contextualImageOperations,
+      policyEnabledOperations: contextualImageOperations
+    })
+    return resolveImageNodeCommands({
+      target: {
+        nodeKind: 'image',
+        count: selectionCount,
+        assetId: node.assetId || null,
+        generationState,
+        source: node.meta.source === 'image-generation-conversation' ? 'generated' : 'upload'
+      },
+      operationAvailability
+    }).map(command => command.id === 'crop' && node.crop
+      ? { ...command, enabled: false }
+      : command)
+  }, [imageGenerationNodeV1, imageRuntimeReady, previewMode, selectedImageModel])
+
+  const selectedImageCommands = useMemo(() => {
+    if (!selectedImageNode) return []
+    const count = selectedNodeIds.length || 1
+    return resolveCommandsForImageNode(selectedImageNode, count)
+  }, [resolveCommandsForImageNode, selectedImageNode, selectedNodeIds.length])
+
+  const selectedMultiViewGroup = useMemo(() => {
+    const groupId = typeof selectedImageNode?.meta.operationGroupId === 'string'
+      ? selectedImageNode.meta.operationGroupId
+      : null
+    if (!groupId) return null
+    const nodesInGroup = freeCanvas.nodes.filter((node): node is IFreeCanvasImageNode => (
+      node.kind === 'image' && node.meta.operationGroupId === groupId
+    ))
+    const members: MultiViewGroupPanelMember[] = nodesInGroup.map(node => {
+      const viewId = typeof node.meta.operationViewSpec === 'string'
+        ? node.meta.operationViewSpec
+        : 'unknown'
+      const knownView = defaultMultiViewSpecs.find(view => view.id === viewId)
+      const generationState = node.meta.generationState
+      const state = generationState === 'failed'
+        ? 'failed'
+        : generationState === 'running'
+          ? 'running'
+          : generationState === 'succeeded' || node.assetId
+            ? 'succeeded'
+            : 'queued'
+      return {
+        nodeId: node.id,
+        itemId: typeof node.meta.operationItemId === 'string' ? node.meta.operationItemId : node.id,
+        viewId,
+        viewLabel: knownView?.label || viewId,
+        state,
+        assetId: node.assetId || null
+      }
+    })
+    const sourceNodeId = nodesInGroup.find(node => typeof node.meta.sourceCanvasNodeId === 'string')
+      ?.meta.sourceCanvasNodeId
+    const sourceAvailable = typeof sourceNodeId === 'string'
+      && freeCanvas.nodes.some(node => node.kind === 'image' && node.id === sourceNodeId && Boolean(node.assetId))
+    return { groupId, members, sourceNodeId: typeof sourceNodeId === 'string' ? sourceNodeId : null, sourceAvailable }
+  }, [freeCanvas.nodes, selectedImageNode])
+
+  const selectMultiViewMember = useCallback((nodeId: string) => {
+    const current = freeCanvasRef.current
+    if (!current.nodes.some(node => node.id === nodeId)) return
+    emitGenerationCanvas({ ...current, selectedNodeId: nodeId })
+    setSelectedNodeIds([nodeId])
+  }, [emitGenerationCanvas])
+
+  const retryMultiViewMember = useCallback((member: MultiViewGroupPanelMember) => {
+    const current = freeCanvasRef.current
+    const failedNode = current.nodes.find(node => node.id === member.nodeId && node.kind === 'image')
+    const sourceNodeId = failedNode && typeof failedNode.meta.sourceCanvasNodeId === 'string'
+      ? failedNode.meta.sourceCanvasNodeId
+      : null
+    const sourceNode = sourceNodeId
+      ? current.nodes.find((node): node is IFreeCanvasImageNode => node.id === sourceNodeId && node.kind === 'image')
+      : null
+    const groupId = failedNode && typeof failedNode.meta.operationGroupId === 'string'
+      ? failedNode.meta.operationGroupId
+      : undefined
+    if (!sourceNode?.assetId || !groupId) return
+    void openImageOperationWorkbench(sourceNode, 'multi-view', {
+      operationGroupId: groupId,
+      viewSpec: member.viewId
+    })
+  }, [openImageOperationWorkbench])
+
+  const useMultiViewMemberAsReference = useCallback((member: MultiViewGroupPanelMember) => {
+    const node = freeCanvasRef.current.nodes.find(
+      (candidate): candidate is IFreeCanvasImageNode => candidate.id === member.nodeId && candidate.kind === 'image'
+    )
+    if (!node?.assetId) return
+    void openImageOperationWorkbench(node, 'reference-generate')
+  }, [openImageOperationWorkbench])
+
+  const applyCanvasCommand = useCallback((command: CanvasLocalCommand) => {
+    const applied = executeCanvasLocalCommand(
+      canvasCommandHistoryRef.current,
+      freeCanvasRef.current,
+      command
+    )
+    canvasCommandHistoryRef.current = applied.history
+    if (applied.project !== freeCanvasRef.current) emitGenerationCanvas(applied.project)
+  }, [emitGenerationCanvas])
+
+  const closeNodeContextMenu = useCallback(() => {
+    setNodeContextMenu(current => {
+      current?.returnFocus?.focus()
+      return null
+    })
+  }, [])
+
+  const rasterVisibleImageNode = useCallback(async (node: IFreeCanvasImageNode): Promise<Blob> => {
+    if (!node.assetId) throw new Error('图片资产不可用。')
+    const image = await loadImageElement(canvasImageAssetUrl(node.assetId))
+    return renderVisibleImage(image, node, { format: 'image/png' })
+  }, [])
+
+  const exportVisibleImageNode = useCallback(async (node: IFreeCanvasImageNode) => {
+    try {
+      const blob = await rasterVisibleImageNode(node)
+      const objectUrl = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = `${node.title || 'image'}-visible.png`
+      anchor.rel = 'noopener'
+      anchor.click()
+      URL.revokeObjectURL(objectUrl)
+      setClipboardNotice('已导出包含裁切、翻转和标注的所见图片')
+    } catch {
+      setUploadError('无法导出当前所见图片。')
+    }
+  }, [rasterVisibleImageNode])
+
+  const copyVisibleImageNode = useCallback(async (node: IFreeCanvasImageNode) => {
+    try {
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+        throw new Error('Clipboard image write is unavailable')
+      }
+      const blob = await rasterVisibleImageNode(node)
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+      setClipboardNotice('已复制包含裁切、翻转和标注的所见图片')
+    } catch {
+      setUploadError('当前环境不支持复制所见图片，请使用“下载所见图片”。')
+    }
+  }, [rasterVisibleImageNode])
+
+  const executeImageCommand = useCallback((nodeId: string, commandId: ImageNodeCommandId) => {
+    const current = freeCanvasRef.current
+    const node = current.nodes.find((candidate): candidate is IFreeCanvasImageNode =>
+      candidate.id === nodeId && candidate.kind === 'image'
+    )
+    if (!node) return
+
+    if (commandId === 'copy') {
+      copiedImageNodeRef.current = node
+      setClipboardNotice('已复制图片节点')
+      return
+    }
+    if (commandId === 'duplicate') {
+      const duplicate = duplicateCanvasImageNode(node, createLocalId('free-image-copy'))
+      applyCanvasCommand({ kind: 'insert-node', node: duplicate, index: current.nodes.length })
+      setSelectedNodeIds([duplicate.id])
+      return
+    }
+    if (commandId === 'delete') {
+      const nodeIds = selectedNodeIds.includes(nodeId) && selectedNodeIds.length > 0
+        ? selectedNodeIds
+        : [nodeId]
+      applyCanvasCommand({ kind: 'delete-nodes', nodeIds })
+      setSelectedNodeIds([])
+      return
+    }
+    if (commandId === 'zoom-selection') {
+      const flowNode = reactFlow.getNode(nodeId)
+      if (flowNode) void reactFlow.fitView({ nodes: [flowNode], padding: 0.22, duration: 280 })
+      return
+    }
+    if (commandId === 'layer-up' || commandId === 'bring-front' || commandId === 'layer-down' || commandId === 'send-back') {
+      const index = current.nodes.findIndex(candidate => candidate.id === nodeId)
+      const toIndex = commandId === 'bring-front'
+        ? current.nodes.length - 1
+        : commandId === 'send-back'
+          ? 0
+          : commandId === 'layer-up' ? index + 1 : index - 1
+      applyCanvasCommand({ kind: 'reorder-node', nodeId, toIndex })
+      return
+    }
+    if (commandId === 'flip-horizontal' || commandId === 'flip-vertical') {
+      applyCanvasCommand({
+        kind: 'flip-image',
+        nodeId,
+        axis: commandId === 'flip-horizontal' ? 'horizontal' : 'vertical'
+      })
+      return
+    }
+    if (commandId === 'crop') {
+      if (!node.crop) setCropNodeId(nodeId)
+      return
+    }
+    if (commandId === 'annotate') {
+      setAnnotationEditorNodeId(nodeId)
+      return
+    }
+    if (commandId === 'copy-visible') {
+      void copyVisibleImageNode(node)
+      return
+    }
+    if (commandId === 'export-visible') {
+      void exportVisibleImageNode(node)
+      return
+    }
+    if (commandId === 'download-original' && node.assetId) {
+      const anchor = document.createElement('a')
+      anchor.href = canvasImageAssetUrl(node.assetId)
+      anchor.download = `${node.title || 'image'}.png`
+      anchor.rel = 'noopener'
+      anchor.click()
+      return
+    }
+    const operation = imageOperationForCommand(commandId)
+    if (operation) {
+      void openImageOperationWorkbench(node, operation)
+    }
+  }, [applyCanvasCommand, copyVisibleImageNode, exportVisibleImageNode, openImageOperationWorkbench, reactFlow, selectedNodeIds])
+
+  useEffect(() => {
+    const handleLocalShortcut = (event: KeyboardEvent) => {
+      if (isCanvasKeyboardLocked || isTypingTarget(event.target)) return
+      const node = selectedImageNodeRef.current
+      if (!node) return
+      const modifier = event.ctrlKey || event.metaKey
+      const key = event.key.toLowerCase()
+      if (modifier && key === 'z') {
+        event.preventDefault()
+        const applied = event.shiftKey
+          ? redoCanvasLocalCommand(canvasCommandHistoryRef.current, freeCanvasRef.current)
+          : undoCanvasLocalCommand(canvasCommandHistoryRef.current, freeCanvasRef.current)
+        canvasCommandHistoryRef.current = applied.history
+        emitGenerationCanvas(applied.project)
+        return
+      }
+      if (modifier && key === 'y') {
+        event.preventDefault()
+        const applied = redoCanvasLocalCommand(canvasCommandHistoryRef.current, freeCanvasRef.current)
+        canvasCommandHistoryRef.current = applied.history
+        emitGenerationCanvas(applied.project)
+        return
+      }
+      if (modifier && key === 'd') {
+        event.preventDefault()
+        executeImageCommand(node.id, 'duplicate')
+        return
+      }
+      if (event.key === 'Backspace' || event.key === 'Delete') {
+        event.preventDefault()
+        executeImageCommand(node.id, 'delete')
+        return
+      }
+      if (event.shiftKey && event.key === '1') {
+        event.preventDefault()
+        executeImageCommand(node.id, 'zoom-selection')
+        return
+      }
+      if (modifier && (event.key === ']' || event.key === '[')) {
+        event.preventDefault()
+        executeImageCommand(
+          node.id,
+          event.key === ']'
+            ? event.altKey ? 'bring-front' : 'layer-up'
+            : event.altKey ? 'send-back' : 'layer-down'
+        )
+      }
+    }
+    window.addEventListener('keydown', handleLocalShortcut)
+    return () => window.removeEventListener('keydown', handleLocalShortcut)
+  }, [emitGenerationCanvas, executeImageCommand, isCanvasKeyboardLocked])
+
+  const maximumOperationInputs = selectedImageModel?.capabilities?.references?.maxCount
+    ?? selectedImageModel?.capabilities?.maxReferenceImages
+    ?? 1
+  const imageOperationExternalIssues = useMemo(() => {
+    const issues: string[] = []
+    if (!imageGenerationNodeV1) issues.push('图片生成功能当前未开启。')
+    if (previewMode) issues.push('预览模式不能发起图片生成。')
+    if (!imageRuntimeReady) issues.push('图片生成 Runtime 尚未就绪。')
+    if (!selectedImageConnection?.enabled) issues.push('图片模型连接不可用。')
+    if (!selectedImageConnection?.credentialConfigured) issues.push('图片模型连接尚未配置凭据。')
+    if (!selectedImageConnection?.lastTest?.ok) issues.push('图片模型连接尚未测试成功。')
+    if (!selectedImageModel) issues.push('尚未选择可用图片模型。')
+    return issues
+  }, [imageGenerationNodeV1, imageRuntimeReady, previewMode, selectedImageConnection, selectedImageModel])
+
+  const importImageOperationReferences = useCallback(async (
+    files: File[]
+  ): Promise<ImageOperationReference[]> => {
+    const remaining = Math.max(0, maximumOperationInputs - 1 - (activeImageOperationDraft?.references.length || 0))
+    const accepted = files.slice(0, remaining)
+    const imported = await Promise.all(accepted.map(async (file, index) => {
+      const asset = await storageServiceClient.imageAssets.import(file)
+      return {
+        referenceId: createLocalId('operation-reference'),
+        assetId: asset.providerInputAsset.id,
+        sourceAssetId: asset.originalAsset.id,
+        label: file.name,
+        role: 'content' as const,
+        order: (activeImageOperationDraft?.references.length || 0) + index
+      }
+    }))
+    return imported
+  }, [activeImageOperationDraft?.references.length, maximumOperationInputs])
+
+  const submitImageOperation = useCallback(async (draft: ImageOperationDraft) => {
+    if (!selectedImageConnection || !selectedImageModel) throw new Error('图片模型连接不可用。')
+    const snapshot = compileImageOperationDraft(draft, {
+      connectionId: selectedImageConnection.id,
+      modelId: selectedImageModel.id,
+      outputFormat: imageComposerDraft.outputFormat,
+      watermark: imageComposerDraft.watermark,
+      promptOptimization: imageComposerDraft.promptOptimization
+    })
+    const succeeded = await executeImageDraft(snapshot, {
+      nodeId: draft.source.nodeId,
+      activateConversation: false
+    })
+    if (!succeeded) throw new Error('图片操作未成功提交，请检查画布上的失败节点后重试。')
+    setActiveImageOperationDraft(null)
+  }, [executeImageDraft, imageComposerDraft.outputFormat, imageComposerDraft.promptOptimization, imageComposerDraft.watermark, selectedImageConnection, selectedImageModel])
+
+  const submitMultiViewOperation = useCallback(async (
+    draft: ImageOperationDraft,
+    selectedViewIds: string[]
+  ) => {
+    if (!selectedImageConnection || !selectedImageModel) throw new Error('图片模型连接不可用。')
+    const groupId = draft.operationGroupId || createLocalId('multi-view-group')
+    const members = createMultiViewRequestMembers({
+      sourceDraft: draft,
+      selectedViewIds,
+      groupId,
+      createItemId: view => createLocalId(`multi-view-${view.id}`)
+    }).map(member => {
+      const runId = createImageGenerationRunId()
+      const snapshot = compileImageOperationDraft(member.draft, {
+        connectionId: selectedImageConnection.id,
+        modelId: selectedImageModel.id,
+        outputFormat: imageComposerDraft.outputFormat,
+        watermark: imageComposerDraft.watermark,
+        promptOptimization: imageComposerDraft.promptOptimization
+      })
+      return { ...member, runId, snapshot }
+    })
+    if (members.length === 0) throw new Error('请至少选择一个视角。')
+
+    const current = freeCanvasRef.current
+    const sourceNode = current.nodes.find(node => node.id === draft.source.nodeId)
+    if (!sourceNode || sourceNode.kind !== 'image') throw new Error('多角度源图片已不在当前画布中。')
+    const frame = imageGenerationPlaceholderFrame(members[0].snapshot)
+    const groupMemberOffset = current.nodes.filter(node => node.meta.operationGroupId === groupId).length
+    const placeholders = members.map((member, index) => {
+      const placementIndex = groupMemberOffset + index
+      return createOperationPlaceholder({
+      snapshot: member.snapshot,
+      runId: member.runId,
+      conversationId: `image-operation-${member.runId}`,
+      position: {
+        x: sourceNode.position.x + sourceNode.width + 48 + (placementIndex % 3) * (frame.width + 24),
+        y: sourceNode.position.y + Math.floor(placementIndex / 3) * (frame.height + 48)
+      },
+      frame
+      })
+    })
+    const canvasWithGroup = {
+      ...current,
+      nodes: [...current.nodes, ...placeholders],
+      selectedNodeId: placeholders[0].id
+    }
+    emitGenerationCanvas(canvasWithGroup)
+
+    let saved = false
+    try {
+      saved = Boolean(await onPersistCanvas?.(canvasWithGroup))
+    } catch {
+      saved = false
+    }
+    if (!saved) {
+      const failedCanvas = members.reduce(
+        (canvas, member) => failFreeCanvasImageGeneration(canvas, member.runId, 'storage_write_failed'),
+        freeCanvasRef.current
+      )
+      emitGenerationCanvas(failedCanvas)
+      await onPersistCanvas?.(failedCanvas).catch(() => false)
+      throw new Error('多角度占位节点保存失败，未发起任何模型请求。')
+    }
+
+    setActiveImageOperationDraft(null)
+    void scheduleMultiViewMembers(
+      members,
+      member => executeImageDraft(member.snapshot, {
+        nodeId: draft.source.nodeId,
+        activateConversation: false,
+        runId: member.runId,
+        placeholderPrepared: true
+      }),
+      1
+    )
+  }, [emitGenerationCanvas, executeImageDraft, imageComposerDraft.outputFormat, imageComposerDraft.promptOptimization, imageComposerDraft.watermark, onPersistCanvas, selectedImageConnection, selectedImageModel])
+
   const nodes = useMemo<FreeCanvasFlowNode[]>(() => freeCanvas.nodes.map(node => ({
     id: node.id,
     type: node.kind === 'image-generator' ? 'imageGeneratorNode' : 'freeCanvasNode',
@@ -1339,8 +1896,6 @@ const FreeCanvasBuilderInner = ({
       onTextRangeReplace: replaceTextRange,
       onTextStyleChange: updateTextStyle,
       onImageResize: resizeImageNode,
-      onStartImageAnnotationEdit: setAnnotationEditorNodeId,
-      onStartImageCrop: setCropNodeId,
       resultThumbnailUrl: node.kind === 'image-generator' && node.primaryAssetId
         ? canvasImageAssetUrl(node.primaryAssetId)
         : undefined,
@@ -1349,17 +1904,32 @@ const FreeCanvasBuilderInner = ({
         ? (nodeId: string) => onConfigureImageModel({ projectId: activeProject.id, nodeId, returnTarget: 'free-canvas' })
         : undefined,
       onContinueLegacyImageCreation: continueLegacyImageCreation,
-      onContinueImageCreation: continueImageCreation,
+      imageCommands: node.kind === 'image' && node.id === selectedImageNode?.id
+        ? selectedImageCommands
+        : undefined,
+      onImageCommand: executeImageCommand,
       imageGeneratorInputSummary: node.kind === 'image-generator' ? {
         promptConnected: freeCanvas.edges.some(edge => edge.target === node.id && edge.targetHandle === 'prompt'),
         sourceConnected: freeCanvas.edges.some(edge => edge.target === node.id && edge.targetHandle === 'source-image'),
         referenceCount: freeCanvas.edges.filter(edge => edge.target === node.id && edge.targetHandle === 'reference-image').length
       } : undefined
     }
-  })), [activeProject.id, continueImageCreation, continueLegacyImageCreation, copyTextNode, editingNodeId, freeCanvas.edges, freeCanvas.nodes, freeCanvas.selectedNodeId, onConfigureImageModel, replaceTextRange, resizeImageNode, updateTextStyle])
+  })), [activeProject.id, continueLegacyImageCreation, copyTextNode, editingNodeId, executeImageCommand, freeCanvas.edges, freeCanvas.nodes, freeCanvas.selectedNodeId, onConfigureImageModel, replaceTextRange, resizeImageNode, selectedImageCommands, selectedImageNode?.id, updateTextStyle])
 
   const [flowNodes, setFlowNodes] = useState<FreeCanvasFlowNode[]>(nodes)
-  useEffect(() => setFlowNodes(nodes), [nodes])
+  useEffect(() => {
+    setFlowNodes(current => {
+      const measuredById = new Map(current.flatMap(node => (
+        node.measured?.width !== undefined && node.measured.height !== undefined
+          ? [[node.id, node.measured] as const]
+          : []
+      )))
+      return nodes.map(node => {
+        const measured = measuredById.get(node.id)
+        return measured ? { ...node, measured } : node
+      })
+    })
+  }, [nodes])
 
   const edges = useMemo<Edge[]>(() => freeCanvas.edges.map(edge => ({
     id: edge.id,
@@ -1392,6 +1962,16 @@ const FreeCanvasBuilderInner = ({
     }
   }
 
+  const handleSelectionChange = useCallback<OnSelectionChangeFunc<FreeCanvasFlowNode>>(({ nodes: selection }) => {
+    const nextNodeIds = selection.map(node => node.id)
+    setSelectedNodeIds(current => (
+      current.length === nextNodeIds.length && current.every((nodeId, index) => nodeId === nextNodeIds[index])
+        ? current
+        : nextNodeIds
+    ))
+    setNodeContextMenu(null)
+  }, [])
+
   const cancelImageCrop = () => setCropNodeId(null)
 
   const confirmImageCrop = (lines: FreeCanvasCropLines) => {
@@ -1407,9 +1987,30 @@ const FreeCanvasBuilderInner = ({
   }
 
   const handleNodeClick: NodeMouseHandler<FreeCanvasFlowNode> = (_event, node) => {
+    setNodeContextMenu(null)
     setSelectedEdgeId(null)
     setSelectedNodeIds([node.id])
     setSelectedNodeId(node.id)
+  }
+
+  const handleNodeContextMenu: NodeMouseHandler<FreeCanvasFlowNode> = (event, node) => {
+    event.preventDefault()
+    const target = node.data.canvasNode
+    if (target.kind !== 'image' || !target.assetId || target.meta.generationState === 'running') {
+      setNodeContextMenu(null)
+      return
+    }
+    const preservesSelection = selectedNodeIds.includes(node.id)
+    if (!preservesSelection) {
+      setSelectedNodeIds([node.id])
+      setSelectedNodeId(node.id)
+    }
+    setNodeContextMenu({
+      nodeId: node.id,
+      x: event.clientX,
+      y: event.clientY,
+      returnFocus: event.currentTarget instanceof HTMLElement ? event.currentTarget : null
+    })
   }
 
   const handleNodeDoubleClick: NodeMouseHandler<FreeCanvasFlowNode> = (_event, node) => {
@@ -1621,16 +2222,19 @@ const FreeCanvasBuilderInner = ({
             nodes={flowNodes}
             edges={edges}
             nodeTypes={nodeTypes}
-            deleteKeyCode={editingNodeId || isCanvasKeyboardLocked ? null : ['Backspace', 'Delete']}
+            deleteKeyCode={null}
             onNodesChange={handleNodesChange}
             onNodeClick={handleNodeClick}
+            onNodeContextMenu={handleNodeContextMenu}
             onNodeDoubleClick={handleNodeDoubleClick}
             onNodeDragStop={handleNodeDragStop}
-            onSelectionChange={({ nodes: selection }) => setSelectedNodeIds(selection.map(node => node.id))}
+            onSelectionChange={handleSelectionChange}
+            onMoveStart={() => setNodeContextMenu(null)}
             onConnect={handleConnect}
             isValidConnection={isValidConnection}
             onEdgeClick={handleEdgeClick}
             onPaneClick={() => {
+              setNodeContextMenu(null)
               setSelectedNodeIds([])
               setSelectedNodeId(null)
               setSelectedEdgeId(null)
@@ -1651,6 +2255,23 @@ const FreeCanvasBuilderInner = ({
             <MiniMap pannable zoomable className="!bottom-6 !left-auto !right-16" />
             <Controls className="!bottom-6 !left-auto !right-4" />
           </ReactFlow>
+          {nodeContextMenu && (() => {
+            const contextNode = freeCanvas.nodes.find((node): node is IFreeCanvasImageNode =>
+              node.id === nodeContextMenu.nodeId && node.kind === 'image'
+            )
+            if (!contextNode) return null
+            const selectionCount = selectedNodeIds.includes(contextNode.id)
+              ? Math.max(1, selectedNodeIds.length)
+              : 1
+            return (
+              <CanvasNodeContextMenu
+                position={{ x: nodeContextMenu.x, y: nodeContextMenu.y }}
+                commands={resolveCommandsForImageNode(contextNode, selectionCount)}
+                onExecute={commandId => executeImageCommand(contextNode.id, commandId)}
+                onClose={closeNodeContextMenu}
+              />
+            )
+          })()}
           {fileDragActive && (
             <div className="pointer-events-none absolute inset-4 z-40 flex items-center justify-center rounded-[18px] border-2 border-dashed border-sky-300 bg-sky-50/75 text-sm font-black text-sky-700">
               松开以添加图片
@@ -1710,6 +2331,16 @@ const FreeCanvasBuilderInner = ({
             {clipboardNotice}
           </div>
         )}
+        {selectedMultiViewGroup && (
+          <MultiViewGroupPanel
+            groupId={selectedMultiViewGroup.groupId}
+            members={selectedMultiViewGroup.members}
+            sourceAvailable={selectedMultiViewGroup.sourceAvailable}
+            onSelect={selectMultiViewMember}
+            onRetry={retryMultiViewMember}
+            onUseAsReference={useMultiViewMemberAsReference}
+          />
+        )}
         {cropNode && (
           <ImageCropEditor
             media={imageNodeToMedia(cropNode)}
@@ -1724,6 +2355,37 @@ const FreeCanvasBuilderInner = ({
             imageUrl={annotationEditorNode.assetId ? canvasImageAssetUrl(annotationEditorNode.assetId) : annotationEditorNode.imageUrl || ''}
             onCancel={() => setAnnotationEditorNodeId(null)}
             onSave={annotations => saveImageAnnotations(annotationEditorNode.id, annotations)}
+          />
+        )}
+        {imageOperationPreparing && (
+          <div className="fixed inset-0 z-[89] flex items-center justify-center bg-gray-950/45 backdrop-blur-sm" role="status">
+            <div className="flex items-center gap-3 rounded-full bg-white px-5 py-3 text-sm font-bold text-gray-700 shadow-xl">
+              <Loader2 className="h-4 w-4 animate-spin text-[#c96442]" />
+              正在准备所见画面的模型输入…
+            </div>
+          </div>
+        )}
+        {activeImageOperationDraft?.operation === 'multi-view' && selectedImageModel && (
+          <MultiViewWorkbenchDialog
+            key={`multi-view:${activeImageOperationDraft.source.nodeId}`}
+            initialDraft={activeImageOperationDraft}
+            initialSelectedViewIds={activeImageOperationDraft.viewSpec ? [activeImageOperationDraft.viewSpec] : undefined}
+            modelLabel={selectedImageModel.displayName}
+            externalBlockingIssues={imageOperationExternalIssues}
+            onCancel={() => setActiveImageOperationDraft(null)}
+            onGenerate={submitMultiViewOperation}
+          />
+        )}
+        {activeImageOperationDraft && activeImageOperationDraft.operation !== 'multi-view' && selectedImageModel && (
+          <ImageOperationWorkbenchDialog
+            key={`${activeImageOperationDraft.operation}:${activeImageOperationDraft.source.nodeId}`}
+            initialDraft={activeImageOperationDraft}
+            modelLabel={selectedImageModel.displayName}
+            maximumInputs={maximumOperationInputs}
+            externalBlockingIssues={imageOperationExternalIssues}
+            onImportReferences={importImageOperationReferences}
+            onCancel={() => setActiveImageOperationDraft(null)}
+            onGenerate={submitImageOperation}
           />
         )}
       </div>
@@ -2087,9 +2749,8 @@ const FreeCanvasNode = ({ data, selected }: NodeProps<FreeCanvasFlowNode>) => {
         node={node}
         selected={selected}
         onResize={data.onImageResize}
-        onStartAnnotationEdit={data.onStartImageAnnotationEdit}
-        onStartImageCrop={data.onStartImageCrop}
-        onContinueCreation={data.onContinueImageCreation}
+        commands={data.imageCommands || []}
+        onCommand={commandId => data.onImageCommand(node.id, commandId)}
       />
     )
   }
@@ -2257,16 +2918,14 @@ const FreeCanvasImageNodeView = ({
   node,
   selected,
   onResize,
-  onStartAnnotationEdit,
-  onStartImageCrop,
-  onContinueCreation
+  commands,
+  onCommand
 }: {
   node: IFreeCanvasImageNode
   selected: boolean
   onResize: (nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => void
-  onStartAnnotationEdit: (nodeId: string) => void
-  onStartImageCrop: (nodeId: string) => void
-  onContinueCreation: (nodeId: string, workflow: ProjectImageGenerationWorkflow) => void
+  commands: readonly ResolvedImageNodeCommand[]
+  onCommand: (commandId: ImageNodeCommandId) => void
 }) => {
   const selectedNodeCount = useStore(state => state.nodes.filter(candidate => candidate.selected).length)
   const generationState = node.meta?.generationState
@@ -2274,12 +2933,19 @@ const FreeCanvasImageNodeView = ({
   const failurePresentation = getRuntimeErrorPresentation(generationErrorCode)
   const imageUrl = node.assetId ? canvasImageAssetUrl(node.assetId) : node.imageUrl
   const crop = node.crop
-  const imageStyle = crop ? {
-    width: `${100 / crop.width}%`,
-    height: `${100 / crop.height}%`,
-    left: `${-crop.x / crop.width * 100}%`,
-    top: `${-crop.y / crop.height * 100}%`
-  } : undefined
+  const presentation = node.meta.presentation && typeof node.meta.presentation === 'object'
+    ? node.meta.presentation as Record<string, unknown>
+    : {}
+  const flipTransform = `scale(${presentation.flipX === true ? -1 : 1}, ${presentation.flipY === true ? -1 : 1})`
+  const imageStyle = {
+    ...(crop ? {
+      width: `${100 / crop.width}%`,
+      height: `${100 / crop.height}%`,
+      left: `${-crop.x / crop.width * 100}%`,
+      top: `${-crop.y / crop.height * 100}%`
+    } : {}),
+    transform: flipTransform
+  }
 
   return (
     <div
@@ -2305,13 +2971,7 @@ const FreeCanvasImageNodeView = ({
         }}
       />
       <NodeToolbar isVisible={selected && selectedNodeCount === 1 && generationState !== 'running' && Boolean(node.assetId)} position={Position.Top} offset={10}>
-        <ImageNodeToolbar
-          canCrop={Boolean(node.assetId && !node.crop)}
-          onEdit={() => onStartAnnotationEdit(node.id)}
-          onCrop={() => onStartImageCrop(node.id)}
-          generatedResult={node.meta?.source === 'image-generation-conversation'}
-          onContinue={workflow => onContinueCreation(node.id, workflow)}
-        />
+        <ImageNodeActionBar commands={commands} onExecute={onCommand} />
       </NodeToolbar>
       <Handle type="target" position={Position.Left} className="!bg-gray-950 !opacity-0 group-hover:!opacity-100" />
       <div className="relative h-full w-full overflow-hidden">
@@ -2351,70 +3011,6 @@ const FreeCanvasImageNodeView = ({
     </div>
   )
 }
-
-const ImageNodeToolbar = ({
-  canCrop,
-  onEdit,
-  onCrop,
-  generatedResult,
-  onContinue
-}: {
-  canCrop: boolean
-  onEdit: () => void
-  onCrop: () => void
-  generatedResult: boolean
-  onContinue: (workflow: ProjectImageGenerationWorkflow) => void
-}) => (
-  <div
-    className="nodrag nowheel flex items-center gap-1 rounded-full border border-gray-200 bg-gray-950 px-3 py-2 text-white shadow-[0_18px_60px_rgba(15,23,42,0.22)]"
-    onPointerDown={event => event.stopPropagation()}
-    onMouseDown={event => event.stopPropagation()}
-    onClick={event => event.stopPropagation()}
-  >
-    <ImageToolbarButton title="Edit image annotations" onClick={onEdit}><Pencil className="h-4 w-4" /></ImageToolbarButton>
-    {canCrop && (
-      <>
-        <div className="mx-1 h-6 w-px bg-white/20" />
-        <ImageToolbarButton title="Crop image" onClick={onCrop}><Scissors className="h-4 w-4" /></ImageToolbarButton>
-      </>
-    )}
-    {generatedResult && (
-      <>
-        <div className="mx-1 h-6 w-px bg-white/20" />
-        <ImageToolbarButton title="参考图生成" onClick={() => onContinue('reference-generate')}><ImageIcon className="h-4 w-4" /></ImageToolbarButton>
-        <ImageToolbarButton title="智能改图" onClick={() => onContinue('smart-edit')}><Brush className="h-4 w-4" /></ImageToolbarButton>
-        <ImageToolbarButton title="局部修改" onClick={() => onContinue('region-edit')}><MousePointer2 className="h-4 w-4" /></ImageToolbarButton>
-      </>
-    )}
-  </div>
-)
-
-const ImageToolbarButton = ({
-  title,
-  active = false,
-  onClick,
-  children
-}: {
-  title: string
-  active?: boolean
-  onClick: () => void
-  children: ReactNode
-}) => (
-  <button
-    type="button"
-    className={`nodrag flex h-8 w-8 items-center justify-center rounded-full transition ${active ? 'bg-white text-gray-950' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
-    title={title}
-    aria-label={title}
-    onPointerDown={event => event.stopPropagation()}
-    onMouseDown={event => event.stopPropagation()}
-    onClick={event => {
-      event.stopPropagation()
-      onClick()
-    }}
-  >
-    {children}
-  </button>
-)
 
 type ImageAnnotationHistory = {
   past: IFreeCanvasImageAnnotation[][]
@@ -4089,6 +4685,59 @@ const PanelModeButton = ({
   </button>
 )
 
+const contextualImageOperations: readonly ImageProductOperation[] = [
+  'reference-generate',
+  'effect-render',
+  'region-redraw',
+  'erase',
+  'outpaint',
+  'text-edit',
+  'multi-view',
+  'upscale',
+  'subject-extract'
+]
+
+const imageOperationForCommand = (
+  commandId: ImageNodeCommandId
+): ImageProductOperation | null => {
+  if (commandId === 'as-reference') return 'reference-generate'
+  if (commandId === 'effect-render') return 'effect-render'
+  if (commandId === 'region-redraw') return 'region-redraw'
+  if (commandId === 'erase') return 'erase'
+  if (commandId === 'outpaint') return 'outpaint'
+  if (commandId === 'multi-view') return 'multi-view'
+  if (commandId === 'text-edit') return 'text-edit'
+  if (commandId === 'enhance') return 'upscale'
+  if (commandId === 'subject-extract') return 'subject-extract'
+  return null
+}
+
+const defaultImageOperationPreset = (operation: ImageProductOperation): string => {
+  if (operation === 'effect-render') return 'product-sketch'
+  if (operation === 'outpaint') return 'balanced'
+  if (operation === 'multi-view') return 'identity-preserving'
+  if (operation === 'erase') return 'context-fill'
+  if (operation === 'region-redraw') return 'point-guided'
+  if (operation === 'text-edit') return 'layout-preserving'
+  if (operation === 'upscale') return 'generative-redraw'
+  if (operation === 'subject-extract') return 'white-background'
+  return 'reference-variation'
+}
+
+const defaultImageOperationPreservation = (
+  operation: ImageProductOperation
+): string[] => {
+  if (operation === 'effect-render') return ['主体轮廓', '材质颜色']
+  if (operation === 'outpaint') return ['主体身份', '光照方向']
+  if (operation === 'multi-view') return ['主体身份', '比例结构', '材质与颜色']
+  if (operation === 'erase') return ['区域外内容', '背景纹理']
+  if (operation === 'region-redraw') return ['区域外内容', '透视关系']
+  if (operation === 'text-edit') return ['字体风格', '周围图形']
+  if (operation === 'upscale') return ['主体造型', '构图布局']
+  if (operation === 'subject-extract') return ['主体身份', '轮廓边缘']
+  return ['主体身份', '画面风格']
+}
+
 const nodeTypes = {
   freeCanvasNode: FreeCanvasNode,
   imageGeneratorNode: ImageGeneratorFlowNode
@@ -4124,6 +4773,48 @@ const imageGenerationPlaceholderFrame = (
   return ratio >= 1
     ? { width: 320, height: Math.max(1, Math.round(320 / ratio)) }
     : { width: Math.max(1, Math.round(320 * ratio)), height: 320 }
+}
+
+const createOperationPlaceholder = ({
+  snapshot,
+  runId,
+  conversationId,
+  position,
+  frame
+}: {
+  snapshot: ImageGenerationComposerDraft
+  runId: string
+  conversationId: string
+  position: { x: number; y: number }
+  frame: { width: number; height: number }
+}): IFreeCanvasImageNode => {
+  const placeholder = createFreeCanvasImageGenerationPlaceholder({
+    runId,
+    conversationId,
+    prompt: promptDocumentPlainText(snapshot.promptDocument),
+    position,
+    width: frame.width,
+    height: frame.height
+  })
+  const operation = snapshot.operation
+  if (!operation) return placeholder
+  const operationPlaceholderMeta = { ...placeholder.meta }
+  delete operationPlaceholderMeta.conversationId
+  return {
+    ...placeholder,
+    meta: {
+      ...operationPlaceholderMeta,
+      source: 'contextual-image-operation',
+      imageOperation: operation.operation,
+      imageRecipeId: operation.recipeId,
+      imageRecipeVersion: operation.recipeVersion,
+      sourceAssetId: operation.source.originalAssetId,
+      sourceCanvasNodeId: operation.source.nodeId,
+      ...(operation.operationGroupId ? { operationGroupId: operation.operationGroupId } : {}),
+      ...(operation.operationItemId ? { operationItemId: operation.operationItemId } : {}),
+      ...(operation.viewSpec ? { operationViewSpec: operation.viewSpec } : {})
+    }
+  }
 }
 
 const safeGenerationErrorCode = (value: unknown): string => (

@@ -66,6 +66,60 @@ class BBoxRegionBody(RequestModel):
 type RegionBody = Annotated[PointRegionBody | BBoxRegionBody, Field(discriminator="type")]
 
 
+class OperationSourceBody(RequestModel):
+    node_id: str = Field(alias="nodeId", pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,191}$")
+    original_asset_id: str = Field(alias="originalAssetId", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,191}$")
+    canvas_asset_id: str = Field(alias="canvasAssetId", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,191}$")
+    provider_asset_id: str = Field(alias="providerAssetId", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,191}$")
+
+
+class OperationSnapshotBody(RequestModel):
+    operation: Literal[
+        "reference-generate",
+        "effect-render",
+        "global-edit",
+        "region-redraw",
+        "erase",
+        "outpaint",
+        "text-edit",
+        "multi-view",
+        "upscale",
+        "subject-extract",
+    ]
+    recipe_id: str = Field(alias="recipeId", pattern=r"^[a-z0-9][a-z0-9._/-]{0,127}$")
+    recipe_version: str = Field(alias="recipeVersion", pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
+    source: OperationSourceBody
+    preservation_intents: list[str] = Field(default_factory=list, alias="preservationIntents", max_length=20)
+    parameters: dict[str, str | int | float | bool | list[str]] = Field(default_factory=dict, max_length=24)
+    operation_group_id: str | None = Field(
+        default=None,
+        alias="operationGroupId",
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,191}$",
+    )
+    operation_item_id: str | None = Field(
+        default=None,
+        alias="operationItemId",
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,191}$",
+    )
+    view_spec: str | None = Field(default=None, alias="viewSpec", max_length=80)
+
+    @model_validator(mode="after")
+    def validate_snapshot_values(self) -> OperationSnapshotBody:
+        if any(not value.strip() or len(value) > 160 for value in self.preservation_intents):
+            raise ValueError("operation preservation intents are invalid")
+        for key, value in self.parameters.items():
+            if not key or len(key) > 64 or not key.replace("-", "").replace("_", "").isalnum():
+                raise ValueError("operation parameter key is invalid")
+            if isinstance(value, str) and len(value) > 500:
+                raise ValueError("operation parameter value is too long")
+            if isinstance(value, list) and (
+                len(value) > 32
+                or any(not isinstance(item, str) or len(item) > 160 for item in value)
+            ):
+                raise ValueError("operation parameter list is invalid")
+        return self
+
+
 class ImageGenerationBody(RequestModel):
     run_id: str | None = Field(
         default=None,
@@ -91,6 +145,7 @@ class ImageGenerationBody(RequestModel):
         default="standard",
         alias="promptOptimization",
     )
+    operation: OperationSnapshotBody | None = None
 
     @model_validator(mode="after")
     def require_generation_context(self) -> ImageGenerationBody:
@@ -184,6 +239,10 @@ def _command(body: ImageGenerationBody) -> GenerationCommand:
         output_format=body.output_format,
         watermark=body.watermark,
         prompt_optimization=body.prompt_optimization,
+        operation_snapshot=body.operation.model_dump(
+            by_alias=True,
+            exclude_none=True,
+        ) if body.operation is not None else None,
     )
 
 

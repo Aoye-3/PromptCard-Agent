@@ -12,6 +12,7 @@ import {
   type ModelConnectionInput,
   type ModelConnectionTestResult,
   type ModelCatalogEntry,
+  type ModelCapabilities,
   type ModelIntegrationGroup,
   type ModelProvider,
   type ModelSlot
@@ -230,16 +231,200 @@ const normalizeModel = (value: unknown): ModelCatalogEntry[] => {
   const source = value.source === 'provider-catalog' || value.source === 'remote' || value.source === 'cached'
     ? value.source
     : undefined
+  const capabilities = normalizeModelCapabilities(value.capabilities)
   return [{
     id: value.id,
     providerId: value.providerId,
     displayName: value.displayName,
     modality: value.modality,
-    ...(isRecord(value.capabilities) ? { capabilities: value.capabilities } : {}),
+    ...(capabilities ? { capabilities } : {}),
     ...(integrationGroup ? { integrationGroup } : {}),
     ...(source ? { source } : {}),
     ...(typeof value.assignable === 'boolean' ? { assignable: value.assignable } : {})
   }]
+}
+
+const normalizeModelCapabilities = (value: unknown): ModelCapabilities | undefined => {
+  if (!isRecord(value)) return undefined
+  const capabilities: ModelCapabilities = {}
+  const input = enumArray(value.input, ['text', 'image'] as const)
+  const modes = enumArray(value.modes, ['generate', 'edit', 'region-edit'] as const)
+  const resolutions = enumArray(value.resolutions, ['1K', '2K'] as const)
+  const outputFormats = enumArray(value.outputFormats, ['png', 'jpeg'] as const)
+  const annotationInputs = enumArray(value.annotationInputs, ['raster-markup'] as const)
+  const regionInputs = enumArray(value.regionInputs, ['point', 'bbox'] as const)
+  const responseTransports = enumArray(value.responseTransports, ['url', 'b64_json'] as const)
+
+  if (input.length) capabilities.input = input
+  if (typeof value.toolCalling === 'boolean') capabilities.toolCalling = value.toolCalling
+  if (modes.length) capabilities.modes = modes
+  if (resolutions.length) capabilities.resolutions = resolutions
+  if (Array.isArray(value.aspectRatios)) {
+    capabilities.aspectRatios = value.aspectRatios.filter((item): item is string => typeof item === 'string')
+  }
+  if (value.customSize === null) capabilities.customSize = null
+  else if (isRecord(value.customSize)) {
+    const customSize = numericObject(value.customSize, [
+      'minPixels',
+      'maxPixels',
+      'minAspectRatio',
+      'maxAspectRatio'
+    ] as const)
+    if (customSize) capabilities.customSize = customSize
+  }
+  if (outputFormats.length) capabilities.outputFormats = outputFormats
+  if (typeof value.watermark === 'boolean') capabilities.watermark = value.watermark
+  if (isNonNegativeInteger(value.maxReferenceImages)) {
+    capabilities.maxReferenceImages = value.maxReferenceImages
+  }
+  if (value.mentionStrategy === 'ordered-image-labels') {
+    capabilities.mentionStrategy = value.mentionStrategy
+  }
+  if (isRecord(value.promptOptimization)) {
+    const promptModes = enumArray(value.promptOptimization.modes, ['standard', 'fast'] as const)
+    const defaultMode = value.promptOptimization.default
+    if (promptModes.length && (defaultMode === 'standard' || defaultMode === 'fast')) {
+      capabilities.promptOptimization = { modes: promptModes, default: defaultMode }
+    }
+  }
+  if (isRecord(value.inputConstraints)) {
+    const formats = value.inputConstraints.formats
+    const numeric = numericObject(value.inputConstraints, [
+      'maxImages',
+      'maxBytesPerImage',
+      'maxPixelsPerImage',
+      'minSideExclusive',
+      'minAspectRatio',
+      'maxAspectRatio'
+    ] as const)
+    if (Array.isArray(formats) && numeric) {
+      capabilities.inputConstraints = {
+        formats: formats.filter((item): item is string => typeof item === 'string'),
+        ...numeric
+      }
+    }
+  }
+  if (annotationInputs.length) capabilities.annotationInputs = annotationInputs
+  if (regionInputs.length) capabilities.regionInputs = regionInputs
+  if (responseTransports.length) capabilities.responseTransports = responseTransports
+  if (isNonNegativeInteger(value.outputCount)) capabilities.outputCount = value.outputCount
+  if (typeof value.streaming === 'boolean') capabilities.streaming = value.streaming
+
+  const references = normalizeReferenceCapabilities(value.references)
+  if (references) capabilities.references = references
+  const outputs = normalizeOutputCapabilities(value.outputs)
+  if (outputs) capabilities.outputs = outputs
+  const execution = normalizeExecutionCapabilities(value.execution)
+  if (execution) capabilities.execution = execution
+  const delivery = normalizeDeliveryCapabilities(value.delivery)
+  if (delivery) capabilities.delivery = delivery
+
+  return Object.keys(capabilities).length ? capabilities : undefined
+}
+
+const normalizeReferenceCapabilities = (
+  value: unknown
+): ModelCapabilities['references'] | undefined => {
+  if (!isRecord(value) || !isNonNegativeInteger(value.maxCount)) return undefined
+  if (value.ordering !== 'positional' && value.ordering !== 'unordered') return undefined
+  return {
+    maxCount: value.maxCount,
+    ordering: value.ordering,
+    nativeRoles: enumArray(value.nativeRoles, [
+      'source',
+      'identity',
+      'style',
+      'material',
+      'layout',
+      'content'
+    ] as const),
+    acceptedSources: enumArray(value.acceptedSources, [
+      'asset',
+      'url',
+      'base64',
+      'provider-file'
+    ] as const)
+  }
+}
+
+const normalizeOutputCapabilities = (
+  value: unknown
+): ModelCapabilities['outputs'] | undefined => {
+  if (!isRecord(value)) return undefined
+  if (
+    value.countMode !== 'single'
+    && value.countMode !== 'variations'
+    && value.countMode !== 'ordered-sequence'
+  ) return undefined
+  if (
+    value.countGuarantee !== 'exact'
+    && value.countGuarantee !== 'best-effort'
+    && value.countGuarantee !== 'provider-decides'
+  ) return undefined
+  if (value.maxCount !== null && !isNonNegativeInteger(value.maxCount)) return undefined
+  if (value.alpha !== 'supported' && value.alpha !== 'unsupported' && value.alpha !== 'unknown') {
+    return undefined
+  }
+  return {
+    countMode: value.countMode,
+    countGuarantee: value.countGuarantee,
+    maxCount: value.maxCount,
+    formats: enumArray(value.formats, ['png', 'jpeg'] as const),
+    alpha: value.alpha
+  }
+}
+
+const normalizeExecutionCapabilities = (
+  value: unknown
+): ModelCapabilities['execution'] | undefined => {
+  if (!isRecord(value)) return undefined
+  if (value.submission !== 'synchronous' && value.submission !== 'async-job') return undefined
+  if (typeof value.cancellation !== 'boolean') return undefined
+  return {
+    submission: value.submission,
+    progress: enumArray(value.progress, [
+      'none',
+      'partial-image',
+      'per-output',
+      'percentage'
+    ] as const),
+    completion: enumArray(value.completion, ['inline', 'poll', 'webhook'] as const),
+    cancellation: value.cancellation
+  }
+}
+
+const normalizeDeliveryCapabilities = (
+  value: unknown
+): ModelCapabilities['delivery'] | undefined => {
+  if (!isRecord(value)) return undefined
+  if (value.urlTtlSeconds !== null && !isNonNegativeInteger(value.urlTtlSeconds)) return undefined
+  if (
+    value.browserReadable !== true
+    && value.browserReadable !== false
+    && value.browserReadable !== 'unknown'
+  ) return undefined
+  if (typeof value.mustPersistImmediately !== 'boolean') return undefined
+  return {
+    forms: enumArray(value.forms, ['base64', 'temporary-url'] as const),
+    urlTtlSeconds: value.urlTtlSeconds,
+    browserReadable: value.browserReadable,
+    mustPersistImmediately: value.mustPersistImmediately
+  }
+}
+
+const enumArray = <T extends string>(
+  value: unknown,
+  allowed: readonly T[]
+): T[] => Array.isArray(value)
+  ? value.filter((item): item is T => typeof item === 'string' && allowed.includes(item as T))
+  : []
+
+const numericObject = <K extends string>(
+  value: Record<string, unknown>,
+  keys: readonly K[]
+): Record<K, number> | null => {
+  if (!keys.every(key => typeof value[key] === 'number' && Number.isFinite(value[key]))) return null
+  return Object.fromEntries(keys.map(key => [key, value[key]])) as Record<K, number>
 }
 
 const normalizeIntegrationGroup = (value: unknown): ModelIntegrationGroup | undefined => {

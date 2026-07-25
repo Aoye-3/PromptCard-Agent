@@ -1,5 +1,5 @@
+import type { ModelCatalogEntry } from '@/domain/models/model-management'
 import type { ImageRegion, ImageRegionInputType } from './image-generation'
-import { SEEDREAM_5_PRO_IMAGE_CAPABILITIES } from './image-generation'
 
 export const REGION_GRID_MAX = 999
 export const MIN_BBOX_GRID_SIZE = 1
@@ -95,16 +95,14 @@ export type RegionHistoryAction =
   | { type: 'undo' }
   | { type: 'redo' }
 
-export const SEEDREAM_5_PRO_REGION_CAPABILITIES: ImageRegionCapabilities = {
-  modelId: SEEDREAM_5_PRO_IMAGE_CAPABILITIES.modelId,
-  regionInputs: SEEDREAM_5_PRO_IMAGE_CAPABILITIES.regionInputs
-}
-
-export const imageRegionCapabilitiesForModel = (
-  modelId: string
+export const imageRegionCapabilitiesFromModel = (
+  model: ModelCatalogEntry
 ): ImageRegionCapabilities | null => (
-  modelId === SEEDREAM_5_PRO_REGION_CAPABILITIES.modelId
-    ? SEEDREAM_5_PRO_REGION_CAPABILITIES
+  model.modality === 'image' && model.capabilities?.regionInputs?.length
+    ? {
+        modelId: model.id,
+        regionInputs: model.capabilities.regionInputs
+      }
     : null
 )
 

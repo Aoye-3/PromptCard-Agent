@@ -1,3 +1,5 @@
+import type { ModelCatalogEntry } from '@/domain/models/model-management'
+
 export type ImageGenerationMode = 'generate' | 'edit' | 'region-edit'
 export type ImageMentionStrategy = 'ordered-image-labels'
 export type ImageRegionInputType = 'point' | 'bbox'
@@ -56,15 +58,32 @@ export interface ImageGenerationValidationError {
   code: ImageGenerationValidationErrorCode
 }
 
-export const SEEDREAM_5_PRO_IMAGE_CAPABILITIES: ImageCapabilityManifest = {
-  modelId: 'doubao-seedream-5-0-pro-260628',
-  modes: ['generate', 'edit', 'region-edit'],
-  maxReferenceImages: 10,
-  mentionStrategy: 'ordered-image-labels',
-  regionInputs: ['point', 'bbox'],
-  resolutions: ['1K', '2K'],
-  outputCount: 1,
-  streaming: false
+export const imageCapabilityManifestFromModel = (
+  model: ModelCatalogEntry
+): ImageCapabilityManifest | null => {
+  const capabilities = model.capabilities
+  if (
+    model.modality !== 'image'
+    || !capabilities?.modes?.length
+    || typeof capabilities.maxReferenceImages !== 'number'
+    || capabilities.mentionStrategy !== 'ordered-image-labels'
+    || !capabilities.resolutions?.length
+    || typeof capabilities.outputCount !== 'number'
+    || !Number.isInteger(capabilities.outputCount)
+    || typeof capabilities.streaming !== 'boolean'
+  ) {
+    return null
+  }
+  return {
+    modelId: model.id,
+    modes: capabilities.modes,
+    maxReferenceImages: capabilities.maxReferenceImages,
+    mentionStrategy: capabilities.mentionStrategy,
+    regionInputs: capabilities.regionInputs || [],
+    resolutions: capabilities.resolutions,
+    outputCount: capabilities.outputCount,
+    streaming: capabilities.streaming
+  }
 }
 
 export const validateImageGenerationIntent = (

@@ -8,6 +8,44 @@ export type ImageRegionInput = 'point' | 'bbox'
 export type ImagePromptOptimizationMode = 'standard' | 'fast'
 export type ImageAnnotationInput = 'raster-markup'
 export type ImageResponseTransport = 'url' | 'b64_json'
+export type ImageReferenceRole = 'source' | 'identity' | 'style' | 'material' | 'layout' | 'content'
+export type ImageReferenceSource = 'asset' | 'url' | 'base64' | 'provider-file'
+export type ImageOutputCountMode = 'single' | 'variations' | 'ordered-sequence'
+export type ImageOutputCountGuarantee = 'exact' | 'best-effort' | 'provider-decides'
+export type ImageAlphaSupport = 'supported' | 'unsupported' | 'unknown'
+export type ImageExecutionSubmission = 'synchronous' | 'async-job'
+export type ImageExecutionProgress = 'none' | 'partial-image' | 'per-output' | 'percentage'
+export type ImageExecutionCompletion = 'inline' | 'poll' | 'webhook'
+export type ImageDeliveryForm = 'base64' | 'temporary-url'
+
+export interface ImageReferenceCapabilities {
+  maxCount: number
+  ordering: 'positional' | 'unordered'
+  nativeRoles: ImageReferenceRole[]
+  acceptedSources: ImageReferenceSource[]
+}
+
+export interface ImageOutputCapabilities {
+  countMode: ImageOutputCountMode
+  countGuarantee: ImageOutputCountGuarantee
+  maxCount: number | null
+  formats: ImageOutputFormat[]
+  alpha: ImageAlphaSupport
+}
+
+export interface ImageExecutionCapabilities {
+  submission: ImageExecutionSubmission
+  progress: ImageExecutionProgress[]
+  completion: ImageExecutionCompletion[]
+  cancellation: boolean
+}
+
+export interface ImageDeliveryCapabilities {
+  forms: ImageDeliveryForm[]
+  urlTtlSeconds: number | null
+  browserReadable: boolean | 'unknown'
+  mustPersistImmediately: boolean
+}
 
 export interface ModelProvider {
   id: string
@@ -56,6 +94,10 @@ export interface ModelCapabilities {
   responseTransports?: ImageResponseTransport[]
   outputCount?: number
   streaming?: boolean
+  references?: ImageReferenceCapabilities
+  outputs?: ImageOutputCapabilities
+  execution?: ImageExecutionCapabilities
+  delivery?: ImageDeliveryCapabilities
 }
 
 export interface ModelCatalogEntry {

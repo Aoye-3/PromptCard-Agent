@@ -93,6 +93,30 @@ describe('project image generation conversations', () => {
     expect(result.rejected).toEqual([{ nodeId: 'image-missing', reason: '图片节点没有可用的本地资产。' }])
   })
 
+  it('preserves provider-neutral operation and creative lineage in the request snapshot', () => {
+    const draft = {
+      ...createEmptyConversationDraft(),
+      connectionId: 'connection-1',
+      modelId: 'image-model-1',
+      operation: {
+        operation: 'effect-render' as const,
+        recipeId: 'effect-render/product-sketch',
+        recipeVersion: '1',
+        source: {
+          nodeId: 'node-source',
+          originalAssetId: 'asset-original',
+          canvasAssetId: 'asset-canvas',
+          providerAssetId: 'asset-provider'
+        },
+        preservationIntents: ['保留产品轮廓', '保留材质颜色'],
+        parameters: { preset: 'product-sketch', referenceOrder: ['source'] }
+      }
+    }
+
+    expect(buildConversationGenerationRequest('project-1', 'conversation-1', draft).operation)
+      .toEqual(draft.operation)
+  })
+
   it('projects the immutable run snapshot into a display turn', () => {
     const run = {
       id: 'run-1', projectId: 'project-1', conversationId: 'conversation-1',

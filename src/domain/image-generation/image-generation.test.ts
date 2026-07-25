@@ -1,9 +1,28 @@
 import { describe, expect, test } from 'vitest'
+import type { ModelCatalogEntry } from '@/domain/models/model-management'
 import {
-  SEEDREAM_5_PRO_IMAGE_CAPABILITIES,
+  imageCapabilityManifestFromModel,
   validateImageGenerationIntent,
+  type ImageCapabilityManifest,
   type ImageGenerationIntent
 } from './image-generation'
+
+const imageModel: ModelCatalogEntry = {
+  id: 'image-model',
+  providerId: 'provider-one',
+  displayName: 'Image model',
+  modality: 'image',
+  capabilities: {
+    modes: ['generate', 'edit', 'region-edit'],
+    maxReferenceImages: 10,
+    mentionStrategy: 'ordered-image-labels',
+    regionInputs: ['point', 'bbox'],
+    resolutions: ['1K', '2K'],
+    outputCount: 1,
+    streaming: false
+  }
+}
+const capabilities = imageCapabilityManifestFromModel(imageModel) as ImageCapabilityManifest
 
 const validIntent: ImageGenerationIntent = {
   mode: 'generate',
@@ -14,13 +33,13 @@ const validIntent: ImageGenerationIntent = {
 }
 
 const validationCodes = (intent: ImageGenerationIntent) =>
-  validateImageGenerationIntent(intent, SEEDREAM_5_PRO_IMAGE_CAPABILITIES)
+  validateImageGenerationIntent(intent, capabilities)
     .map(error => error.code)
 
 describe('image generation domain', () => {
-  test('defines the exact Seedream 5.0 Pro capability manifest', () => {
-    expect(SEEDREAM_5_PRO_IMAGE_CAPABILITIES).toEqual({
-      modelId: 'doubao-seedream-5-0-pro-260628',
+  test('derives an image capability manifest from a provider-neutral catalog entry', () => {
+    expect(capabilities).toEqual({
+      modelId: 'image-model',
       modes: ['generate', 'edit', 'region-edit'],
       maxReferenceImages: 10,
       mentionStrategy: 'ordered-image-labels',
@@ -29,6 +48,14 @@ describe('image generation domain', () => {
       outputCount: 1,
       streaming: false
     })
+  })
+
+  test('returns null for a catalog entry without an executable image manifest', () => {
+    expect(imageCapabilityManifestFromModel({
+      ...imageModel,
+      id: 'incomplete-image-model',
+      capabilities: { modes: ['generate'] }
+    })).toBeNull()
   })
 
   test('accepts a supported image generation intent', () => {

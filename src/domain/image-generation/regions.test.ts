@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import type { ModelCatalogEntry } from '@/domain/models/model-management'
 import {
   bboxFromDisplayDrag,
   createRegionHistory,
   displayToRegionPoint,
+  imageRegionCapabilitiesFromModel,
   moveBoundImageRegion,
   reduceRegionHistory,
   regionToDisplayPoint,
@@ -115,6 +117,26 @@ describe('image region coordinates', () => {
 })
 
 describe('bound image regions', () => {
+  it('derives region inputs from the selected catalog model without model-id branches', () => {
+    const model: ModelCatalogEntry = {
+      id: 'fake-region-model',
+      providerId: 'fake-provider',
+      displayName: 'Fake region model',
+      modality: 'image',
+      capabilities: { regionInputs: ['bbox'] }
+    }
+
+    expect(imageRegionCapabilitiesFromModel(model)).toEqual({
+      modelId: 'fake-region-model',
+      regionInputs: ['bbox']
+    })
+    expect(imageRegionCapabilitiesFromModel({
+      ...model,
+      id: 'no-regions',
+      capabilities: {}
+    })).toBeNull()
+  })
+
   it('moves points and boxes without crossing grid boundaries', () => {
     expect(moveBoundImageRegion(pointRegion, -500, 500)).toEqual({
       ...pointRegion,

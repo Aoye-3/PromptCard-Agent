@@ -1,5 +1,6 @@
 import type { CardType, IPreset } from '@/models/Card.model'
 import type { IPromptProject } from '@/models/PromptHistory.model'
+import type { ImageOperationRecipeSnapshot } from '@/domain/image-actions/image-operations'
 
 export interface TrashEntry<T> {
   id: string
@@ -134,6 +135,7 @@ export interface ImageGenerationRunSnapshot {
   height?: number
   outputFormat: string
   watermark: boolean
+  operation?: ImageOperationRecipeSnapshot
 }
 
 export interface ImageGenerationRun {

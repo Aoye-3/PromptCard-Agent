@@ -1,11 +1,12 @@
 import { Fragment, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act, create } from 'react-test-renderer'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 import {
   createFreeCanvasImageGenerationPlaceholder,
-  createFreeCanvasProject
+  createFreeCanvasProject,
+  createFreeCanvasTextNode
 } from '@/domain/free-canvas/free-canvas-project'
 
 const mocks = vi.hoisted(() => ({
@@ -23,6 +24,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@xyflow/react', () => {
   const PassThrough = ({ children }: { children?: ReactNode }) => <Fragment>{children}</Fragment>
+  const reactFlow = {
+    screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y })
+  }
   return {
     Background: () => null,
     BackgroundVariant: { Lines: 'lines' },
@@ -35,8 +39,14 @@ vi.mock('@xyflow/react', () => {
     ReactFlow: PassThrough,
     ReactFlowProvider: PassThrough,
     SelectionMode: { Partial: 'partial' },
-    applyNodeChanges: (_changes: unknown, nodes: unknown) => nodes,
-    useReactFlow: () => ({ screenToFlowPosition: ({ x, y }: { x: number; y: number }) => ({ x, y }) }),
+    applyNodeChanges: (
+      changes: Array<{ id: string; type: string; dimensions?: { width: number; height: number } }>,
+      nodes: Array<{ id: string; measured?: { width: number; height: number } }>
+    ) => nodes.map(node => {
+      const dimensions = changes.find(change => change.id === node.id && change.type === 'dimensions')?.dimensions
+      return dimensions ? { ...node, measured: dimensions } : node
+    }),
+    useReactFlow: () => reactFlow,
     useStore: (selector: (state: { nodes: unknown[]; transform: [number, number, number] }) => unknown) => selector({ nodes: [], transform: [0, 0, 1] })
   }
 })
@@ -140,6 +150,10 @@ const openImageGenerationPanel = (renderer: ReturnType<typeof create>) => {
 }
 
 describe('project-level free canvas image generation entry', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubGlobal('window', {
@@ -240,6 +254,44 @@ describe('project-level free canvas image generation entry', () => {
     openImageGenerationPanel(renderer)
     expect(renderer.root.findAllByType('details')).toHaveLength(0)
     expect(renderer.root.findByProps({ type: 'submit' }).props.disabled).toBe(true)
+  })
+
+  it('preserves measured node dimensions when canvas selection changes', async () => {
+    const node = createFreeCanvasTextNode('Measured node', { x: 120, y: 160 }, 1)
+    let renderer!: ReturnType<typeof create>
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={createFreeCanvasProject(1, { nodes: [node] })}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={vi.fn()}
+        />
+      )
+    })
+
+    const getReactFlow = () => renderer.root.find(candidate => (
+      typeof candidate.props.onNodesChange === 'function' && Array.isArray(candidate.props.nodes)
+    ))
+    const initialSelectionHandler = getReactFlow().props.onSelectionChange
+
+    act(() => getReactFlow().props.onNodesChange([{
+      id: node.id,
+      type: 'dimensions',
+      dimensions: { width: 420, height: 180 }
+    }]))
+    expect(getReactFlow().props.nodes[0].measured).toEqual({ width: 420, height: 180 })
+
+    act(() => getReactFlow().props.onSelectionChange({
+      nodes: [getReactFlow().props.nodes[0]],
+      edges: []
+    }))
+
+    expect(getReactFlow().props.onSelectionChange).toBe(initialSelectionHandler)
+    expect(getReactFlow().props.nodes[0].measured).toEqual({ width: 420, height: 180 })
   })
 
   it('persists a generated result node before marking its placement as placed', async () => {

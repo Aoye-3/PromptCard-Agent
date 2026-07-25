@@ -62,6 +62,31 @@ MODELS: tuple[dict[str, Any], ...] = (
             "watermark": True,
             "outputCount": 1,
             "streaming": False,
+            "references": {
+                "maxCount": 10,
+                "ordering": "positional",
+                "nativeRoles": [],
+                "acceptedSources": ["asset"],
+            },
+            "outputs": {
+                "countMode": "single",
+                "countGuarantee": "exact",
+                "maxCount": 1,
+                "formats": ["png", "jpeg"],
+                "alpha": "unknown",
+            },
+            "execution": {
+                "submission": "synchronous",
+                "progress": ["none"],
+                "completion": ["inline"],
+                "cancellation": False,
+            },
+            "delivery": {
+                "forms": ["temporary-url", "base64"],
+                "urlTtlSeconds": None,
+                "browserReadable": "unknown",
+                "mustPersistImmediately": True,
+            },
         },
     },
 )

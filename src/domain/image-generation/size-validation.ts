@@ -1,5 +1,5 @@
 import type { FreeCanvasImageAspectRatio } from '@/models/PromptHistory.model'
-import { SEEDREAM_5_PRO_IMAGE_CAPABILITIES } from './image-generation'
+import type { ModelCatalogEntry } from '@/domain/models/model-management'
 
 export interface CustomImageSizeConstraints {
   minPixels: number
@@ -33,31 +33,6 @@ export type ImageSizeValidationErrorCode =
 
 export interface ImageSizeValidationError {
   code: ImageSizeValidationErrorCode
-}
-
-const SEEDREAM_ASPECT_RATIOS: readonly FreeCanvasImageAspectRatio[] = [
-  'smart',
-  '1:1',
-  '4:3',
-  '3:4',
-  '16:9',
-  '9:16',
-  '3:2',
-  '2:3',
-  '21:9',
-  'custom'
-]
-
-export const SEEDREAM_5_PRO_SIZE_CAPABILITIES: ImageSizeCapabilities = {
-  modelId: SEEDREAM_5_PRO_IMAGE_CAPABILITIES.modelId,
-  resolutions: SEEDREAM_5_PRO_IMAGE_CAPABILITIES.resolutions,
-  aspectRatios: SEEDREAM_ASPECT_RATIOS,
-  customSize: {
-    minPixels: 921_600,
-    maxPixels: 4_624_220,
-    minAspectRatio: 1 / 16,
-    maxAspectRatio: 16
-  }
 }
 
 export const validateImageSizeSettings = (
@@ -116,10 +91,35 @@ export const recommendedImageSizeSettings = (
   return resolution && aspectRatio ? { resolution, aspectRatio } : null
 }
 
-export const imageSizeCapabilitiesForModel = (
-  modelId: string
-): ImageSizeCapabilities | null => (
-  modelId === SEEDREAM_5_PRO_SIZE_CAPABILITIES.modelId
-    ? SEEDREAM_5_PRO_SIZE_CAPABILITIES
-    : null
+export const imageSizeCapabilitiesFromModel = (
+  model: ModelCatalogEntry
+): ImageSizeCapabilities | null => {
+  const capabilities = model.capabilities
+  if (
+    model.modality !== 'image'
+    || !capabilities?.resolutions?.length
+    || !capabilities.aspectRatios?.length
+    || !capabilities.aspectRatios.every(isImageAspectRatio)
+  ) {
+    return null
+  }
+  return {
+    modelId: model.id,
+    resolutions: capabilities.resolutions,
+    aspectRatios: capabilities.aspectRatios,
+    customSize: capabilities.customSize || null
+  }
+}
+
+const isImageAspectRatio = (value: string): value is FreeCanvasImageAspectRatio => (
+  value === 'smart'
+  || value === '1:1'
+  || value === '4:3'
+  || value === '3:4'
+  || value === '16:9'
+  || value === '9:16'
+  || value === '3:2'
+  || value === '2:3'
+  || value === '21:9'
+  || value === 'custom'
 )

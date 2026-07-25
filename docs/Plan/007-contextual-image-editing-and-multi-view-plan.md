@@ -7,7 +7,7 @@
 - Last reviewed: `2026-07-25`
 - Scope owner: Free Canvas, Image Generation, Agent Runtime, PromptCard Storage
 - Current reference implementation: Seedream 5.0 Pro
-- Explicit UI freeze: this plan must not change or repurpose the existing right-side `Agent / 图片生成 / Prompt库` workspace
+- Explicit UI freeze: this plan must not change or repurpose the existing right-side `Agent / 图片生成 / Prompt库` structure; `作为参考` is the sole state-level bridge and may append to the existing 图片生成 Composer
 - Staged backend acceptance: `Planned; execution has not started`
 - Review trigger: before the first implementation task, after any model-catalog contract change, and before enabling multi-view outside development
 
@@ -26,14 +26,14 @@ Status meanings:
 | --- | --- | --- |
 | 1. Product operations/readiness | Implemented + targeted verified | Provider-neutral operation/readiness types and fake non-Seedream tests exist. |
 | 2. Native capability normalization | Implemented + targeted verified; backend acceptance pending | Frontend catalog normalization and current Seedream factual manifest exist; repeat staged backend acceptance later. |
-| 3. Shared image-command registry | Implemented + targeted verified | Toolbar, More, context menu, shortcuts, local and generative actions resolve from one registry. |
-| 4. Floating/More/context surfaces | Implemented; frontend acceptance pending | Component placement, dismissal and keyboard tests pass. The populated-canvas visibility regression is fixed with a focused 11-node Edge E2E; the full four-corner/25%–200% Playwright matrix remains. |
+| 3. Shared image-command registry | Implemented + targeted verified | Toolbar, More, context menu, shortcuts, local and generative actions resolve from one registry. `作为参考` is a local Composer bridge and is not gated by Runtime readiness. |
+| 4. Floating/More/context surfaces | Implemented; frontend acceptance pending | Component placement, dismissal and keyboard tests pass. `作为参考` now directly appends the source asset to the existing 图片生成 Composer without a modal or provider request. The populated-canvas visibility regression is fixed with a focused 11-node Edge E2E; the full four-corner/25%–200% Playwright matrix remains. |
 | 5. Reversible local commands | Implemented + targeted verified | Mutation/inverse history covers duplicate, delete, reorder and flip without replacing full project state. |
 | 6. Visible image input resolver | Implemented + targeted verified | Crop, flip and annotations resolve to a persistent provider derivative when required. Pixel-fixture expansion remains. |
 | 7. Shared operation workbench | Implemented + targeted verified | Reference, effect, region, erase, outpaint, text, enhance and subject configurations submit only from explicit Generate. |
 | 8. Explicit durable recipe snapshots | Implemented + targeted verified; backend acceptance pending | Provider-neutral operation snapshots cross the browser/Runtime/Storage request boundary. |
 | 9. Minimum creative lineage | Implemented + targeted verified | Source identities, recipe/version, preservation intent and optional group/item/view are immutable run metadata; no schema-v8 table added. |
-| 10. Multi-view workbench | Implemented; frontend acceptance pending | Exact visible request count, view selection, focus behavior and 3D limitation have component coverage; browser E2E remains. |
+| 10. Multi-view workbench | Implemented; frontend acceptance pending | Exact visible request count, 3×3 discrete camera positions, supplemental 3/4/rear views, the `正视 / 左视 / 俯视` model-three-view shortcut, focus behavior and 3D limitation have component coverage; browser E2E remains. |
 | 11. Multi-view persistence/scheduling | Implemented + targeted verified; backend acceptance pending | N stable placeholders are persisted before N independent requests; scheduler has bounded-concurrency and partial-failure tests. |
 | 12. Group recovery/presentation | Implemented; frontend acceptance pending | Derived group panel, per-member states, single-view retry and use-as-reference exist; reload/project-switch E2E remains. |
 | 13. Visible export | Implemented; frontend acceptance pending | Copy/download rasterize crop, flip and annotations without creating an asset; original download remains separate. Clipboard/browser-error E2E remains. |
@@ -905,6 +905,8 @@ Show only for one ready image with a stable `assetId`. Recommended order:
 
 Keep the primary surface to five or six semantic operations plus More and Download. Use visible text for unfamiliar AI operations; do not rely on icons alone.
 
+`作为参考` is an immediate local action: keep the current image-generation conversation and prompt, append the selected image as an ordered `reference-image`, open the existing 图片生成 tab, and show duplicate/limit errors there. It must not open an image-operation workbench, create a placeholder, or call the provider.
+
 ### More menu
 
 Recommended contents:
@@ -1133,7 +1135,8 @@ The frontend is a first-class part of multi-view, not a generic prompt dialog.
 Required controls:
 
 - camera-orbit versus subject-turn mode;
-- visual view-preset selector;
+- visual view-preset selector with the nine discrete positions `左上 / 俯视 / 右上`, `左视 / 正视 / 右视`, and `左下 / 仰视 / 右下`;
+- supplemental `正面 3/4` and `背面` choices plus a `模型三视图` shortcut that selects `正视 / 左视 / 俯视`;
 - ordered selected-view list;
 - preservation constraints;
 - additional references and roles;
@@ -1142,6 +1145,8 @@ Required controls:
 - exact request/member count;
 - model-readiness and consistency disclaimer;
 - explicit Generate.
+
+The current adapter boundary accepts a discrete `viewSpec` and an instruction, not a guaranteed numeric camera pose. Horizontal/vertical degree sliders remain out of scope until at least one supported provider documents and implements exact angle parameters. This avoids presenting approximate prompt language as deterministic 3D camera control.
 
 After submission:
 
@@ -1861,6 +1866,7 @@ flowchart TD
 
 - [ ] toolbar and context-menu entries open the same workbench state.
 - [ ] users can choose camera-orbit or subject-turn, select and reorder views, and inspect the exact planned request count.
+- [x] users can select nine discrete camera positions, retain 3/4 and rear supplemental views, and apply the non-submitting `正视 / 左视 / 俯视` model-three-view shortcut.
 - [ ] the workbench shows the inference/3D limitation and creates no work before explicit Generate.
 - [ ] reopening from history restores the original recipe snapshot and selected views.
 - [ ] the workbench is visually reviewed against the Plan preview.
@@ -2120,6 +2126,8 @@ flowchart TD
 ### Multi-view
 
 31. selecting N views creates one ordered group with N members.
+31a. the 3×3 camera-position grid compiles every selected position to a stable discrete `viewSpec`.
+31b. the model-three-view shortcut selects exactly `front`, `left`, and `top`, updates the visible request count to three, and submits nothing by itself.
 32. opening and editing the multi-view panel creates no provider request.
 33. only explicit Generate submits work.
 34. the current independent-run adapter creates N stable runs and placeholders.
@@ -2137,7 +2145,7 @@ flowchart TD
 
 44. selecting a `threeStageForm` node never exposes image operations.
 45. selecting an `imageAsset` node never initializes, clears, or rewrites a document field selection.
-46. opening, editing, cancelling, or submitting an image workbench does not change the active `Agent / 图片生成 / Prompt库` tab or its existing draft.
+46. opening, editing, cancelling, or submitting an image workbench does not change the active `Agent / 图片生成 / Prompt库` tab or its existing draft; the explicit non-workbench `作为参考` command is the only exception and appends one reference to the existing 图片生成 Composer.
 47. deleting or switching away from a source image invalidates only the matching image-operation draft.
 48. a running or failed image placeholder derives its state from its image-generation run and never from document loading or Agent state.
 49. reopening an image operation from history resolves its source image and recipe snapshot without selecting a document node.

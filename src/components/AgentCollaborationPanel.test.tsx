@@ -127,4 +127,23 @@ describe('AgentCollaborationPanel dense embedded mode', () => {
       expect.objectContaining({ mode: 'free-canvas-workspace' })
     )
   })
+
+  it('prefills an externally requested draft without sending it', () => {
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(
+        <AgentCollaborationPanel
+          title="Free Canvas Agent"
+          mode="free-canvas-workspace"
+          workspaceContext={workspaceContext}
+          onApplyWorkspaceProposal={vi.fn()}
+          draftRequest={{ id: 'complete-text-node-1', content: '请补全当前文字节点。' }}
+          embedded
+        />
+      )
+    })
+
+    expect(renderer.root.findByType('textarea').props.value).toBe('请补全当前文字节点。')
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+  })
 })

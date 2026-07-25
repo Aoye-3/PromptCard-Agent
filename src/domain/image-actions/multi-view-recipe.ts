@@ -31,12 +31,34 @@ export interface MultiViewGroupState {
   failed: number
 }
 
+export const cameraDirectionViewIds = [
+  'upper-left',
+  'top',
+  'upper-right',
+  'left',
+  'front',
+  'right',
+  'lower-left',
+  'low',
+  'lower-right'
+] as const
+
+export const modelThreeViewIds = ['front', 'left', 'top'] as const
+
+export const defaultMultiViewSelectionIds = ['front', 'front-three-quarter', 'left'] as const
+
 export const defaultMultiViewSpecs: readonly MultiViewSpec[] = [
-  { id: 'front', label: '正面', instruction: '从主体正面平视观察', order: 0 },
+  { id: 'front', label: '正视', instruction: '从主体正面平视观察', order: 0 },
   { id: 'front-three-quarter', label: '正面 3/4', instruction: '从主体正面偏左约 45 度观察', order: 1 },
-  { id: 'left', label: '左侧', instruction: '从主体左侧平视观察', order: 2 },
-  { id: 'right', label: '右侧', instruction: '从主体右侧平视观察', order: 3 },
-  { id: 'rear', label: '背面', instruction: '从主体背面平视观察', order: 4 }
+  { id: 'left', label: '左视', instruction: '从主体左侧平视观察', order: 2 },
+  { id: 'right', label: '右视', instruction: '从主体右侧平视观察', order: 3 },
+  { id: 'rear', label: '背面', instruction: '从主体背面平视观察', order: 4 },
+  { id: 'top', label: '俯视', instruction: '从主体正上方俯视观察', order: 5 },
+  { id: 'upper-left', label: '左上', instruction: '从主体左前上方约 45 度俯视观察', order: 6 },
+  { id: 'upper-right', label: '右上', instruction: '从主体右前上方约 45 度俯视观察', order: 7 },
+  { id: 'lower-left', label: '左下', instruction: '从主体左前下方约 30 度仰视观察', order: 8 },
+  { id: 'low', label: '仰视', instruction: '从主体正前下方仰视观察', order: 9 },
+  { id: 'lower-right', label: '右下', instruction: '从主体右前下方约 30 度仰视观察', order: 10 }
 ]
 
 export const createMultiViewRequestMembers = ({

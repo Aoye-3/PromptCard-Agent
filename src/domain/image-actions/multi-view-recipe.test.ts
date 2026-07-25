@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ImageOperationDraft } from './image-operation-draft'
 import {
+  cameraDirectionViewIds,
   createMultiViewRequestMembers,
   deriveMultiViewGroupState,
+  modelThreeViewIds,
   scheduleMultiViewMembers
 } from './multi-view-recipe'
 
@@ -28,6 +30,32 @@ const sourceDraft: ImageOperationDraft = {
 }
 
 describe('multi-view recipe', () => {
+  it('defines the complete camera direction grid and the standard model three-view preset', () => {
+    expect(cameraDirectionViewIds).toEqual([
+      'upper-left',
+      'top',
+      'upper-right',
+      'left',
+      'front',
+      'right',
+      'lower-left',
+      'low',
+      'lower-right'
+    ])
+    expect(modelThreeViewIds).toEqual(['front', 'left', 'top'])
+
+    const members = createMultiViewRequestMembers({
+      sourceDraft,
+      selectedViewIds: modelThreeViewIds,
+      groupId: 'group-three-view',
+      createItemId: view => `item-${view.id}`
+    })
+
+    expect(members.map(member => member.view.id)).toEqual(['front', 'left', 'top'])
+    expect(members.map(member => member.draft.viewSpec)).toEqual(['front', 'left', 'top'])
+    expect(members[2].draft.prompt).toContain('俯视')
+  })
+
   it('creates stable, ordered independent request members with distinct snapshots', () => {
     const members = createMultiViewRequestMembers({
       sourceDraft,

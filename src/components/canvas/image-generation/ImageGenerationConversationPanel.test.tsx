@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { describe, expect, it, vi } from 'vitest'
 import { ImageGenerationConversationPanel } from './ImageGenerationConversationPanel'
+import { getImageComposerHeightBounds } from './image-composer-resize'
 import type { ImageGenerationConversationPanelProps } from './types'
 
 const turns: ImageGenerationConversationPanelProps['turns'] = [
@@ -41,6 +42,13 @@ const props = (): ImageGenerationConversationPanelProps => ({
 })
 
 describe('ImageGenerationConversationPanel', () => {
+  it('caps the composer at 70 percent while reserving conversation space', () => {
+    expect(getImageComposerHeightBounds(768)).toEqual({ min: 168, max: 537 })
+    expect(getImageComposerHeightBounds(1024)).toEqual({ min: 168, max: 716 })
+    expect(getImageComposerHeightBounds(627)).toEqual({ min: 168, max: 415 })
+    expect(getImageComposerHeightBounds(300)).toEqual({ min: 168, max: 168 })
+  })
+
   it('renders turns chronologically with request settings and result or error cards', () => {
     const markup = renderToStaticMarkup(<ImageGenerationConversationPanel {...props()} />)
 
@@ -88,5 +96,56 @@ describe('ImageGenerationConversationPanel', () => {
     expect(panelProps.composer.onPromptChange).toHaveBeenCalledWith('生成一张新图片：')
     expect(panelProps.composer.onWorkflowChange).toHaveBeenCalledWith('smart-edit')
     expect(panelProps.onOpenSubjectLibrary).toHaveBeenCalledTimes(1)
+  })
+
+  it('resizes the bottom composer from an accessible horizontal separator', () => {
+    const panelProps = props()
+    let renderer!: ReactTestRenderer
+    act(() => { renderer = create(<ImageGenerationConversationPanel {...panelProps} />) })
+
+    const separator = renderer.root.findByProps({
+      role: 'separator',
+      'aria-label': '调整图片生成输入区高度'
+    })
+    expect(separator.props['aria-orientation']).toBe('horizontal')
+
+    act(() => separator.props.onKeyDown({
+      key: 'ArrowUp',
+      preventDefault: vi.fn()
+    }))
+    expect(renderer.root.findByProps({ 'data-image-composer-shell': true }).props.style.height).toBe(184)
+
+    const handle = {
+      setPointerCapture: vi.fn(),
+      hasPointerCapture: vi.fn(() => true),
+      releasePointerCapture: vi.fn()
+    }
+    act(() => separator.props.onPointerDown({
+      pointerType: 'mouse',
+      button: 0,
+      pointerId: 7,
+      clientY: 600,
+      currentTarget: handle,
+      preventDefault: vi.fn()
+    }))
+    act(() => separator.props.onPointerMove({
+      pointerId: 7,
+      clientY: 500,
+      currentTarget: handle
+    }))
+
+    expect(renderer.root.findByProps({ 'data-image-composer-shell': true }).props.style.height).toBe(284)
+    act(() => separator.props.onPointerUp({
+      pointerId: 7,
+      clientY: 500,
+      currentTarget: handle
+    }))
+    expect(handle.setPointerCapture).toHaveBeenCalledWith(7)
+    expect(handle.releasePointerCapture).toHaveBeenCalledWith(7)
+
+    act(() => separator.props.onKeyDown({ key: 'End', preventDefault: vi.fn() }))
+    expect(renderer.root.findByProps({ 'data-image-composer-shell': true }).props.style.height).toBe(168)
+    act(() => separator.props.onKeyDown({ key: 'Home', preventDefault: vi.fn() }))
+    expect(renderer.root.findByProps({ 'data-image-composer-shell': true }).props.style.height).toBe(480)
   })
 })

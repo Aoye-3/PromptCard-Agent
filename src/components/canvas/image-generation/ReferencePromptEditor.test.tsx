@@ -5,6 +5,12 @@ import { describe, expect, it, vi } from 'vitest'
 import type { PromptDocument } from '@/models/PromptHistory.model'
 import { ReferencePromptEditor } from './ReferencePromptEditor'
 import {
+  promptDocumentEditorText,
+  promptEditorUnitAt,
+  replacePromptEditorRangeWithReference,
+  replacePromptEditorRangeWithText
+} from './reference-prompt-editor-model'
+import {
   insertPromptReferenceAtTextCursor,
   promptDocumentFromText,
   reconcilePromptDocumentEdit,
@@ -49,6 +55,11 @@ const Harness = ({
     />
   )
 }
+
+const editorWithText = (text: string) => ({
+  childNodes: [{ nodeType: 3, textContent: text }],
+  contains: () => false
+})
 
 describe('ReferencePromptEditor document model', () => {
   it('serializes stable reference segments into readable textarea text and restores them', () => {
@@ -138,10 +149,58 @@ describe('ReferencePromptEditor document model', () => {
       ]
     })
   })
+
+  it('treats each reference as one editor unit for repeated insertion and deletion', () => {
+    const once = replacePromptEditorRangeWithReference(
+      { version: 1, segments: [{ type: 'text', text: '前@后' }] },
+      1,
+      2,
+      references[0]
+    )
+    const twice = replacePromptEditorRangeWithReference(once, 2, 2, references[0])
+
+    expect(promptDocumentEditorText(twice)).toBe(`前\uFFFC\uFFFC后`)
+    expect(promptEditorUnitAt(twice, 1)).toMatchObject({
+      type: 'reference',
+      referenceId: 'ref-product'
+    })
+    expect(replacePromptEditorRangeWithText(twice, 1, 2, '')).toEqual({
+      version: 1,
+      segments: [
+        { type: 'text', text: '前' },
+        { type: 'reference', referenceId: 'ref-product', label: '产品图' },
+        { type: 'text', text: '后' }
+      ]
+    })
+  })
 })
 
 describe('ReferencePromptEditor interactions', () => {
-  it('renders one textarea, no contenteditable HTML, and a visible unresolved-reference error', () => {
+  it('renders references as inline thumbnail tokens without visible @ labels', () => {
+    const markup = renderToStaticMarkup(
+      <ReferencePromptEditor
+        document={{
+          version: 1,
+          segments: [
+            { type: 'text', text: '使用 ' },
+            { type: 'reference', referenceId: 'ref-product', label: '产品图' },
+            { type: 'text', text: ' 生成海报' }
+          ]
+        }}
+        references={references}
+        onChange={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('role="textbox"')
+    expect(markup).toContain('contenteditable="true"')
+    expect(markup).toContain('data-reference-token="true"')
+    expect(markup).toContain('/storage-api/assets/asset-product')
+    expect(markup).not.toContain('<textarea')
+    expect(markup).not.toContain('@产品图')
+  })
+
+  it('renders an unresolved reference as a broken thumbnail token and preserves its error', () => {
     const markup = renderToStaticMarkup(
       <ReferencePromptEditor
         document={{
@@ -157,9 +216,10 @@ describe('ReferencePromptEditor interactions', () => {
       />
     )
 
-    expect(markup.match(/<textarea/g)).toHaveLength(1)
-    expect(markup).not.toContain('contenteditable')
-    expect(markup).toContain('使用 @已删除图片')
+    expect(markup).toContain('contenteditable="true"')
+    expect(markup).toContain('data-reference-token="true"')
+    expect(markup).toContain('失效图片引用：已删除图片')
+    expect(markup).not.toContain('<textarea')
     expect(markup).toContain('失效引用 @已删除图片')
   })
 
@@ -168,10 +228,10 @@ describe('ReferencePromptEditor interactions', () => {
     act(() => {
       renderer = create(<Harness initialDocument={{ version: 1, segments: [{ type: 'text', text: '参考 ' }] }} />)
     })
-    const textarea = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    const editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
 
-    act(() => textarea.props.onChange({
-      target: { value: '参考 @产', selectionStart: 5 }
+    act(() => editor.props.onInput({
+      currentTarget: editorWithText('参考 @产')
     }))
 
     const options = renderer.root.findAllByProps({ role: 'option' })
@@ -179,7 +239,8 @@ describe('ReferencePromptEditor interactions', () => {
     expect(options[0].props.children).toBeTruthy()
 
     act(() => options[0].props.onClick())
-    expect(renderer.root.findByProps({ 'aria-label': '图片描述' }).props.value).toBe('参考 @产品图')
+    expect(renderer.root.findAllByProps({ 'data-reference-id': 'ref-product' })).not.toHaveLength(0)
+    expect(renderer.root.findAllByProps({ 'data-reference-token': 'true' })).toHaveLength(1)
     expect(renderer.root.findAllByProps({ role: 'listbox' })).toHaveLength(0)
   })
 
@@ -188,18 +249,18 @@ describe('ReferencePromptEditor interactions', () => {
     act(() => {
       renderer = create(<Harness initialDocument={{ version: 1, segments: [{ type: 'text', text: '' }] }} />)
     })
-    let textarea = renderer.root.findByProps({ 'aria-label': '图片描述' })
-    act(() => textarea.props.onChange({ target: { value: '@', selectionStart: 1 } }))
-    textarea = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    let editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    act(() => editor.props.onInput({ currentTarget: editorWithText('@') }))
+    editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
 
-    act(() => textarea.props.onKeyDown({ key: 'ArrowDown', preventDefault: vi.fn() }))
-    act(() => textarea.props.onKeyDown({ key: 'Enter', preventDefault: vi.fn() }))
-    expect(renderer.root.findByProps({ 'aria-label': '图片描述' }).props.value).toBe('@风格图')
+    act(() => editor.props.onKeyDown({ key: 'ArrowDown', preventDefault: vi.fn() }))
+    act(() => editor.props.onKeyDown({ key: 'Enter', preventDefault: vi.fn() }))
+    expect(renderer.root.findAllByProps({ 'data-reference-id': 'ref-style' })).not.toHaveLength(0)
 
-    textarea = renderer.root.findByProps({ 'aria-label': '图片描述' })
-    act(() => textarea.props.onChange({ target: { value: '@风格图 @', selectionStart: 7 } }))
-    textarea = renderer.root.findByProps({ 'aria-label': '图片描述' })
-    act(() => textarea.props.onKeyDown({ key: 'Escape', preventDefault: vi.fn() }))
+    editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    act(() => editor.props.onInput({ currentTarget: editorWithText('\uFFFC @') }))
+    editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    act(() => editor.props.onKeyDown({ key: 'Escape', preventDefault: vi.fn() }))
     expect(renderer.root.findAllByProps({ role: 'listbox' })).toHaveLength(0)
   })
 
@@ -208,12 +269,39 @@ describe('ReferencePromptEditor interactions', () => {
     act(() => {
       renderer = create(<Harness initialDocument={{ version: 1, segments: [{ type: 'text', text: '' }] }} />)
     })
-    const textarea = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    const editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
 
-    act(() => textarea.props.onCompositionStart({}))
-    act(() => textarea.props.onChange({ target: { value: '@', selectionStart: 1 } }))
+    act(() => editor.props.onCompositionStart({}))
+    act(() => editor.props.onInput({ currentTarget: editorWithText('@') }))
 
     expect(renderer.root.findAllByProps({ role: 'listbox' })).toHaveLength(0)
+  })
+
+  it('commits an IME composition once when composition ends', () => {
+    const onChange = vi.fn()
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(
+        <ReferencePromptEditor
+          document={{ version: 1, segments: [{ type: 'text', text: '' }] }}
+          references={references}
+          onChange={onChange}
+        />
+      )
+    })
+    const editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    const composedEditor = editorWithText('中文')
+
+    act(() => editor.props.onCompositionStart({}))
+    act(() => editor.props.onInput({ currentTarget: composedEditor }))
+    expect(onChange).not.toHaveBeenCalled()
+
+    act(() => editor.props.onCompositionEnd({ currentTarget: composedEditor }))
+    expect(onChange).toHaveBeenCalledTimes(1)
+    expect(onChange).toHaveBeenCalledWith({
+      version: 1,
+      segments: [{ type: 'text', text: '中文' }]
+    })
   })
 
   it('shows injection and upload actions when @ has no available image candidate', () => {
@@ -231,11 +319,31 @@ describe('ReferencePromptEditor interactions', () => {
         />
       )
     })
-    const textarea = renderer.root.findByProps({ 'aria-label': '图片描述' })
-    act(() => textarea.props.onChange({ target: { value: '@a', selectionStart: 2 } }))
+    const editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    act(() => editor.props.onInput({ currentTarget: editorWithText('@a') }))
 
     expect(renderer.root.findByProps({ role: 'listbox' })).toBeTruthy()
     expect(renderer.root.findByProps({ 'aria-label': '注入已选节点' })).toBeTruthy()
     expect(renderer.root.findByProps({ 'aria-label': '上传图片' })).toBeTruthy()
+  })
+
+  it('accepts only plain text from the clipboard', () => {
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(<Harness initialDocument={{ version: 1, segments: [{ type: 'text', text: '' }] }} />)
+    })
+    const editor = renderer.root.findByProps({ 'aria-label': '图片描述' })
+    const preventDefault = vi.fn()
+
+    act(() => editor.props.onPaste({
+      currentTarget: editorWithText(''),
+      preventDefault,
+      clipboardData: {
+        getData: (type: string) => type === 'text/plain' ? '纯文本' : '<b>纯文本</b>'
+      }
+    }))
+
+    expect(preventDefault).toHaveBeenCalled()
+    expect(renderer.root.findAllByProps({ 'data-prompt-text': true })[0].props.children).toBe('纯文本')
   })
 })

@@ -73,8 +73,7 @@ export const imageNodeCommandDefinitions: readonly ImageNodeCommandDefinition[] 
   {
     id: 'as-reference',
     label: '作为参考',
-    surfaces: ['toolbar', 'context'],
-    operation: 'reference-generate'
+    surfaces: ['toolbar', 'context']
   },
   {
     id: 'effect-render',

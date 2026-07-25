@@ -46,6 +46,55 @@ describe('MultiViewWorkbenchDialog', () => {
     expect(onGenerate).not.toHaveBeenCalled()
   })
 
+  it('offers a nine-position camera grid while retaining three-quarter and rear views', () => {
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(
+        <MultiViewWorkbenchDialog
+          initialDraft={initialDraft}
+          modelLabel="Fake image model"
+          onCancel={vi.fn()}
+          onGenerate={vi.fn().mockResolvedValue(undefined)}
+        />
+      )
+    })
+
+    const grid = renderer.root.findByProps({ 'data-camera-direction-grid': true })
+    expect(grid.findAllByType('button')).toHaveLength(9)
+    expect(renderer.root.findByProps({ 'aria-label': '选择方位 左上' })).toBeTruthy()
+    expect(renderer.root.findByProps({ 'aria-label': '选择方位 仰视' })).toBeTruthy()
+    expect(renderer.root.findByProps({ 'aria-label': '选择补充视角 正面 3/4' })).toBeTruthy()
+    expect(renderer.root.findByProps({ 'aria-label': '选择补充视角 背面' })).toBeTruthy()
+  })
+
+  it('uses the model three-view shortcut without submitting until Generate is clicked', async () => {
+    const onGenerate = vi.fn().mockResolvedValue(undefined)
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(
+        <MultiViewWorkbenchDialog
+          initialDraft={initialDraft}
+          modelLabel="Fake image model"
+          onCancel={vi.fn()}
+          onGenerate={onGenerate}
+        />
+      )
+    })
+
+    act(() => renderer.root.findByProps({
+      'aria-label': '选择模型三视图（正视、左视、俯视）'
+    }).props.onClick())
+
+    expect(renderer.root.findByProps({ 'data-multi-view-request-count': true }).children).toEqual(['3'])
+    expect(onGenerate).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'Generate 3' }).props.onClick()
+    })
+
+    expect(onGenerate).toHaveBeenCalledWith(expect.any(Object), ['front', 'left', 'top'])
+  })
+
   it('one explicit Generate authorizes the displayed independent requests', async () => {
     const onGenerate = vi.fn().mockResolvedValue(undefined)
     let renderer!: ReactTestRenderer

@@ -11,7 +11,7 @@ Contextual Image Actions are selected-image tools on Free Canvas. They own:
 - visible-image copy/export;
 - contextual generation placeholders and multi-view result groups.
 
-They do not own or modify the existing right-side `Agent / 图片生成 / Prompt库` workspace. Opening, cancelling, submitting, completing or retrying a contextual image operation must not change the active right tab, its Agent draft, its image-generation conversation draft, or Prompt Library state.
+They do not own or restructure the existing right-side `Agent / 图片生成 / Prompt库` workspace. The single explicit bridge is `作为参考`: it opens the existing 图片生成 tab and appends the source image to that Composer's current reference list without opening a modal or sending a request. All other opening, cancelling, submitting, completing or retrying of contextual image operations must not change the active right tab, its Agent draft, its image-generation conversation draft, or Prompt Library state.
 
 [Plan 007](../Plan/007-contextual-image-editing-and-multi-view-plan.md) is the implementation and acceptance tracker. [ADR-015](../decisions/ADR-015-explicit-multi-view-request-groups.md) records multi-view authorization and member semantics.
 
@@ -42,7 +42,7 @@ The same resolved commands feed:
 - `CanvasNodeContextMenu`;
 - keyboard handlers in `FreeCanvasBuilderScreen`.
 
-Local commands include copy/duplicate/delete, zoom, layer order, horizontal/vertical flip, crop, annotation, original download, copy-visible and export-visible. Generative commands map to provider-neutral product operations rather than provider request fields.
+Local commands include copy/duplicate/delete, zoom, layer order, horizontal/vertical flip, crop, annotation, original download, copy-visible, export-visible and `作为参考`. `作为参考` only mutates the in-memory image Composer draft and therefore does not require Runtime/model readiness. Generative commands map to provider-neutral product operations rather than provider request fields.
 
 Availability combines eligible image selection, model-catalog native capability, adapter implementation, recipe status, product policy and Runtime readiness. Seedream IDs never appear in command resolution.
 
@@ -62,7 +62,7 @@ Technical derivatives are not creative results. Generative operations always cre
 
 ## Operation workbenches
 
-`ImageOperationWorkbenchDialog` is the shared modal shell for reference generation, effect rendering, region redraw, erase, outpaint, text edit, generative enhance and subject extraction.
+`ImageOperationWorkbenchDialog` is the shared modal shell for effect rendering, region redraw, erase, outpaint, text edit, generative enhance and subject extraction. `作为参考` deliberately bypasses this shell.
 
 It displays the actual source preview and asset trace, recipe preset, prompt, preservation intent, capability-limited supporting references, output settings, limitations and submission issues. Opening, editing presets, adding references, choosing a point, cancelling or pressing Escape never invokes the provider. Only the explicit Generate button compiles an immutable recipe snapshot and creates a run.
 
@@ -79,7 +79,9 @@ The versioned evaluation definition is [Image Operation Evaluation Manifest v1](
 
 ## Multi-view
 
-`MultiViewWorkbenchDialog` makes selected views and the exact number of independent requests visible before confirmation.
+`MultiViewWorkbenchDialog` makes selected views and the exact number of independent requests visible before confirmation. Its discrete camera-position selector uses a 3×3 layout: `左上 / 俯视 / 右上`, `左视 / 正视 / 右视`, and `左下 / 仰视 / 右下`. Existing `正面 3/4` and `背面` views remain available as supplemental choices. `模型三视图` replaces the current selection with `正视 / 左视 / 俯视`; it does not submit until the user presses Generate.
+
+These controls compile to stable provider-neutral `viewSpec` values and natural-language view instructions. The UI deliberately does not expose continuous horizontal/vertical degree sliders: the current adapters document instruction-following image edits, not exact camera-angle parameters, so a degree control would imply unsupported precision.
 
 One Generate confirmation:
 
@@ -89,7 +91,7 @@ One Generate confirmation:
 4. submits independent provider-neutral requests with bounded concurrency;
 5. never claims native grouped output or exact 3D reconstruction.
 
-`MultiViewGroupPanel` derives queued/running/partial/succeeded/failed state from member image nodes. Successful views remain usable when another view fails. `重试此视角` opens a workbench containing only that failed view and creates a new run in the same group; it does not mutate the historical failed member or resubmit successful views. `作为参考` opens the contextual reference workbench for the successful result.
+`MultiViewGroupPanel` derives queued/running/partial/succeeded/failed state from member image nodes. Successful views remain usable when another view fails. `重试此视角` opens a workbench containing only that failed view and creates a new run in the same group; it does not mutate the historical failed member or resubmit successful views. `作为参考` directly appends the successful result to the existing right-side 图片生成 Composer and opens that tab; it does not open a workbench or submit a request.
 
 Contextual placeholders use `meta.source = "contextual-image-operation"` and do not carry a conversation ID. The right-side image-generation path keeps its existing `image-generation-conversation` source and conversation identity.
 

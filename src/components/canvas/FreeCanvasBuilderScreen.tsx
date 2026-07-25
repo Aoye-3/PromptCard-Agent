@@ -40,6 +40,10 @@ import { RegionEditorDialog } from '@/components/canvas/image-generation/RegionE
 import { ProjectResourceLibrary } from '@/components/canvas/ProjectResourceLibrary'
 import { ImageNodeActionBar } from '@/components/canvas/image-actions/ImageNodeActionBar'
 import { CanvasNodeContextMenu } from '@/components/canvas/image-actions/CanvasNodeContextMenu'
+import {
+  CanvasTextNodeContextMenu,
+  type TextNodeContextCommand
+} from '@/components/canvas/image-actions/CanvasTextNodeContextMenu'
 import { ImageOperationWorkbenchDialog } from '@/components/canvas/image-actions/ImageOperationWorkbenchDialog'
 import { MultiViewWorkbenchDialog } from '@/components/canvas/image-actions/MultiViewWorkbenchDialog'
 import {
@@ -266,7 +270,10 @@ const FreeCanvasBuilderInner = ({
   const [imageConnections, setImageConnections] = useState<ModelConnection[]>([])
   const [imageAssignment, setImageAssignment] = useState<ModelAssignment | null>(null)
   const [imageRuntimeReady, setImageRuntimeReady] = useState(false)
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([])
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>(
+    () => freeCanvas.selectedNodeId ? [freeCanvas.selectedNodeId] : []
+  )
+  const [agentDraftRequest, setAgentDraftRequest] = useState<{ id: string; content: string } | undefined>()
   const [nodeContextMenu, setNodeContextMenu] = useState<{
     nodeId: string
     x: number
@@ -406,7 +413,9 @@ const FreeCanvasBuilderInner = ({
     setImageConversationNextCursor(null)
     setImageConversationRuns({})
     setImageRunNextCursors({})
-    setSelectedNodeIds([])
+    setSelectedNodeIds(
+      freeCanvasRef.current.selectedNodeId ? [freeCanvasRef.current.selectedNodeId] : []
+    )
     setNodeContextMenu(null)
     setActiveImageOperationDraft(null)
     setImageOperationPreparing(false)
@@ -631,6 +640,20 @@ const FreeCanvasBuilderInner = ({
       .then(() => setClipboardNotice('已复制文本节点'))
       .catch(() => setClipboardNotice('复制文本失败'))
   }, [])
+
+  const completeTextNodeWithAgent = useCallback((nodeId: string) => {
+    const node = freeCanvasRef.current.nodes.find((candidate): candidate is IFreeCanvasTextNode =>
+      candidate.id === nodeId && candidate.kind === 'text'
+    )
+    if (!node || previewMode) return
+    const text = freeCanvasTextSegmentsToPlainText(node.segments)
+    setRightPanelCollapsed(false)
+    setRightPanelMode('agent')
+    setAgentDraftRequest({
+      id: `complete-text-node-${node.id}-${Date.now()}`,
+      content: `请读取当前选中的文字节点和画布上下文，补全下面内容，并直接更新该文字节点：\n\n${text}`
+    })
+  }, [previewMode])
 
   const resizeImageNode = useCallback((nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => {
     emitGenerationCanvas(updateFreeCanvasImageNodeFrame(freeCanvasRef.current, nodeId, frame))
@@ -1542,6 +1565,30 @@ const FreeCanvasBuilderInner = ({
     setSelectedNodeIds([nodeId])
   }, [emitGenerationCanvas])
 
+  const addCanvasImageAsComposerReference = useCallback((node: IFreeCanvasImageNode) => {
+    setRightPanelMode('image-generation')
+    setRightPanelCollapsed(false)
+    if (!node.assetId) {
+      setUploadError('图片节点没有可用的本地资产。')
+      return
+    }
+    if (imageComposerDraft.inputs.some(input => (
+      input.referenceId.startsWith(`canvas-${node.id}-`)
+    ))) {
+      setUploadError('该图片已在当前参考图中。')
+      return
+    }
+    if (imageComposerDraft.inputs.length >= maxComposerImages) {
+      setUploadError(`已达到当前模型的 ${maxComposerImages} 张参考图上限。`)
+      return
+    }
+    const result = injectCanvasNodesIntoDraft(imageComposerDraft, [node])
+    setImageComposerDraft(result.draft)
+    setUploadError(result.rejected.length > 0
+      ? result.rejected.map(item => item.reason).join(' ')
+      : null)
+  }, [imageComposerDraft, maxComposerImages])
+
   const retryMultiViewMember = useCallback((member: MultiViewGroupPanelMember) => {
     const current = freeCanvasRef.current
     const failedNode = current.nodes.find(node => node.id === member.nodeId && node.kind === 'image')
@@ -1566,8 +1613,8 @@ const FreeCanvasBuilderInner = ({
       (candidate): candidate is IFreeCanvasImageNode => candidate.id === member.nodeId && candidate.kind === 'image'
     )
     if (!node?.assetId) return
-    void openImageOperationWorkbench(node, 'reference-generate')
-  }, [openImageOperationWorkbench])
+    addCanvasImageAsComposerReference(node)
+  }, [addCanvasImageAsComposerReference])
 
   const applyCanvasCommand = useCallback((command: CanvasLocalCommand) => {
     const applied = executeCanvasLocalCommand(
@@ -1585,6 +1632,16 @@ const FreeCanvasBuilderInner = ({
       return null
     })
   }, [])
+
+  const deleteCanvasNodes = useCallback((nodeId: string) => {
+    const current = freeCanvasRef.current
+    if (!current.nodes.some(node => node.id === nodeId)) return
+    const nodeIds = selectedNodeIds.includes(nodeId) && selectedNodeIds.length > 0
+      ? selectedNodeIds
+      : [nodeId]
+    applyCanvasCommand({ kind: 'delete-nodes', nodeIds })
+    setSelectedNodeIds([])
+  }, [applyCanvasCommand, selectedNodeIds])
 
   const rasterVisibleImageNode = useCallback(async (node: IFreeCanvasImageNode): Promise<Blob> => {
     if (!node.assetId) throw new Error('图片资产不可用。')
@@ -1640,11 +1697,7 @@ const FreeCanvasBuilderInner = ({
       return
     }
     if (commandId === 'delete') {
-      const nodeIds = selectedNodeIds.includes(nodeId) && selectedNodeIds.length > 0
-        ? selectedNodeIds
-        : [nodeId]
-      applyCanvasCommand({ kind: 'delete-nodes', nodeIds })
-      setSelectedNodeIds([])
+      deleteCanvasNodes(nodeId)
       return
     }
     if (commandId === 'zoom-selection') {
@@ -1694,15 +1747,37 @@ const FreeCanvasBuilderInner = ({
       anchor.click()
       return
     }
+    if (commandId === 'as-reference') {
+      addCanvasImageAsComposerReference(node)
+      return
+    }
     const operation = imageOperationForCommand(commandId)
     if (operation) {
       void openImageOperationWorkbench(node, operation)
     }
-  }, [applyCanvasCommand, copyVisibleImageNode, exportVisibleImageNode, openImageOperationWorkbench, reactFlow, selectedNodeIds])
+  }, [addCanvasImageAsComposerReference, applyCanvasCommand, copyVisibleImageNode, deleteCanvasNodes, exportVisibleImageNode, openImageOperationWorkbench, reactFlow])
+
+  const executeTextCommand = useCallback((nodeId: string, command: TextNodeContextCommand) => {
+    if (command === 'copy') {
+      copyTextNode(nodeId)
+      return
+    }
+    if (command === 'complete') {
+      completeTextNodeWithAgent(nodeId)
+      return
+    }
+    deleteCanvasNodes(nodeId)
+  }, [completeTextNodeWithAgent, copyTextNode, deleteCanvasNodes])
 
   useEffect(() => {
     const handleLocalShortcut = (event: KeyboardEvent) => {
       if (isCanvasKeyboardLocked || isTypingTarget(event.target)) return
+      const selectedNodeId = freeCanvasRef.current.selectedNodeId
+      if ((event.key === 'Backspace' || event.key === 'Delete') && selectedNodeId) {
+        event.preventDefault()
+        deleteCanvasNodes(selectedNodeId)
+        return
+      }
       const node = selectedImageNodeRef.current
       if (!node) return
       const modifier = event.ctrlKey || event.metaKey
@@ -1728,11 +1803,6 @@ const FreeCanvasBuilderInner = ({
         executeImageCommand(node.id, 'duplicate')
         return
       }
-      if (event.key === 'Backspace' || event.key === 'Delete') {
-        event.preventDefault()
-        executeImageCommand(node.id, 'delete')
-        return
-      }
       if (event.shiftKey && event.key === '1') {
         event.preventDefault()
         executeImageCommand(node.id, 'zoom-selection')
@@ -1750,7 +1820,7 @@ const FreeCanvasBuilderInner = ({
     }
     window.addEventListener('keydown', handleLocalShortcut)
     return () => window.removeEventListener('keydown', handleLocalShortcut)
-  }, [emitGenerationCanvas, executeImageCommand, isCanvasKeyboardLocked])
+  }, [deleteCanvasNodes, emitGenerationCanvas, executeImageCommand, isCanvasKeyboardLocked])
 
   const maximumOperationInputs = selectedImageModel?.capabilities?.references?.maxCount
     ?? selectedImageModel?.capabilities?.maxReferenceImages
@@ -1996,11 +2066,13 @@ const FreeCanvasBuilderInner = ({
   const handleNodeContextMenu: NodeMouseHandler<FreeCanvasFlowNode> = (event, node) => {
     event.preventDefault()
     const target = node.data.canvasNode
-    if (target.kind !== 'image' || !target.assetId || target.meta.generationState === 'running') {
+    const imageMenuUnavailable = target.kind === 'image'
+      && (!target.assetId || target.meta.generationState === 'running')
+    if ((target.kind !== 'image' && target.kind !== 'text') || imageMenuUnavailable) {
       setNodeContextMenu(null)
       return
     }
-    const preservesSelection = selectedNodeIds.includes(node.id)
+    const preservesSelection = selectedNodeIds.includes(node.id) || freeCanvas.selectedNodeId === node.id
     if (!preservesSelection) {
       setSelectedNodeIds([node.id])
       setSelectedNodeId(node.id)
@@ -2256,10 +2328,19 @@ const FreeCanvasBuilderInner = ({
             <Controls className="!bottom-6 !left-auto !right-4" />
           </ReactFlow>
           {nodeContextMenu && (() => {
-            const contextNode = freeCanvas.nodes.find((node): node is IFreeCanvasImageNode =>
-              node.id === nodeContextMenu.nodeId && node.kind === 'image'
-            )
+            const contextNode = freeCanvas.nodes.find(node => node.id === nodeContextMenu.nodeId)
             if (!contextNode) return null
+            if (contextNode.kind === 'text') {
+              return (
+                <CanvasTextNodeContextMenu
+                  position={{ x: nodeContextMenu.x, y: nodeContextMenu.y }}
+                  completeDisabled={previewMode}
+                  onExecute={command => executeTextCommand(contextNode.id, command)}
+                  onClose={closeNodeContextMenu}
+                />
+              )
+            }
+            if (contextNode.kind !== 'image') return null
             const selectionCount = selectedNodeIds.includes(contextNode.id)
               ? Math.max(1, selectedNodeIds.length)
               : 1
@@ -2712,6 +2793,7 @@ const FreeCanvasBuilderInner = ({
               sessionKey={`workspace:free-canvas:${activeProject.id}`}
               workspaceContext={workspaceContext}
               onApplyWorkspaceProposal={handleApplyAgentProposal}
+              draftRequest={agentDraftRequest}
               compact
               embedded
               contextLabel={`已读取画布 · ${freeCanvas.nodes.length} 个节点`}

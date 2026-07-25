@@ -71,6 +71,19 @@ describe('image node command registry', () => {
     })
   })
 
+  it('keeps 作为参考 as a local Composer action without Runtime readiness', () => {
+    const asReference = resolveImageNodeCommands({
+      target: readyImage,
+      operationAvailability: {}
+    }).find(command => command.id === 'as-reference')
+
+    expect(asReference).toMatchObject({
+      enabled: true,
+      disabledReason: null
+    })
+    expect(asReference).not.toHaveProperty('operation')
+  })
+
   it('does not expose ready-image actions for running or assetless placeholders', () => {
     expect(resolveImageNodeCommands({
       target: {

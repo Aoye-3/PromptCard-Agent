@@ -27,6 +27,7 @@ import {
   ReferencePromptEditor,
   type ReferencePromptEditorHandle
 } from './ReferencePromptEditor'
+import { ComposerReferencePreviewDialog } from './ComposerReferencePreviewDialog'
 
 type ComposerPopover = 'assets' | 'workflow' | 'model' | 'size' | 'more' | null
 
@@ -43,9 +44,13 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
   const promptEditorRef = useRef<ReferencePromptEditorHandle>(null)
   const [openPopover, setOpenPopover] = useState<ComposerPopover>(null)
   const [referenceMenuId, setReferenceMenuId] = useState<string | null>(null)
+  const [previewReferenceId, setPreviewReferenceId] = useState<string | null>(null)
   const references = useMemo(() => (
     [...(props.references || [])].sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
   ), [props.references])
+  const previewReference = previewReferenceId
+    ? references.find(reference => reference.referenceId === previewReferenceId)
+    : undefined
   const maxImages = props.maxImages || 10
   const uploadBlocked = references.length >= maxImages
   const blockingRequirements = props.blockingRequirements || props.missingRequirements || []
@@ -114,11 +119,11 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
     <form
       ref={formRef}
       aria-label="图片生成输入"
-      className="relative border-t border-[#e5e7eb] bg-white p-2.5"
+      className="relative h-full border-t border-[#e5e7eb] bg-white p-2.5"
       onSubmit={submit}
     >
-      <div className="relative rounded-[10px] border border-[#d1d5db] bg-white px-2.5 pb-2 pt-2 shadow-[0_0_0_1px_rgba(20,20,19,0.02)] transition-colors focus-within:border-[#87867f]">
-        <div className="flex min-h-11 items-center gap-1.5 overflow-x-auto pb-1" aria-label="本轮图片输入">
+      <div className="relative flex h-full min-h-0 flex-col rounded-[10px] border border-[#d1d5db] bg-white px-2.5 pb-2 pt-2 shadow-[0_0_0_1px_rgba(20,20,19,0.02)] transition-colors focus-within:border-[#87867f]">
+        <div className="flex min-h-11 shrink-0 items-center gap-1.5 overflow-x-auto pb-1" aria-label="本轮图片输入">
           <div className="relative shrink-0">
             <button
               type="button"
@@ -153,8 +158,7 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
             <div key={reference.referenceId} className="relative shrink-0">
               <button
                 type="button"
-                aria-label={`管理图${index + 1} ${reference.label}`}
-                aria-expanded={referenceMenuId === reference.referenceId}
+                aria-label={`查看图${index + 1} ${reference.label}`}
                 className={`group relative block h-10 w-10 overflow-hidden rounded-lg border bg-gray-100 transition ${
                   reference.mentioned
                     ? 'border-[#c96442] shadow-[0_0_0_1px_rgba(201,100,66,0.16)]'
@@ -162,23 +166,44 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
                 }`}
                 onClick={() => {
                   setOpenPopover(null)
-                  setReferenceMenuId(current => current === reference.referenceId ? null : reference.referenceId)
+                  setReferenceMenuId(null)
+                  setPreviewReferenceId(reference.referenceId)
                 }}
               >
                 <img src={reference.imageUrl} alt={reference.label} className="h-full w-full object-cover" />
                 <span className="absolute left-0.5 top-0.5 rounded bg-black/70 px-1 py-0.5 text-[8px] font-bold text-white">
                   图{index + 1}
                 </span>
-                <span className={`absolute bottom-0.5 left-0.5 max-w-[34px] truncate rounded px-1 py-0.5 text-[7px] font-bold ${
+              </button>
+              <button
+                type="button"
+                aria-label={`管理图${index + 1} ${reference.label}`}
+                aria-expanded={referenceMenuId === reference.referenceId}
+                className={`absolute bottom-0.5 left-0.5 max-w-[34px] truncate rounded px-1 py-0.5 text-[7px] font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c96442] ${
                   reference.role === 'source-image'
                     ? 'bg-amber-300/95 text-amber-950'
-                    : 'bg-white/90 text-gray-700'
-                }`}>
-                  {reference.role === 'source-image' ? '主图' : '参考'}
-                </span>
-                <span className="absolute right-0.5 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white/90 text-gray-700 opacity-0 shadow transition group-hover:opacity-100">
-                  <MoreHorizontal size={9} aria-hidden="true" />
-                </span>
+                    : 'bg-white/90 text-gray-700 hover:bg-white'
+                }`}
+                onClick={() => {
+                  setOpenPopover(null)
+                  setReferenceMenuId(current => current === reference.referenceId ? null : reference.referenceId)
+                }}
+              >
+                {reference.role === 'source-image' ? '主图' : '参考'}
+              </button>
+              <button
+                type="button"
+                aria-label={`从参考图列表移除图${index + 1} ${reference.label}`}
+                disabled={!props.onRemoveReference}
+                className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-white bg-[#141413] text-white shadow-sm transition hover:bg-red-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c96442] disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={event => {
+                  event.stopPropagation()
+                  setReferenceMenuId(null)
+                  setPreviewReferenceId(current => current === reference.referenceId ? null : current)
+                  props.onRemoveReference?.(reference.referenceId)
+                }}
+              >
+                <X size={10} strokeWidth={2.5} aria-hidden="true" />
               </button>
               {referenceMenuId === reference.referenceId && (
                 <ComposerMenu className={`${index > 4 ? 'right-0' : 'left-0'} top-[calc(100%+8px)] w-56`}>
@@ -258,6 +283,15 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
           </span>
         </div>
 
+        {previewReference && (
+          <ComposerReferencePreviewDialog
+            imageUrl={previewReference.imageUrl}
+            label={previewReference.label}
+            imageNumber={references.findIndex(reference => reference.referenceId === previewReference.referenceId) + 1}
+            onClose={() => setPreviewReferenceId(null)}
+          />
+        )}
+
         {props.promptDocument && props.onPromptDocumentChange ? (
           <ReferencePromptEditor
             ref={promptEditorRef}
@@ -283,7 +317,7 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
         ) : (
           <textarea
             aria-label="图片描述"
-            className="min-h-14 max-h-32 w-full resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-[13px] leading-5 text-[#141413] outline-none placeholder:text-[#87867f]"
+            className="min-h-14 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-[13px] leading-5 text-[#141413] outline-none placeholder:text-[#87867f]"
             placeholder="描述你想生成或修改的图片，输入 @ 引用图片"
             value={props.prompt}
             onChange={event => props.onPromptChange(event.target.value)}
@@ -321,7 +355,10 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
           </details>
         )}
 
-        <div className="flex min-w-0 items-center gap-1 border-t border-[#f3f4f6] pt-1.5">
+        <div
+          data-image-composer-toolbar
+          className="flex min-w-0 shrink-0 items-center gap-1 border-t border-[#f3f4f6] pt-1.5"
+        >
           <ToolbarPopover
             open={openPopover === 'workflow'}
             align="left"
@@ -388,7 +425,7 @@ export const ImageGenerationComposer = (props: ImageGenerationComposerProps) => 
           <ToolbarPopover
             open={openPopover === 'size'}
             align="right"
-            className="w-[340px]"
+            className="w-72"
             button={(
               <SummaryPill
                 label={`${displayAspectRatio(props.aspectRatio)} · ${props.resolution}`}

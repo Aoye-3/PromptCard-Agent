@@ -19,6 +19,10 @@ interface AgentCollaborationPanelProps {
   compact?: boolean
   embedded?: boolean
   contextLabel?: string
+  draftRequest?: {
+    id: string
+    content: string
+  }
 }
 
 const agentQuickPrompts = [
@@ -45,7 +49,8 @@ export function AgentCollaborationPanel({
   autoApplyWorkspaceChanges = false,
   compact = false,
   embedded = false,
-  contextLabel = '已读取工作区'
+  contextLabel = '已读取工作区',
+  draftRequest
 }: AgentCollaborationPanelProps) {
   const sessionKey = sessionKeyProp || `workspace:${mode.replace('-workspace', '')}:${workspaceContext.projectId}`
   const {
@@ -70,6 +75,10 @@ export function AgentCollaborationPanel({
     if (!initialized) init()
     checkRuntime()
   }, [checkRuntime, init, initialized])
+
+  useEffect(() => {
+    if (draftRequest) setDraft(draftRequest.content)
+  }, [draftRequest])
 
   const conversationMessages = useMemo(
     () => [...messages, ...appliedMessages].sort((a, b) => a.createdAt - b.createdAt),

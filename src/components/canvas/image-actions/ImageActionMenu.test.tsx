@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vitest'
 import type { ResolvedImageNodeCommand } from '@/domain/image-actions/image-node-commands'
 import { CanvasNodeContextMenu } from './CanvasNodeContextMenu'
+import { CanvasTextNodeContextMenu } from './CanvasTextNodeContextMenu'
 import { ImageNodeActionBar } from './ImageNodeActionBar'
 import { clampContextMenuPosition } from './image-action-ui'
 
@@ -56,5 +57,31 @@ describe('image action menu surfaces', () => {
     expect(html).toContain('role="menu"')
     expect(html).toContain('Ctrl+C')
     expect(html).toContain('Backspace')
+    expect(html).toContain('w-56')
+    expect(html).toContain('text-[13px]')
+    expect(html).toContain('py-1.5')
+    expect(html).not.toContain('w-72')
+    expect(html).not.toContain('py-2.5')
+  })
+
+  it('uses the same compact context menu for text-node actions', () => {
+    const html = renderToStaticMarkup(
+      <CanvasTextNodeContextMenu
+        position={{ x: 12, y: 12 }}
+        onExecute={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(html).toContain('role="menu"')
+    expect(html).toContain('aria-label="文字节点菜单"')
+    expect(html).toContain('复制')
+    expect(html).toContain('补全')
+    expect(html).toContain('删除')
+    expect(html).toContain('Ctrl+C')
+    expect(html).toContain('Backspace')
+    expect(html).toContain('w-56')
+    expect(html).toContain('text-[13px]')
+    expect(html).toContain('py-1.5')
   })
 })

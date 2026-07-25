@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 import {
   createFreeCanvasImageGenerationPlaceholder,
+  createFreeCanvasImageNodeFromMedia,
   createFreeCanvasProject,
   createFreeCanvasTextNode
 } from '@/domain/free-canvas/free-canvas-project'
@@ -51,7 +52,11 @@ vi.mock('@xyflow/react', () => {
   }
 })
 
-vi.mock('@/components/AgentCollaborationPanel', () => ({ AIChatbotBox: () => <div data-agent-panel /> }))
+vi.mock('@/components/AgentCollaborationPanel', () => ({
+  AIChatbotBox: ({ draftRequest }: { draftRequest?: { content: string } }) => (
+    <div data-agent-panel data-agent-draft={draftRequest?.content || ''} />
+  )
+}))
 vi.mock('@/components/PromptLibraryPreviewMode', () => ({ PromptLibraryPreviewPanel: () => <div data-prompt-panel /> }))
 vi.mock('@/components/prompt-media/PromptPresetPreviewDialog', () => ({ PromptPresetPreviewDialog: () => null }))
 vi.mock('@/components/canvas/ImageCropEditor', () => ({ ImageCropEditor: () => null }))
@@ -109,6 +114,11 @@ const baseProps = {
   onEditQuickPreset: vi.fn(),
   onUseQuickPreset: vi.fn()
 }
+
+const promptEditorWithText = (text: string) => ({
+  childNodes: [{ nodeType: 3, textContent: text }],
+  contains: () => false
+})
 
 const configureReadyImageModel = () => {
   mocks.getCatalog.mockResolvedValue({
@@ -234,6 +244,59 @@ describe('project-level free canvas image generation entry', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  it('adds an image directly to the Composer when 作为参考 is clicked without opening a workbench', async () => {
+    const imageNode = createFreeCanvasImageNodeFromMedia({
+      id: 'reference-source',
+      kind: 'imageAsset',
+      title: '产品参考图',
+      position: { x: 120, y: 160 },
+      width: 320,
+      height: 240,
+      assetId: 'asset-reference.png',
+      imageUrl: '/storage-api/assets/asset-reference.png',
+      meta: {}
+    })
+    let renderer!: ReturnType<typeof create>
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={createFreeCanvasProject(1, {
+            nodes: [imageNode],
+            selectedNodeId: imageNode.id
+          })}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={vi.fn()}
+        />
+      )
+    })
+
+    const getImageNodeData = () => renderer.root.find(candidate => (
+      Array.isArray(candidate.props.nodes) && candidate.props.nodes[0]?.data?.onImageCommand
+    )).props.nodes[0].data
+
+    act(() => getImageNodeData().onImageCommand(imageNode.id, 'as-reference'))
+
+    expect(renderer.root.findAllByProps({ 'aria-label': '查看图1 产品参考图' })).toHaveLength(1)
+    expect(renderer.root.findByProps({ 'data-free-canvas-image-generation-panel': true })).toBeTruthy()
+    expect(renderer.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
+    expect(mocks.requestGeneration).not.toHaveBeenCalled()
+
+    act(() => getImageNodeData().onImageCommand(imageNode.id, 'as-reference'))
+    expect(renderer.root.findAllByProps({ 'aria-label': '查看图1 产品参考图' })).toHaveLength(1)
+
+    act(() => renderer.root.findByProps({
+      'aria-label': '从参考图列表移除图1 产品参考图'
+    }).props.onClick({ stopPropagation: vi.fn() }))
+
+    expect(renderer.root.findAllByProps({ 'aria-label': '查看图1 产品参考图' })).toHaveLength(0)
+    expect(getImageNodeData()).toBeTruthy()
+    expect(mocks.requestGeneration).not.toHaveBeenCalled()
+  })
+
   it('keeps an empty prompt quiet while leaving generation disabled', async () => {
     configureReadyImageModel()
     let renderer!: ReturnType<typeof create>
@@ -292,6 +355,101 @@ describe('project-level free canvas image generation entry', () => {
 
     expect(getReactFlow().props.onSelectionChange).toBe(initialSelectionHandler)
     expect(getReactFlow().props.nodes[0].measured).toEqual({ width: 420, height: 180 })
+  })
+
+  it('deletes the selected text node with Backspace outside text editing', async () => {
+    const node = createFreeCanvasTextNode('Delete me', { x: 120, y: 160 }, 1)
+    const onChange = vi.fn()
+    const canvas = {
+      ...createFreeCanvasProject(1, { nodes: [node] }),
+      selectedNodeId: node.id
+    }
+    vi.stubGlobal('HTMLElement', class HTMLElement {})
+
+    await act(async () => {
+      create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={onChange}
+        />
+      )
+    })
+    onChange.mockClear()
+
+    const keydownHandlers = vi.mocked(window.addEventListener).mock.calls
+      .filter(([eventName]) => eventName === 'keydown')
+      .map(([, handler]) => handler as EventListener)
+    const event = {
+      key: 'Backspace',
+      target: null,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      preventDefault: vi.fn()
+    } as unknown as KeyboardEvent
+
+    act(() => keydownHandlers.forEach(handler => handler(event)))
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      nodes: [],
+      selectedNodeId: null
+    }))
+  })
+
+  it('opens the compact text-node menu and stages completion in the Agent composer', async () => {
+    const node = createFreeCanvasTextNode('待补全的文字节点', { x: 120, y: 160 }, 1)
+    const canvas = {
+      ...createFreeCanvasProject(1, { nodes: [node] }),
+      selectedNodeId: node.id
+    }
+    const onChange = vi.fn()
+    vi.stubGlobal('HTMLElement', class HTMLElement {})
+    let renderer!: ReturnType<typeof create>
+
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={onChange}
+        />
+      )
+    })
+    onChange.mockClear()
+
+    const reactFlow = renderer.root.find(candidate => (
+      typeof candidate.props.onNodeContextMenu === 'function' && Array.isArray(candidate.props.nodes)
+    ))
+    act(() => reactFlow.props.onNodeContextMenu({
+      preventDefault: vi.fn(),
+      clientX: 240,
+      clientY: 180,
+      currentTarget: null
+    }, reactFlow.props.nodes[0]))
+
+    const menu = renderer.root.findByProps({ 'aria-label': '文字节点菜单' })
+    const labels = menu.findAllByType('button').map(button => button.findAllByType('span')[1]?.children[0])
+    expect(labels).toEqual(expect.arrayContaining(['复制', '补全', '删除']))
+    expect(onChange).not.toHaveBeenCalled()
+
+    const complete = menu.findAllByType('button').find(button => (
+      button.findAllByType('span').some(span => span.children.includes('补全'))
+    ))!
+    act(() => complete.props.onClick())
+
+    expect(renderer.root.findByProps({ 'data-agent-panel': true }).props['data-agent-draft'])
+      .toContain('待补全的文字节点')
   })
 
   it('persists a generated result node before marking its placement as placed', async () => {
@@ -365,7 +523,7 @@ describe('project-level free canvas image generation entry', () => {
     openImageGenerationPanel(renderer)
     const prompt = renderer.root.findByProps({ 'aria-label': '图片描述' })
     await act(async () => {
-      prompt.props.onChange({ target: { value: 'A red apple', selectionStart: 11 } })
+      prompt.props.onInput({ currentTarget: promptEditorWithText('A red apple') })
       await Promise.resolve()
     })
     expect(renderer.root.findByProps({ type: 'submit' }).props.disabled).toBe(false)
@@ -430,7 +588,7 @@ describe('project-level free canvas image generation entry', () => {
     openImageGenerationPanel(renderer)
     const prompt = renderer.root.findByProps({ 'aria-label': '图片描述' })
     await act(async () => {
-      prompt.props.onChange({ target: { value: 'A red apple', selectionStart: 11 } })
+      prompt.props.onInput({ currentTarget: promptEditorWithText('A red apple') })
       await Promise.resolve()
     })
     expect(renderer.root.findByProps({ type: 'submit' }).props.disabled).toBe(false)

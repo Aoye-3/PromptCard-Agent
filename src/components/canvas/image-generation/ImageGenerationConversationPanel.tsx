@@ -1,9 +1,23 @@
 import { Box, History, Image as ImageIcon, Pencil, Plus, ScanLine, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent
+} from 'react'
 import { ImageGenerationComposer } from './ImageGenerationComposer'
 import { ImageGenerationHistoryDialog } from './ImageGenerationHistoryDialog'
 import { ImageGenerationTurnCard } from './ImageGenerationTurnCard'
+import { getImageComposerHeightBounds } from './image-composer-resize'
 import type { ImageGenerationConversationPanelProps } from './types'
+
+const composerKeyboardStep = 16
+
+interface ComposerResizeState {
+  startY: number
+  startHeight: number
+}
 
 export const ImageGenerationConversationPanel = ({
   projectLabel,
@@ -25,7 +39,86 @@ export const ImageGenerationConversationPanel = ({
   onTurnAction
 }: ImageGenerationConversationPanelProps) => {
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [composerHeight, setComposerHeight] = useState<number | null>(null)
+  const [renderedComposerHeight, setRenderedComposerHeight] = useState(
+    getImageComposerHeightBounds(0).min
+  )
+  const [panelHeight, setPanelHeight] = useState(0)
+  const panelRef = useRef<HTMLElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+  const resizeRef = useRef<ComposerResizeState | null>(null)
   const chronologicalTurns = [...turns].sort((left, right) => left.createdAt - right.createdAt)
+  const composerHeightBounds = getImageComposerHeightBounds(panelHeight)
+
+  useEffect(() => {
+    const panel = panelRef.current
+    const composerShell = composerRef.current
+    if (!panel || !composerShell) return
+    const measure = () => {
+      setPanelHeight(panel.getBoundingClientRect().height)
+      setRenderedComposerHeight(composerShell.getBoundingClientRect().height)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(panel)
+    observer.observe(composerShell)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    if (composerHeight === null) return
+    setComposerHeight(current => current === null
+      ? current
+      : clamp(current, composerHeightBounds.min, composerHeightBounds.max))
+  }, [composerHeightBounds.max, composerHeightBounds.min, composerHeight])
+
+  const currentComposerHeight = () => (
+    composerHeight
+    ?? composerRef.current?.getBoundingClientRect().height
+    ?? composerHeightBounds.min
+  )
+
+  const startComposerResize = (event: PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    resizeRef.current = {
+      startY: event.clientY,
+      startHeight: currentComposerHeight()
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    event.preventDefault()
+  }
+
+  const moveComposerResize = (event: PointerEvent<HTMLButtonElement>) => {
+    const state = resizeRef.current
+    if (!state) return
+    setComposerHeight(clamp(
+      state.startHeight - (event.clientY - state.startY),
+      composerHeightBounds.min,
+      composerHeightBounds.max
+    ))
+  }
+
+  const finishComposerResize = (event: PointerEvent<HTMLButtonElement>) => {
+    if (!resizeRef.current) return
+    moveComposerResize(event)
+    resizeRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+  }
+
+  const resizeComposerFromKeyboard = (event: KeyboardEvent<HTMLButtonElement>) => {
+    let nextHeight: number | null = null
+    const current = currentComposerHeight()
+    if (event.key === 'ArrowUp') nextHeight = current + composerKeyboardStep
+    if (event.key === 'ArrowDown') nextHeight = current - composerKeyboardStep
+    if (event.key === 'Home') nextHeight = composerHeightBounds.max
+    if (event.key === 'End') nextHeight = composerHeightBounds.min
+    if (nextHeight === null) return
+    event.preventDefault()
+    setComposerHeight(clamp(nextHeight, composerHeightBounds.min, composerHeightBounds.max))
+  }
 
   const continueConversation = (conversationId: string) => {
     onContinueConversation(conversationId)
@@ -76,7 +169,11 @@ export const ImageGenerationConversationPanel = ({
   ]
 
   return (
-    <section aria-label="图片生成会话" className="flex h-full min-h-0 flex-col bg-white text-[#141413]">
+    <section
+      ref={panelRef}
+      aria-label="图片生成会话"
+      className="flex h-full min-h-0 flex-col bg-white text-[#141413]"
+    >
       <header className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-[#e5e7eb] px-3">
         <div className="flex min-w-0 items-center gap-2">
           <ImageIcon size={14} className="shrink-0 text-[#5e5d59]" aria-hidden="true" />
@@ -151,7 +248,31 @@ export const ImageGenerationConversationPanel = ({
         )}
       </div>
 
-      <ImageGenerationComposer {...composer} />
+      <button
+        type="button"
+        role="separator"
+        aria-label="调整图片生成输入区高度"
+        aria-orientation="horizontal"
+        aria-valuemin={composerHeightBounds.min}
+        aria-valuemax={composerHeightBounds.max}
+        aria-valuenow={Math.round(composerHeight ?? renderedComposerHeight)}
+        className="group flex h-3 shrink-0 cursor-row-resize items-center justify-center border-t border-[#e5e7eb] bg-white text-[#b1b0aa] outline-none transition hover:bg-[#f9fafb] hover:text-[#5e5d59] focus-visible:bg-[#f9fafb] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[#d1d5db]"
+        onPointerDown={startComposerResize}
+        onPointerMove={moveComposerResize}
+        onPointerUp={finishComposerResize}
+        onPointerCancel={finishComposerResize}
+        onKeyDown={resizeComposerFromKeyboard}
+      >
+        <span className="h-0.5 w-10 rounded-full bg-current transition group-hover:w-12" aria-hidden="true" />
+      </button>
+      <div
+        ref={composerRef}
+        data-image-composer-shell
+        className="min-h-0 shrink-0"
+        style={composerHeight === null ? undefined : { height: composerHeight }}
+      >
+        <ImageGenerationComposer {...composer} />
+      </div>
       <ImageGenerationHistoryDialog
         open={historyOpen}
         conversations={conversations}
@@ -166,5 +287,9 @@ export const ImageGenerationConversationPanel = ({
     </section>
   )
 }
+
+const clamp = (value: number, minimum: number, maximum: number) => (
+  Math.min(maximum, Math.max(minimum, value))
+)
 
 export default ImageGenerationConversationPanel

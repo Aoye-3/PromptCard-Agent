@@ -59,6 +59,7 @@ describe('ImageGenerationComposer', () => {
     expect(attachmentStrip.props.className).toContain('min-h-11')
     expect(addButton.props.className).toContain('h-10')
     expect(sendButton.props.className).toContain('h-8')
+    expect(renderer.root.findByProps({ 'data-reference-prompt-editor': true }).props.className).toContain('flex-1')
     expect(renderer.root.findAllByType('span').some(node => node.children.join('') === '参考图 0/10')).toBe(true)
   })
 
@@ -72,6 +73,11 @@ describe('ImageGenerationComposer', () => {
     open(renderer, '选择图片模型')
     act(() => renderer.root.findByProps({ 'aria-label': 'Seedream 5.0 Pro' }).props.onClick())
     open(renderer, '设置比例与分辨率')
+    expect(renderer.root.findAll(node => (
+      typeof node.props.className === 'string'
+      && node.props.className.includes('absolute bottom-')
+      && node.props.className.includes('w-72')
+    ))).toHaveLength(1)
     act(() => renderer.root.findByProps({ 'aria-label': '2K' }).props.onClick())
     act(() => renderer.root.findByProps({ 'aria-label': '16:9' }).props.onClick())
     open(renderer, '更多图片设置')
@@ -148,6 +154,39 @@ describe('ImageGenerationComposer', () => {
     expect(props.onRemoveReference).toHaveBeenCalledWith('reference-one')
   })
 
+  it('previews a reference from its thumbnail body and removes it only from the corner action', () => {
+    const props: ImageGenerationComposerProps = {
+      ...createProps(),
+      references: [{
+        referenceId: 'reference-one',
+        assetId: 'asset-one',
+        label: '产品图',
+        imageUrl: '/one.png',
+        mentioned: false,
+        role: 'reference-image',
+        order: 0
+      }],
+      onRemoveReference: vi.fn()
+    }
+    let renderer!: ReactTestRenderer
+    act(() => { renderer = create(<ImageGenerationComposer {...props} />) })
+
+    open(renderer, '查看图1 产品图')
+
+    const dialog = renderer.root.findByProps({ role: 'dialog' })
+    expect(dialog.props['aria-modal']).toBe(true)
+    expect(renderer.root.findByProps({ alt: '产品图完整预览' }).props.src).toBe('/one.png')
+    expect(props.onRemoveReference).not.toHaveBeenCalled()
+
+    act(() => renderer.root.findByProps({ 'aria-label': '关闭产品图预览' }).props.onClick())
+    expect(renderer.root.findAllByProps({ role: 'dialog' })).toHaveLength(0)
+
+    act(() => renderer.root.findByProps({ 'aria-label': '从参考图列表移除图1 产品图' }).props.onClick({
+      stopPropagation: vi.fn()
+    }))
+    expect(props.onRemoveReference).toHaveBeenCalledWith('reference-one')
+  })
+
   it('keeps custom dimensions in the size popover and submits through Ctrl/Cmd+Enter', () => {
     const props: ImageGenerationComposerProps = {
       ...createProps(),
@@ -193,7 +232,8 @@ describe('ImageGenerationComposer', () => {
     let renderer!: ReactTestRenderer
     act(() => { renderer = create(<ImageGenerationComposer {...props} />) })
 
-    expect(renderer.root.findByProps({ 'aria-label': '图片描述' }).props.value).toContain('@已删除图片')
+    expect(renderer.root.findByProps({ 'aria-label': '图片描述' }).props.contentEditable).toBe(true)
+    expect(renderer.root.findAllByProps({ 'data-reference-token': 'true' })).toHaveLength(1)
     expect(renderer.root.findByProps({ 'aria-label': '生成图片' }).props.disabled).toBe(true)
     expect(renderer.root.findByProps({ role: 'alert' })).toBeTruthy()
   })

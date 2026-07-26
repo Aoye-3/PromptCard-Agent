@@ -283,6 +283,7 @@ const FreeCanvasBuilderInner = ({
   const [activeImageOperationDraft, setActiveImageOperationDraft] = useState<ImageOperationDraft | null>(null)
   const [imageOperationPreparing, setImageOperationPreparing] = useState(false)
   const [activeImageConversationId, setActiveImageConversationId] = useState<string | null>(null)
+  const imageConversationIntentRef = useRef<'auto' | 'new' | 'active'>('auto')
   const [imageConversations, setImageConversations] = useState<ImageGenerationConversationSummary[]>([])
   const [imageConversationNextCursor, setImageConversationNextCursor] = useState<string | null>(null)
   const [imageConversationRuns, setImageConversationRuns] = useState<Record<string, ImageGenerationRun[]>>({})
@@ -374,6 +375,7 @@ const FreeCanvasBuilderInner = ({
       ? mergeById(current, page.conversations)
       : page.conversations)
     setImageConversationNextCursor(page.nextCursor)
+    return page
   }, [])
 
   const loadImageConversationRuns = useCallback(async (
@@ -397,6 +399,7 @@ const FreeCanvasBuilderInner = ({
         : page.runs
     }))
     setImageRunNextCursors(current => ({ ...current, [conversationId]: page.nextCursor }))
+    return page
   }, [])
 
   useEffect(() => {
@@ -408,6 +411,7 @@ const FreeCanvasBuilderInner = ({
 
   useEffect(() => {
     const controller = new AbortController()
+    imageConversationIntentRef.current = 'auto'
     setActiveImageConversationId(null)
     setImageConversations([])
     setImageConversationNextCursor(null)
@@ -426,8 +430,8 @@ const FreeCanvasBuilderInner = ({
     setImageAnnotationTarget(null)
     setImageAnnotationDocuments({})
     setImageComposerDraft(current => createEmptyConversationDraft({
-      connectionId: imageAssignment?.connectionId || current.connectionId,
-      modelId: imageAssignment?.modelId || current.modelId,
+      connectionId: current.connectionId,
+      modelId: current.modelId,
       resolution: current.resolution,
       aspectRatio: current.aspectRatio,
       width: current.width,
@@ -436,9 +440,30 @@ const FreeCanvasBuilderInner = ({
       outputFormat: current.outputFormat,
       watermark: current.watermark
     }))
-    void loadImageConversations(activeProject.id, controller.signal).catch(() => undefined)
+    void (async () => {
+      try {
+        const page = await loadImageConversations(activeProject.id, controller.signal)
+        const latestConversation = page?.conversations[0]
+        if (!latestConversation || controller.signal.aborted || imageConversationIntentRef.current !== 'auto') return
+        await loadImageConversationRuns(activeProject.id, latestConversation.id, controller.signal)
+        if (controller.signal.aborted || imageConversationIntentRef.current !== 'auto') return
+        imageConversationIntentRef.current = 'active'
+        setActiveImageConversationId(latestConversation.id)
+      } catch {
+        // Fall back to the existing empty state when history cannot be restored.
+      }
+    })()
     return () => controller.abort()
-  }, [activeProject.id, imageAssignment?.connectionId, imageAssignment?.modelId, loadImageConversations])
+  }, [activeProject.id, loadImageConversationRuns, loadImageConversations])
+
+  useEffect(() => {
+    if (!imageAssignment) return
+    setImageComposerDraft(current => ({
+      ...current,
+      connectionId: imageAssignment.connectionId,
+      modelId: imageAssignment.modelId
+    }))
+  }, [imageAssignment])
 
   const cardTypes = useMemo(() => [
     { type: 'subject', label: cardTypeLabel('subject') },
@@ -705,6 +730,7 @@ const FreeCanvasBuilderInner = ({
   }, [activeImageConversationId, imageCatalogModels, imageConversationRuns, optimisticImageTurn])
 
   const resetImageConversation = useCallback(() => {
+    imageConversationIntentRef.current = 'new'
     setActiveImageConversationId(null)
     setOptimisticImageTurn(null)
     setImageRegionEditorOpen(false)
@@ -724,12 +750,12 @@ const FreeCanvasBuilderInner = ({
   }, [imageAssignment?.connectionId, imageAssignment?.modelId])
 
   const openImageGeneration = useCallback(() => {
-    resetImageConversation()
     setRightPanelMode('image-generation')
     setRightPanelCollapsed(false)
-  }, [resetImageConversation])
+  }, [])
 
   const continueImageConversation = useCallback((conversationId: string) => {
+    imageConversationIntentRef.current = 'active'
     setActiveImageConversationId(conversationId)
     setOptimisticImageTurn(null)
     setImageComposerDraft(current => createEmptyConversationDraft({
@@ -1106,6 +1132,7 @@ const FreeCanvasBuilderInner = ({
       emitGenerationCanvas(canvasWithPlaceholder)
     }
     if (identity.activateConversation && identity.conversationId) {
+      imageConversationIntentRef.current = 'active'
       setActiveImageConversationId(identity.conversationId)
     }
     if (identity.activateConversation) setImageGenerationBusy(true)

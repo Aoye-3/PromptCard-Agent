@@ -103,6 +103,7 @@ vi.mock('@/storage/storage-service-client', async importOriginal => {
 })
 
 import { CanvasBottomToolbar, FreeCanvasBuilderScreen } from './FreeCanvasBuilderScreen'
+import { ImageGenerationConversationPanel } from './image-generation/ImageGenerationConversationPanel'
 
 const baseProps = {
   quickDrawerOpen: false,
@@ -153,6 +154,31 @@ const configureReadyImageModel = () => {
     providers: [{ providerId: 'volcengine-ark', status: 'ready' }]
   })
 }
+
+const storedImageGenerationRun = (overrides: Record<string, unknown> = {}) => ({
+  id: 'run-latest',
+  projectId: 'project-a',
+  conversationId: 'conversation-latest',
+  connectionId: 'ark-primary',
+  providerId: 'volcengine-ark',
+  modelId: 'seedream-model',
+  state: 'succeeded' as const,
+  requestSnapshot: {
+    mode: 'generate',
+    promptOptimization: 'standard' as const,
+    promptDocument: { version: 1, segments: [{ type: 'text' as const, text: 'Remember this image request' }] },
+    inputAssets: [],
+    regions: [],
+    resolution: '2K',
+    aspectRatio: '1:1',
+    outputFormat: 'png',
+    watermark: false
+  },
+  outputAssetIds: ['asset-latest'],
+  createdAt: 20,
+  finishedAt: 30,
+  ...overrides
+})
 
 const openImageGenerationPanel = (renderer: ReturnType<typeof create>) => {
   const switcher = renderer.root.findByProps({ 'data-free-canvas-panel-switcher': true })
@@ -242,6 +268,91 @@ describe('project-level free canvas image generation entry', () => {
     act(() => imageTab.props.onClick())
     expect(renderer.root.findByProps({ 'data-free-canvas-image-generation-panel': true })).toBeTruthy()
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('resumes the most recently updated image conversation in the main panel', async () => {
+    mocks.getConversations.mockResolvedValue({
+      conversations: [
+        {
+          id: 'conversation-latest', projectId: 'project-a', title: 'Latest image conversation',
+          createdAt: 10, updatedAt: 30, turnCount: 1
+        },
+        {
+          id: 'conversation-older', projectId: 'project-a', title: 'Older image conversation',
+          createdAt: 1, updatedAt: 5, turnCount: 1
+        }
+      ],
+      nextCursor: null
+    })
+    mocks.getConversationRuns.mockResolvedValue({ runs: [storedImageGenerationRun()], nextCursor: null })
+
+    let renderer!: ReturnType<typeof create>
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={createFreeCanvasProject(1)}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={vi.fn()}
+        />
+      )
+    })
+    openImageGenerationPanel(renderer)
+
+    const panel = renderer.root.findByType(ImageGenerationConversationPanel)
+    expect(mocks.getConversationRuns).toHaveBeenCalledWith(expect.objectContaining({
+      projectId: 'project-a',
+      conversationId: 'conversation-latest'
+    }))
+    expect(panel.props.conversationLabel).toBe('Latest image conversation')
+    expect(panel.props.turns).toEqual([
+      expect.objectContaining({ id: 'run-latest', prompt: 'Remember this image request' })
+    ])
+  })
+
+  it('keeps an explicitly new conversation blank when history finishes loading later', async () => {
+    let resolveConversations!: (value: {
+      conversations: Array<Record<string, unknown>>
+      nextCursor: null
+    }) => void
+    mocks.getConversations.mockReturnValue(new Promise(resolve => {
+      resolveConversations = resolve
+    }))
+
+    let renderer!: ReturnType<typeof create>
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={createFreeCanvasProject(1)}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={vi.fn()}
+        />
+      )
+    })
+    openImageGenerationPanel(renderer)
+    act(() => renderer.root.findByType(ImageGenerationConversationPanel).props.onNewConversation())
+
+    await act(async () => {
+      resolveConversations({
+        conversations: [{
+          id: 'conversation-latest', projectId: 'project-a', title: 'Latest image conversation',
+          createdAt: 10, updatedAt: 30, turnCount: 1
+        }],
+        nextCursor: null
+      })
+      await Promise.resolve()
+    })
+
+    const panel = renderer.root.findByType(ImageGenerationConversationPanel)
+    expect(panel.props.turns).toEqual([])
+    expect(mocks.getConversationRuns).not.toHaveBeenCalled()
   })
 
   it('adds an image directly to the Composer when 作为参考 is clicked without opening a workbench', async () => {

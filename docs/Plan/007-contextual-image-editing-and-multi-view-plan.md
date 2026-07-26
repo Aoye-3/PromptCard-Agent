@@ -13,7 +13,7 @@
 
 ## Implementation Ledger
 
-Last implementation update: `2026-07-25`.
+Last implementation update: `2026-07-26`.
 
 Status meanings:
 
@@ -48,7 +48,7 @@ Frontend-first acceptance order requested by the user:
 3. only after the frontend is clean, progressively accept backend catalog, request validation, run snapshots, Storage and Runtime;
 4. do not perform paid live Seedream evaluations without explicit cost authorization; record their absence rather than inferring a pass.
 
-The two attempted full frontend test runs on `2026-07-24` were interrupted externally before completion. They are not recorded as failures and are not recorded as passes. Focused frontend suites and repeated production builds passed before this ledger update.
+The complete frontend Vitest suite passed on `2026-07-26` through `npm.cmd run test:frontend`: four bounded sequential shards completed 106 test files and 634 tests without leaving a Runtime process behind. This supersedes the two interrupted full-suite attempts from `2026-07-24`. Production build, browser E2E, viewport/zoom, focus, accessibility and reload acceptance remain separate gates.
 
 ### Manual frontend acceptance finding: populated canvas becomes blank
 

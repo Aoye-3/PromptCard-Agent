@@ -41,10 +41,12 @@ Before merging implementation work, run:
 
 ```powershell
 npm.cmd run build
-npm.cmd test -- --run
+npm.cmd run test:frontend
 .\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests -q -p no:cacheprovider
 npm.cmd run lint
 ```
+
+`test:frontend` runs the complete Vitest suite as four bounded, sequential shards. Each shard writes its native process output to `.tmp/frontend-tests` before replaying it, which prevents Windows child-process tests from keeping the calling output pipe open. Use `npm.cmd test -- --run <files>` for focused local verification.
 
 For Agent Runtime work, also run:
 

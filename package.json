@@ -20,6 +20,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 30",
     "preview": "vite preview",
     "test": "vitest",
+    "test:frontend": "powershell -ExecutionPolicy Bypass -File scripts/run-frontend-tests.ps1",
     "test:e2e": "playwright test"
   },
   "dependencies": {

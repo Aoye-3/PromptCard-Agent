@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest'
 import { createServer, type Server } from 'node:http'
+import { createConnection } from 'node:net'
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -28,18 +29,74 @@ afterEach(async () => {
 })
 
 async function stopProcessTree(child: ReturnType<typeof spawn>) {
-  if (!child.pid || child.exitCode !== null) return
-  const pid = child.pid
-  await new Promise<void>((resolve) => {
-    const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true })
-    killer.on('error', () => resolve())
-    killer.on('close', () => resolve())
-  })
+  if (!child.pid) return
+  await stopProcessIds([child.pid])
+}
+
+async function stopProcessIds(processIds: number[]) {
+  for (const processId of [...processIds].reverse()) {
+    try {
+      process.kill(processId)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
+    }
+  }
   for (let attempt = 0; attempt < 50; attempt += 1) {
-    if (!(await isProcessRunning(pid))) return
+    const running = await Promise.all(processIds.map(isProcessRunning))
+    if (running.every(value => !value)) return
     await new Promise(resolve => setTimeout(resolve, 100))
   }
-  throw new Error(`Could not stop agent runtime process tree ${pid}`)
+  throw new Error(`Could not stop agent runtime process tree ${processIds.join(', ')}`)
+}
+
+function getListeningProcessId(port: number) {
+  return new Promise<number | null>((resolve, reject) => {
+    const child = spawn('netstat', ['-ano', '-p', 'tcp'], { windowsHide: true })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', chunk => { stdout += chunk.toString() })
+    child.stderr.on('data', chunk => { stderr += chunk.toString() })
+    child.on('error', reject)
+    child.on('close', code => {
+      if (code !== 0) {
+        reject(new Error(`Could not inspect listener on port ${port}: ${stderr}`))
+        return
+      }
+      const match = stdout.split(/\r?\n/).find(line => {
+        const columns = line.trim().split(/\s+/)
+        if (columns.length < 5 || columns[0].toUpperCase() !== 'TCP') return false
+        const localAddress = columns[1]
+        return Number(localAddress.slice(localAddress.lastIndexOf(':') + 1)) === port
+          && columns[3].toUpperCase() === 'LISTENING'
+      })
+      resolve(match ? Number(match.trim().split(/\s+/).at(-1)) : null)
+    })
+  })
+}
+
+async function waitForPortClosed(port: number) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (!(await isPortListening(port))) return
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  throw new Error(`Runtime port ${port} remained reachable after cleanup`)
+}
+
+function isPortListening(port: number) {
+  return new Promise<boolean>((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port })
+    let settled = false
+    const finish = (listening: boolean) => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      resolve(listening)
+    }
+    socket.setTimeout(250)
+    socket.once('connect', () => finish(true))
+    socket.once('error', () => finish(false))
+    socket.once('timeout', () => finish(false))
+  })
 }
 
 function isProcessRunning(pid: number) {
@@ -262,6 +319,7 @@ async function expectScriptSupportsTestParameters() {
 describe('start-dev-with-agent.ps1', () => {
   test('starts a healthy agent runtime without model-key environment variables', async () => {
     const port = await getAvailablePort()
+    let runtimeProcessId: number | null = null
     let stdout = ''
     let stderr = ''
     const credentialFreeEnv = { ...process.env }
@@ -289,10 +347,14 @@ describe('start-dev-with-agent.ps1', () => {
         `http://127.0.0.1:${port}/health`,
         () => `${stdout}\n${stderr}`
       )
+      runtimeProcessId = await getListeningProcessId(port)
+      expect(runtimeProcessId).not.toBeNull()
       await expect(response.json()).resolves.toMatchObject({ status: 'healthy' })
       expect(child.exitCode).toBeNull()
     } finally {
+      if (runtimeProcessId) await stopProcessIds([runtimeProcessId])
       await stopProcessTree(child)
+      await waitForPortClosed(port)
     }
   }, 45_000)
 

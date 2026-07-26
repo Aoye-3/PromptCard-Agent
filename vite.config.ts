@@ -73,6 +73,14 @@ export default defineConfig({
     }
   },
   test: {
+    include: [
+      'src/**/*.test.{ts,tsx}',
+      'scripts/**/*.test.ts',
+      'vite/**/*.test.ts',
+      'text-agent-runtime/src/**/*.test.ts',
+      'src-tauri/**/*.test.ts',
+      'vite.config.test.ts'
+    ],
     exclude: [
       '**/node_modules/**',
       'dist/**',

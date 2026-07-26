@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   createImageGenerationRunId,
   ImageGenerationController,
+  prepareImageGenerationBatch,
   requestImageGeneration,
   type ImageGenerationRequest
 } from './image-generation-client'
@@ -29,6 +30,42 @@ const request = (): ImageGenerationRequest => ({
 })
 
 describe('image generation client', () => {
+  it('prepares every multi-view member before generation and preserves order', async () => {
+    const members = [1, 2, 3].map(index => ({
+      ...request(),
+      runId: `image-run-${String(index).padStart(32, '0')}`
+    }))
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(members.map(member => ({
+      runId: member.runId,
+      state: 'queued'
+    }))), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    const prepared = await prepareImageGenerationBatch(members, fetcher)
+
+    expect(fetcher).toHaveBeenCalledWith(
+      '/agent-api/promptcard/runtime/image-generation-batches/prepare',
+      expect.objectContaining({ method: 'POST', credentials: 'include' })
+    )
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({ members })
+    expect(prepared.map(member => member.runId)).toEqual(members.map(member => member.runId))
+  })
+
+  it('rejects an incomplete or reordered batch response', async () => {
+    const members = [1, 2].map(index => ({
+      ...request(),
+      runId: `image-run-${String(index).padStart(32, '0')}`
+    }))
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      { runId: members[1].runId, state: 'queued' },
+      { runId: members[0].runId, state: 'queued' }
+    ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(prepareImageGenerationBatch(members, fetcher)).rejects.toMatchObject({
+      code: 'invalid_runtime_response',
+      retryable: false
+    })
+  })
+
   it('posts a project conversation request without requiring a canvas node', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       runId: 'image-run-conversation',

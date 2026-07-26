@@ -189,6 +189,69 @@ export const projectRunToTurn = (
   }
 }
 
+export const rebuildPreparedImageGenerationRequest = (
+  run: ImageGenerationRun
+): ImageGenerationRequest | null => {
+  const snapshot = run.requestSnapshot
+  const operation = snapshot.operation
+  if (
+    run.state !== 'queued'
+    || !run.nodeId
+    || !operation
+    || operation.operation !== 'multi-view'
+    || !operation.operationGroupId
+    || !operation.operationItemId
+    || !operation.viewSpec
+    || !['generate', 'edit', 'region-edit'].includes(snapshot.mode)
+    || !['png', 'jpeg'].includes(snapshot.outputFormat)
+  ) return null
+
+  const regions: ImageGenerationRegion[] = []
+  snapshot.regions.forEach(region => {
+    if (
+      region.type === 'point'
+      && typeof region.referenceId === 'string'
+      && typeof region.x === 'number'
+      && typeof region.y === 'number'
+    ) {
+      regions.push({ type: 'point', referenceId: region.referenceId, x: region.x, y: region.y })
+      return
+    }
+    if (
+      region.type === 'bbox'
+      && typeof region.referenceId === 'string'
+      && typeof region.x1 === 'number'
+      && typeof region.y1 === 'number'
+      && typeof region.x2 === 'number'
+      && typeof region.y2 === 'number'
+    ) regions.push({
+        type: 'bbox', referenceId: region.referenceId,
+        x1: region.x1, y1: region.y1, x2: region.x2, y2: region.y2
+      })
+  })
+
+  return {
+    runId: run.id,
+    projectId: run.projectId,
+    nodeId: run.nodeId,
+    connectionId: run.connectionId,
+    modelId: run.modelId,
+    mode: snapshot.mode as ImageGenerationRequest['mode'],
+    promptDocument: clonePromptDocument(snapshot.promptDocument as PromptDocument),
+    inputs: snapshot.inputAssets.map(input => ({ ...input })),
+    regions,
+    resolution: snapshot.resolution,
+    aspectRatio: snapshot.aspectRatio || 'smart',
+    ...(snapshot.aspectRatio === 'custom' && snapshot.width && snapshot.height
+      ? { width: snapshot.width, height: snapshot.height }
+      : {}),
+    outputFormat: snapshot.outputFormat as ImageGenerationRequest['outputFormat'],
+    watermark: snapshot.watermark,
+    promptOptimization: snapshot.promptOptimization,
+    operation: cloneOperationSnapshot(operation)
+  }
+}
+
 export const promptDocumentPlainText = (document: PromptDocument): string => (
   document.segments.map(segment => segment.type === 'text' ? segment.text : `@${segment.label}`).join('')
 )

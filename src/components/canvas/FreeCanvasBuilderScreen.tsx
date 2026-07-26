@@ -116,6 +116,7 @@ import {
   injectCanvasNodesIntoDraft,
   promptDocumentPlainText,
   projectRunToTurn,
+  rebuildPreparedImageGenerationRequest,
   type ImageGenerationComposerDraft,
   type ProjectImageGenerationInput,
   type ProjectImageGenerationWorkflow
@@ -138,7 +139,13 @@ import {
 import { compileImageGeneratorPrompt } from '@/domain/image-generation/prompt-compiler'
 import { getRuntimeErrorPresentation, type ModelAssignment, type ModelCatalogEntry, type ModelConnection } from '@/domain/models/model-management'
 import { modelManagementClient } from '@/services/model-management-client'
-import { createImageGenerationRunId, ImageGenerationClientError, requestImageGeneration } from '@/services/image-generation-client'
+import {
+  createImageGenerationRunId,
+  ImageGenerationClientError,
+  prepareImageGenerationBatch,
+  requestImageGeneration,
+  type ImageGenerationRequest
+} from '@/services/image-generation-client'
 import {
   storageServiceClient,
   type ImageGenerationConversationSummary,
@@ -318,6 +325,8 @@ const FreeCanvasBuilderInner = ({
   const activeProjectIdRef = useRef(activeProject.id)
   const placementProcessingRef = useRef(false)
   const unpersistedPlacementRunIdsRef = useRef(new Set<string>())
+  const activeGenerationRunIdsRef = useRef(new Set<string>())
+  const scheduledGenerationRunIdsRef = useRef(new Set<string>())
   const emitGenerationCanvas = useCallback((next: IFreeCanvasProject) => {
     freeCanvasRef.current = next
     onChangeRef.current(next)
@@ -1102,9 +1111,15 @@ const FreeCanvasBuilderInner = ({
       activateConversation: boolean
       runId?: string
       placeholderPrepared?: boolean
+      preparedRequest?: ImageGenerationRequest
+      resumePrepared?: boolean
     }
   ): Promise<boolean> => {
-    if ((identity.activateConversation && imageGenerationBusy) || !imageGenerationNodeV1 || !imageModelUsable) return false
+    if (
+      (identity.activateConversation && imageGenerationBusy)
+      || !imageGenerationNodeV1
+      || (!identity.resumePrepared && !imageModelUsable)
+    ) return false
     const runId = identity.runId || createImageGenerationRunId()
     const frame = imageGenerationPlaceholderFrame(snapshot)
     const current = freeCanvasRef.current
@@ -1186,13 +1201,15 @@ const FreeCanvasBuilderInner = ({
       }))
       setImageAnnotationDocuments({})
     }
+    if (activeGenerationRunIdsRef.current.has(runId)) return false
+    activeGenerationRunIdsRef.current.add(runId)
     try {
-      const request = buildConversationGenerationRequest(
+      const request = identity.preparedRequest || buildConversationGenerationRequest(
         activeProject.id,
         identity.conversationId || 'image-operation',
         snapshot
       )
-      if (!identity.conversationId) {
+      if (!identity.preparedRequest && !identity.conversationId) {
         delete request.conversationId
         request.nodeId = identity.nodeId || snapshot.operation?.source.nodeId
       }
@@ -1219,6 +1236,7 @@ const FreeCanvasBuilderInner = ({
     } catch (error) {
       if (activeProjectIdRef.current === activeProject.id) {
         const clientError = error instanceof ImageGenerationClientError ? error : null
+        if (identity.resumePrepared && clientError?.code === 'run_already_started') return false
         const errorCode = safeGenerationErrorCode(clientError?.code)
         const failedCanvas = failFreeCanvasImageGeneration(freeCanvasRef.current, runId, errorCode)
         emitGenerationCanvas(failedCanvas)
@@ -1239,11 +1257,52 @@ const FreeCanvasBuilderInner = ({
       }
       return false
     } finally {
+      activeGenerationRunIdsRef.current.delete(runId)
       if (identity.activateConversation && activeProjectIdRef.current === activeProject.id) {
         setImageGenerationBusy(false)
       }
     }
   }, [activeProject.id, emitGenerationCanvas, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversationRuns, loadImageConversations, onPersistCanvas, processPendingImagePlacements, reactFlow, selectedImageModel?.displayName])
+
+  useEffect(() => {
+    const projectId = activeProject.id
+    const recover = async () => {
+      const placeholders = freeCanvasRef.current.nodes.filter(isRunningFreeCanvasImageGeneration)
+      const runs = await Promise.all(placeholders.map(node => {
+        const runId = String(node.meta?.generationRunId || '')
+        return runId
+          ? storageServiceClient.imageGenerationRuns.getById(runId, projectId).catch(() => null)
+          : Promise.resolve(null)
+      }))
+      if (activeProjectIdRef.current !== projectId) return
+      const recoverable = runs.flatMap(run => {
+        if (!run || scheduledGenerationRunIdsRef.current.has(run.id) || activeGenerationRunIdsRef.current.has(run.id)) return []
+        const request = rebuildPreparedImageGenerationRequest(run)
+        return request ? [{ request, snapshot: imageGenerationRequestToDraft(request) }] : []
+      })
+      recoverable.forEach(member => scheduledGenerationRunIdsRef.current.add(member.request.runId!))
+      void scheduleMultiViewMembers(
+        recoverable,
+        member => {
+          const runId = member.request.runId!
+          scheduledGenerationRunIdsRef.current.delete(runId)
+          if (activeProjectIdRef.current !== projectId) return Promise.resolve(false)
+          return executeImageDraft(member.snapshot, {
+            nodeId: member.request.nodeId,
+            activateConversation: false,
+            runId,
+            placeholderPrepared: true,
+            preparedRequest: member.request,
+            resumePrepared: true
+          })
+        },
+        1
+      ).finally(() => {
+        recoverable.forEach(member => scheduledGenerationRunIdsRef.current.delete(member.request.runId!))
+      })
+    }
+    void recover().catch(() => undefined)
+  }, [activeProject.id, executeImageDraft])
 
   const submitImageConversationTurn = useCallback(async () => {
     if (imageGenerationBusy || !imageGenerationNodeV1 || !imageModelUsable) return
@@ -1965,18 +2024,50 @@ const FreeCanvasBuilderInner = ({
       throw new Error('多角度占位节点保存失败，未发起任何模型请求。')
     }
 
+    const requests = members.map(member => {
+      const request = buildConversationGenerationRequest(
+        activeProject.id,
+        `image-operation-${member.runId}`,
+        member.snapshot
+      )
+      delete request.conversationId
+      request.nodeId = draft.source.nodeId
+      return { ...request, runId: member.runId }
+    })
+    try {
+      await prepareImageGenerationBatch(requests)
+    } catch (error) {
+      const errorCode = safeGenerationErrorCode(
+        error instanceof ImageGenerationClientError ? error.code : 'storage_write_failed'
+      )
+      const failedCanvas = members.reduce(
+        (canvas, member) => failFreeCanvasImageGeneration(canvas, member.runId, errorCode),
+        freeCanvasRef.current
+      )
+      emitGenerationCanvas(failedCanvas)
+      await onPersistCanvas?.(failedCanvas).catch(() => false)
+      throw new Error('多角度批量准备失败，未发起任何模型请求。')
+    }
+
     setActiveImageOperationDraft(null)
+    members.forEach(member => scheduledGenerationRunIdsRef.current.add(member.runId))
     void scheduleMultiViewMembers(
       members,
-      member => executeImageDraft(member.snapshot, {
-        nodeId: draft.source.nodeId,
-        activateConversation: false,
-        runId: member.runId,
-        placeholderPrepared: true
-      }),
+      member => {
+        scheduledGenerationRunIdsRef.current.delete(member.runId)
+        if (activeProjectIdRef.current !== activeProject.id) return Promise.resolve(false)
+        return executeImageDraft(member.snapshot, {
+          nodeId: draft.source.nodeId,
+          activateConversation: false,
+          runId: member.runId,
+          placeholderPrepared: true
+        })
+      },
       1
-    )
-  }, [emitGenerationCanvas, executeImageDraft, imageComposerDraft.outputFormat, imageComposerDraft.promptOptimization, imageComposerDraft.watermark, onPersistCanvas, selectedImageConnection, selectedImageModel])
+    ).finally(() => {
+      members.forEach(member => scheduledGenerationRunIdsRef.current.delete(member.runId))
+    })
+  }, [activeProject.id, emitGenerationCanvas, executeImageDraft, imageComposerDraft.outputFormat, imageComposerDraft.promptOptimization, imageComposerDraft.watermark, onPersistCanvas, selectedImageConnection, selectedImageModel])
 
   const nodes = useMemo<FreeCanvasFlowNode[]>(() => freeCanvas.nodes.map(node => ({
     id: node.id,
@@ -4929,6 +5020,33 @@ const createOperationPlaceholder = ({
 const safeGenerationErrorCode = (value: unknown): string => (
   typeof value === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(value) ? value : 'generation_failed'
 )
+
+const imageGenerationRequestToDraft = (
+  request: ImageGenerationRequest
+): ImageGenerationComposerDraft => ({
+  promptDocument: {
+    version: 1,
+    segments: request.promptDocument.segments.map(segment => ({ ...segment }))
+  },
+  workflow: request.mode === 'region-edit'
+    ? 'region-edit'
+    : request.mode === 'edit' ? 'smart-edit' : request.inputs.length > 0 ? 'reference-generate' : 'text-to-image',
+  connectionId: request.connectionId,
+  modelId: request.modelId,
+  resolution: request.resolution,
+  aspectRatio: request.aspectRatio,
+  ...(request.width ? { width: request.width } : {}),
+  ...(request.height ? { height: request.height } : {}),
+  promptOptimization: request.promptOptimization,
+  outputFormat: request.outputFormat,
+  watermark: request.watermark,
+  inputs: request.inputs.map(input => ({
+    ...input,
+    role: input.role || 'reference-image'
+  })),
+  regions: request.regions.map(region => ({ ...region })),
+  operation: request.operation
+})
 
 const nextNodePosition = (reactFlow: ReturnType<typeof useReactFlow<FreeCanvasFlowNode>>, count: number) => (
   reactFlow.screenToFlowPosition({ x: window.innerWidth / 2 + count * 20, y: window.innerHeight / 2 + count * 16 })

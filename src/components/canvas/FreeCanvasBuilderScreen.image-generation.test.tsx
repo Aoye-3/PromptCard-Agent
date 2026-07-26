@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   getRunById: vi.fn(),
   getPendingPlacements: vi.fn(),
   markPlacementPlaced: vi.fn(),
+  prepareGeneration: vi.fn(),
   requestGeneration: vi.fn()
 }))
 
@@ -76,7 +77,11 @@ vi.mock('@/services/model-management-client', () => ({
 }))
 vi.mock('@/services/image-generation-client', async importOriginal => {
   const original = await importOriginal<typeof import('@/services/image-generation-client')>()
-  return { ...original, requestImageGeneration: mocks.requestGeneration }
+  return {
+    ...original,
+    prepareImageGenerationBatch: mocks.prepareGeneration,
+    requestImageGeneration: mocks.requestGeneration
+  }
 })
 vi.mock('@/storage/storage-service-client', async importOriginal => {
   const original = await importOriginal<typeof import('@/storage/storage-service-client')>()
@@ -205,6 +210,10 @@ describe('project-level free canvas image generation entry', () => {
     mocks.getConversationRuns.mockResolvedValue({ runs: [], nextCursor: null })
     mocks.getRunById.mockResolvedValue(null)
     mocks.getPendingPlacements.mockResolvedValue([])
+    mocks.prepareGeneration.mockImplementation(async members => members.map((member: { runId: string }) => ({
+      runId: member.runId,
+      state: 'queued'
+    })))
     mocks.requestGeneration.mockResolvedValue({
       runId: 'image-run-0123456789abcdef0123456789abcdef',
       state: 'succeeded',
@@ -714,6 +723,85 @@ describe('project-level free canvas image generation entry', () => {
     })
   })
 
+  it('persists all multi-view placeholders and prepares all runs before any generation request', async () => {
+    configureReadyImageModel()
+    vi.stubGlobal('HTMLElement', class HTMLElement {})
+    const source = createFreeCanvasImageNodeFromMedia({
+      id: 'node-source',
+      kind: 'imageAsset',
+      title: 'Source',
+      position: { x: 100, y: 120 },
+      width: 320,
+      height: 320,
+      assetId: 'asset-source.png',
+      imageUrl: '/storage-api/assets/asset-source.png',
+      imagePrompt: '',
+      sourceNodeId: null,
+      generatedFromAgent: false,
+      crop: null,
+      text: '',
+      color: '#111827',
+      meta: {}
+    })
+    const canvas = {
+      ...createFreeCanvasProject(1, { nodes: [source] }),
+      selectedNodeId: source.id
+    }
+    const onChange = vi.fn()
+    const onPersistCanvas = vi.fn().mockResolvedValue(true)
+    mocks.prepareGeneration.mockRejectedValue(new Error('storage unavailable'))
+    let renderer!: ReturnType<typeof create>
+
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={onChange}
+          onPersistCanvas={onPersistCanvas}
+        />
+      )
+    })
+    const reactFlow = renderer.root.find(candidate => (
+      typeof candidate.props.onNodeContextMenu === 'function' && Array.isArray(candidate.props.nodes)
+    ))
+    await act(async () => {
+      reactFlow.props.nodes[0].data.onImageCommand(source.id, 'multi-view')
+      await Promise.resolve()
+    })
+    const dialog = renderer.root.findByProps({ 'data-image-operation-workbench': 'multi-view' })
+    await act(async () => {
+      dialog.findByType('textarea').props.onChange({ target: { value: 'Keep the same product identity' } })
+    })
+    const generate = dialog.findByProps({ 'aria-label': 'Generate 3' })
+    await act(async () => {
+      generate.props.onClick()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const persistedGroup = onPersistCanvas.mock.calls[0][0]
+    const placeholders = persistedGroup.nodes.filter((node: { meta: { generationRunId?: string } }) => (
+      Boolean(node.meta.generationRunId)
+    ))
+    expect(placeholders).toHaveLength(3)
+    expect(mocks.prepareGeneration).toHaveBeenCalledWith(expect.arrayContaining(
+      placeholders.map((node: { meta: { generationRunId: string } }) => expect.objectContaining({
+        runId: node.meta.generationRunId
+      }))
+    ))
+    expect(onPersistCanvas.mock.invocationCallOrder[0]).toBeLessThan(mocks.prepareGeneration.mock.invocationCallOrder[0])
+    expect(mocks.requestGeneration).not.toHaveBeenCalled()
+    const failedGroup = onChange.mock.calls[onChange.mock.calls.length - 1][0]
+    expect(failedGroup.nodes.filter((node: { meta: { generationState?: string } }) => (
+      node.meta.generationState === 'failed'
+    ))).toHaveLength(3)
+  })
+
   it('hydrates an existing generation node in place before marking the placement', async () => {
     const runId = 'image-run-0123456789abcdef0123456789abcdef'
     const placeholder = createFreeCanvasImageGenerationPlaceholder({
@@ -763,6 +851,7 @@ describe('project-level free canvas image generation entry', () => {
       meta: { generationState: 'succeeded', generatedResult: true }
     })
     expect(mocks.markPlacementPlaced).toHaveBeenCalledWith(runId, placeholder.id)
+    expect(mocks.requestGeneration).not.toHaveBeenCalled()
   })
 
   it('restores a persisted running node as failed when the stored run failed', async () => {
@@ -807,5 +896,95 @@ describe('project-level free canvas image generation entry', () => {
     })
     expect(reconciledNode.meta).not.toHaveProperty('providerMessage')
     expect(onPersistCanvas).toHaveBeenCalled()
+  })
+
+  it('resumes an authorized queued multi-view member once from its immutable snapshot', async () => {
+    const runId = 'image-run-0123456789abcdef0123456789abcdef'
+    const placeholder = createFreeCanvasImageGenerationPlaceholder({
+      runId,
+      conversationId: `image-operation-${runId}`,
+      prompt: 'front view',
+      position: { x: 100, y: 120 },
+      width: 320,
+      height: 320
+    })
+    const queuedRun = storedImageGenerationRun({
+      id: runId,
+      nodeId: 'node-source',
+      conversationId: undefined,
+      state: 'queued',
+      outputAssetIds: [],
+      requestSnapshot: {
+        mode: 'edit',
+        promptOptimization: 'standard',
+        promptDocument: { version: 1, segments: [{ type: 'text', text: 'front view' }] },
+        inputAssets: [{
+          referenceId: 'source', role: 'source-image', assetId: 'asset-provider',
+          sourceAssetId: 'asset-original', order: 0
+        }],
+        regions: [],
+        resolution: '2K',
+        aspectRatio: '1:1',
+        outputFormat: 'png',
+        watermark: false,
+        operation: {
+          operation: 'multi-view',
+          recipeId: 'multi-view/product-turntable',
+          recipeVersion: '1',
+          source: {
+            nodeId: 'node-source', originalAssetId: 'asset-original',
+            canvasAssetId: 'asset-canvas', providerAssetId: 'asset-provider'
+          },
+          preservationIntents: ['keep identity'],
+          parameters: { view: 'front' },
+          operationGroupId: 'group-1',
+          operationItemId: 'item-1',
+          viewSpec: 'front'
+        }
+      }
+    })
+    mocks.getRunById.mockResolvedValue(queuedRun)
+    mocks.requestGeneration.mockResolvedValue({
+      runId,
+      state: 'succeeded',
+      assetId: 'asset-resumed.png',
+      captureId: 'capture-resumed',
+      contentType: 'image/png',
+      width: 1024,
+      height: 1024
+    })
+    const onChange = vi.fn()
+    const onPersistCanvas = vi.fn().mockResolvedValue(true)
+
+    await act(async () => {
+      create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={createFreeCanvasProject(1, { nodes: [placeholder] })}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={onChange}
+          onPersistCanvas={onPersistCanvas}
+        />
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.requestGeneration).toHaveBeenCalledTimes(1)
+    expect(mocks.requestGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      runId,
+      nodeId: 'node-source',
+      operation: expect.objectContaining({
+        operation: 'multi-view',
+        operationGroupId: 'group-1',
+        viewSpec: 'front'
+      })
+    }))
+    const completedCanvas = onChange.mock.calls[onChange.mock.calls.length - 1][0]
+    expect(completedCanvas.nodes).toHaveLength(1)
+    expect(completedCanvas.nodes[0].id).toBe(placeholder.id)
   })
 })

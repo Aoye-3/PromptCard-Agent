@@ -247,6 +247,12 @@ const RUNTIME_ERROR_PRESENTATIONS: Record<string, RuntimeErrorPresentation> = {
   timeout: { message: '图片生成超时。', action: '稍后重试' },
   service_unavailable: { message: '图片生成服务暂时不可用。', action: '稍后重试' },
   storage_write_failed: { message: '生成结果无法写入本地存储。', action: '检查本地存储' },
+  invalid_operation_context: { message: '图片操作上下文不一致。', action: '重新发起操作' },
+  invalid_operation_source: { message: '图片操作源资产不一致。', action: '重新发起操作' },
+  invalid_operation_mode: { message: '图片操作模式或区域无效。', action: '修改参数' },
+  invalid_operation_group: { message: '多视图操作组无效。', action: '重新发起操作' },
+  run_conflict: { message: '生成任务与已有记录冲突。', action: '重新发起操作' },
+  run_already_started: { message: '生成任务已在其他执行流程中启动。', action: '等待状态更新' },
   generation_failed: DEFAULT_RUNTIME_ERROR
 }
 

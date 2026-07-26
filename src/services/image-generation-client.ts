@@ -47,6 +47,11 @@ export interface ImageGenerationResult {
   height: number
 }
 
+export interface PreparedImageGeneration {
+  runId: string
+  state: 'queued'
+}
+
 export class ImageGenerationClientError extends Error {
   code: string
   action: string
@@ -97,6 +102,51 @@ export const requestImageGeneration = async (
     throw new ImageGenerationClientError('invalid_runtime_response', false)
   }
   return result
+}
+
+export const prepareImageGenerationBatch = async (
+  inputs: ImageGenerationRequest[],
+  fetcher: Fetcher = fetch
+): Promise<PreparedImageGeneration[]> => {
+  if (
+    inputs.length < 1
+    || inputs.length > 11
+    || inputs.some(input => !input.runId || !hasGenerationIdentity(input))
+  ) {
+    throw new ImageGenerationClientError('invalid_input', false)
+  }
+  const members = inputs.map(cloneRequest)
+  const runtimeRequest = createRuntimeHttpClient(fetcher)
+  let payload: unknown
+  try {
+    payload = await runtimeRequest('/agent-api/promptcard/runtime/image-generation-batches/prepare', {
+      method: 'POST',
+      body: JSON.stringify({ members })
+    })
+  } catch (error) {
+    if (!(error instanceof RuntimeHttpError)) {
+      throw new ImageGenerationClientError('service_unavailable', true)
+    }
+    throw new ImageGenerationClientError(
+      safeErrorIdentifier(error.code, 'storage_write_failed'),
+      error.retryable,
+      error.runId
+    )
+  }
+  if (!Array.isArray(payload) || payload.length !== members.length) {
+    throw new ImageGenerationClientError('invalid_runtime_response', false)
+  }
+  return payload.map((candidate, index) => {
+    if (
+      !isRecord(candidate)
+      || candidate.state !== 'queued'
+      || candidate.runId !== members[index].runId
+      || !isLocalIdentifier(candidate.runId)
+    ) {
+      throw new ImageGenerationClientError('invalid_runtime_response', false)
+    }
+    return { runId: candidate.runId, state: 'queued' }
+  })
 }
 
 export type ImageGenerationControllerState =
@@ -159,7 +209,8 @@ export class ImageGenerationController {
 }
 
 export const imageGenerationClient = {
-  generate: requestImageGeneration
+  generate: requestImageGeneration,
+  prepareBatch: prepareImageGenerationBatch
 }
 
 export const createImageGenerationRunId = (): string => {

@@ -5,7 +5,8 @@ import {
   buildConversationGenerationRequest,
   createEmptyConversationDraft,
   injectCanvasNodesIntoDraft,
-  projectRunToTurn
+  projectRunToTurn,
+  rebuildPreparedImageGenerationRequest
 } from './project-conversation'
 
 const textNode = (id: string, text: string): IFreeCanvasTextNode => ({
@@ -137,5 +138,66 @@ describe('project image generation conversations', () => {
       settings: { workflow: 'smart-edit', modelLabel: 'Seedream 5.0 Pro', resolution: '2K', aspectRatio: '16:9' },
       result: { assetId: 'asset-output', imageUrl: '/storage-api/assets/asset-output' }
     })
+  })
+
+  it('rebuilds an authorized queued multi-view request from its immutable snapshot', () => {
+    const run = {
+      id: 'image-run-0123456789abcdef0123456789abcdef',
+      projectId: 'project-1',
+      nodeId: 'node-source',
+      connectionId: 'ark-primary',
+      providerId: 'volcengine-ark',
+      modelId: 'seedream',
+      state: 'queued',
+      requestSnapshot: {
+        mode: 'edit',
+        promptOptimization: 'standard',
+        promptDocument: { version: 1, segments: [{ type: 'text', text: 'front view' }] },
+        inputAssets: [{
+          referenceId: 'source', role: 'source-image', assetId: 'asset-provider',
+          sourceAssetId: 'asset-original', order: 0
+        }],
+        regions: [],
+        resolution: '2K',
+        aspectRatio: '1:1',
+        outputFormat: 'png',
+        watermark: false,
+        operation: {
+          operation: 'multi-view',
+          recipeId: 'multi-view/product-turntable',
+          recipeVersion: '1',
+          source: {
+            nodeId: 'node-source', originalAssetId: 'asset-original',
+            canvasAssetId: 'asset-canvas', providerAssetId: 'asset-provider'
+          },
+          preservationIntents: ['keep identity'],
+          parameters: { view: 'front' },
+          operationGroupId: 'group-1',
+          operationItemId: 'item-1',
+          viewSpec: 'front'
+        }
+      },
+      outputAssetIds: [],
+      createdAt: 10
+    } satisfies ImageGenerationRun
+
+    expect(rebuildPreparedImageGenerationRequest(run)).toEqual({
+      runId: run.id,
+      projectId: 'project-1',
+      nodeId: 'node-source',
+      connectionId: 'ark-primary',
+      modelId: 'seedream',
+      mode: 'edit',
+      promptDocument: { version: 1, segments: [{ type: 'text', text: 'front view' }] },
+      inputs: run.requestSnapshot.inputAssets,
+      regions: [],
+      resolution: '2K',
+      aspectRatio: '1:1',
+      outputFormat: 'png',
+      watermark: false,
+      promptOptimization: 'standard',
+      operation: run.requestSnapshot.operation
+    })
+    expect(rebuildPreparedImageGenerationRequest({ ...run, state: 'running' })).toBeNull()
   })
 })

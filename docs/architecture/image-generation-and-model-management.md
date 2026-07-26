@@ -150,6 +150,20 @@ Attachments have three explicit sources: injection of the current canvas selecti
 
 Composer validation has separate blocking and presentation channels. `blockingRequirements` is authoritative for submit-button enablement and includes empty prompt, readiness, connection, reference, workflow, region, and size checks. `missingRequirements` contains only issues useful inside the Composer. An untouched empty prompt and model-readiness guidance are intentionally quiet in the Composer: the send button remains disabled, while readiness remediation stays in the session header. Invalid custom dimensions, unresolved mentions, missing workflow inputs, and missing regions remain visible near the send action. Runtime validation remains authoritative even when a frontend issue is intentionally not rendered.
 
+## Atomic multi-view preparation and recovery
+
+Multi-view remains a group of independent single-image runs; it is not represented as a Provider-native batch and does not claim exact 3D reconstruction. The browser creates stable group/item/run/view identities and all placeholder nodes first, persists the canvas, and then calls:
+
+```text
+POST /agent-api/promptcard/runtime/image-generation-batches/prepare
+```
+
+The request contains 1-11 complete `ImageGenerationRequest` members. Gateway requires one project, source node, connection, model, operation group, and unique run/item/view identities. Preparation does not read credentials, load Provider state, or invoke a Provider. It delegates to `POST /api/image-generation-runs/batch`, which inserts every queued run in one SQLite transaction. PromptCard Storage remains schema v7; no group table or schema v8 is introduced.
+
+After preparation succeeds, the browser uses the existing single-member `POST /image-generations` boundary under the current concurrency limit. A prepared run is claimable only when its project/node or conversation identity, connection/provider/model identity, immutable request snapshot, and empty output identity match exactly and its state is `queued`. A mismatch returns `run_conflict`; an already running or terminal run returns `run_already_started`. Neither path overwrites the existing record.
+
+On project load, persisted placeholder run IDs are reconciled with Storage. `queued` authorized multi-view runs rebuild the same provider-neutral request from the immutable snapshot and resume sequentially; `running` runs only poll; terminal runs hydrate or fail the existing node in place. Browser-local active and scheduled run-ID sets prevent duplicate recovery. A failed-view retry creates a new run while preserving the original group/view and the historical failed run.
+
 ## Common operational errors
 
 | Code | Meaning / action |
@@ -166,6 +180,9 @@ Composer validation has separate blocking and presentation channels. `blockingRe
 | `image_generation_disabled` | Enable the trusted server rollout flag only after dependencies and a connection are ready. |
 | `input_images_too_large` | Reduce the aggregate bytes of all source/reference images below 300 MB and keep every image at or below 30 MB. |
 | `generation_busy`, `generation_capacity_reached` | Wait for the per-connection or global concurrency slot to become available. |
+| `invalid_operation_context`, `invalid_operation_source`, `invalid_operation_mode`, `invalid_operation_group` | Rebuild the contextual operation from the current source and recipe; rejection occurs before run creation, credentials, and Provider invocation. |
+| `run_conflict` | Do not reuse the run ID; create a new operation attempt. |
+| `run_already_started` | Do not resubmit; poll the existing run to a terminal state. |
 
 ## Adding a second image provider
 

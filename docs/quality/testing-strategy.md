@@ -29,6 +29,7 @@ The current frontend test suite covers several core utilities and stores:
 - project Image Generation conversations, legacy read-only generator normalization, structured `@` references, source/reference roles, size/region/annotation validation, project-scoped lifecycle reconciliation, permanent history UI, and generated-result Media reuse
 - model catalog/connection/assignment contracts, OS keyring storage and transactional legacy migration
 - Seedream prompt/provider mapping, standard/fast optimization, URL/Base64 response handling, multilingual Prompt preservation, sanitized errors, secure result download, input/concurrency limits, and terminal run persistence
+- contextual operation cross-field semantics, all-operation Fake Provider lifecycle/lineage, prepared-run conflict handling, atomic multi-view preparation, and queued interruption recovery
 - PromptCard Storage schema v3→v4→v5 migration, original/derived image import, project conversation/run pagination, placement state machine, output/original/derived strong references, and Runtime-to-Storage SQLite integration
 
 Tests are run through Vitest.
@@ -57,6 +58,23 @@ npm.cmd run agent:check
 ```
 
 The full Runtime Ruff gate currently passes for `app` and `tests`; the image-generation E2E Runtime fixture is checked separately.
+
+On Windows, Runtime and Storage pytest runs that use `tmp_path` must use a unique workspace-local base directory because stale pytest directories may retain restrictive ACLs. Keep the directory on the repository drive:
+
+```powershell
+$baseTemp = Join-Path $PWD ('.tmp\pytest-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
+New-Item -ItemType Directory -Force -Path $baseTemp | Out-Null
+& .\agent-runtime\backend\.venv\Scripts\python.exe -m pytest agent-runtime\backend\tests promptcard_storage\tests -q --basetemp $baseTemp
+```
+
+Use a unique workspace-local Ruff cache for the same reason:
+
+```powershell
+$env:RUFF_CACHE_DIR = Join-Path $PWD ('.tmp\ruff-' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
+& .\agent-runtime\backend\.venv\Scripts\python.exe -m ruff check agent-runtime\backend\app agent-runtime\backend\tests
+```
+
+The Plan 007 backend closure specifically asserts that all queued multi-view runs and all placeholders exist before the first Fake Provider call, batch failure produces zero Provider calls, queued reload resumes once at concurrency 1, running reload never resubmits, and localized output is stored before `succeeded`.
 
 For startup script work, run:
 

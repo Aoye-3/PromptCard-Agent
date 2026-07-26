@@ -8,7 +8,7 @@
 - Scope owner: Free Canvas, Image Generation, Agent Runtime, PromptCard Storage
 - Current reference implementation: Seedream 5.0 Pro
 - Explicit UI freeze: this plan must not change or repurpose the existing right-side `Agent / 图片生成 / Prompt库` structure; `作为参考` is the sole state-level bridge and may append to the existing 图片生成 Composer
-- Staged backend acceptance: `Planned; execution has not started`
+- Staged backend acceptance: `B1/B2/B7 code and Fake Provider closure complete; unified human acceptance pending`
 - Review trigger: before the first implementation task, after any model-catalog contract change, and before enabling multi-view outside development
 
 ## Implementation Ledger
@@ -31,26 +31,39 @@ Status meanings:
 | 5. Reversible local commands | Implemented + targeted verified | Mutation/inverse history covers duplicate, delete, reorder and flip without replacing full project state. |
 | 6. Visible image input resolver | Implemented + targeted verified | Crop, flip and annotations resolve to a persistent provider derivative when required. Pixel-fixture expansion remains. |
 | 7. Shared operation workbench | Implemented + targeted verified | Reference, effect, region, erase, outpaint, text, enhance and subject configurations submit only from explicit Generate. |
-| 8. Explicit durable recipe snapshots | Implemented + targeted verified; backend acceptance pending | Provider-neutral operation snapshots cross the browser/Runtime/Storage request boundary. |
+| 8. Explicit durable recipe snapshots | Implemented + backend verified | Provider-neutral operation snapshots cross the browser/Runtime/Storage boundary and inconsistent context/source/mode/group requests are rejected before credentials or Provider access. |
 | 9. Minimum creative lineage | Implemented + targeted verified | Source identities, recipe/version, preservation intent and optional group/item/view are immutable run metadata; no schema-v8 table added. |
 | 10. Multi-view workbench | Implemented; frontend acceptance pending | Exact visible request count, 3×3 discrete camera positions, supplemental 3/4/rear views, the `正视 / 左视 / 俯视` model-three-view shortcut, focus behavior and 3D limitation have component coverage; browser E2E remains. |
-| 11. Multi-view persistence/scheduling | Implemented + targeted verified; backend acceptance pending | N stable placeholders are persisted before N independent requests; scheduler has bounded-concurrency and partial-failure tests. |
-| 12. Group recovery/presentation | Implemented; frontend acceptance pending | Derived group panel, per-member states, single-view retry and use-as-reference exist; reload/project-switch E2E remains. |
+| 11. Multi-view persistence/scheduling | Implemented + backend verified | N stable placeholders are saved, then N queued runs are created atomically through batch prepare before the first independent Provider request. |
+| 12. Group recovery/presentation | Implemented + targeted verified; final human acceptance pending | Queued authorized members rebuild the exact request from immutable snapshots at concurrency 1; running members only poll; active/scheduled run IDs prevent duplicate browser submission. |
 | 13. Visible export | Implemented; frontend acceptance pending | Copy/download rasterize crop, flip and annotations without creating an asset; original download remains separate. Clipboard/browser-error E2E remains. |
 | 14. Subject extraction | Implemented experimental; evaluation pending | Executable solid-background redraw workbench; never described as transparent alpha extraction. |
 | 15. Text edit | Implemented experimental; evaluation pending | Executable region-guided workbench with exact replacement instruction; CJK/Latin/layout live fixtures remain unrun. |
 | 16. Quality enhancement/readiness | Implemented experimental; evaluation pending | Executable generative redraw workbench; explicitly not native pixel-preserving upscale. |
 
-Frontend-first acceptance order requested by the user:
+Backend-complete-then-human-acceptance order requested by the user:
 
-1. finish uninterrupted frontend unit/component suite;
-2. run production build, lint, browser E2E, viewport/zoom, focus and right-workspace-freeze checks;
-3. only after the frontend is clean, progressively accept backend catalog, request validation, run snapshots, Storage and Runtime;
+1. keep the completed frontend behavior stable while closing B1, B2 and B7 in code and Fake Provider tests;
+2. complete Runtime, Storage, frontend, build and static verification before asking for manual acceptance;
+3. perform one unified human acceptance after the backend closure instead of stopping between implementation gates;
 4. do not perform paid live Seedream evaluations without explicit cost authorization; record their absence rather than inferring a pass.
 
-The complete frontend Vitest suite passed on `2026-07-26` through `npm.cmd run test:frontend`: four bounded sequential shards completed 106 test files and 634 tests without leaving a Runtime process behind. This supersedes the two interrupted full-suite attempts from `2026-07-24`. Production build, browser E2E, viewport/zoom, focus, accessibility and reload acceptance remain separate gates.
+The complete frontend Vitest suite passed on `2026-07-26` through `npm.cmd run test:frontend`: four bounded sequential shards completed 106 test files and 639 tests without leaving a Runtime process behind. This supersedes the two interrupted full-suite attempts from `2026-07-24`. Production build, browser E2E, viewport/zoom, focus, accessibility and reload acceptance remain separate gates.
 
 The canonical human browser procedure is maintained in [Manual Frontend Acceptance](../quality/manual-frontend-acceptance.md). Complete its F1-F7 gates and retain the required evidence before changing any `Implemented; frontend acceptance pending` ledger entry to accepted. Paid live-provider evaluation remains a separate explicitly authorized gate.
+
+### Backend closure result (2026-07-26)
+
+The code/Fake Provider completion standard for this implementation round is met:
+
+- B1 uses one shared operation semantic validator for single generation and batch preparation. It rejects inconsistent node/conversation context, source/input lineage, operation mode/region, recipe namespace, and multi-view group fields before run creation.
+- Storage exposes `POST /api/image-generation-runs/batch` and creates 1-11 queued runs in one SQLite transaction without changing schema v7.
+- Gateway exposes `POST /agent-api/promptcard/runtime/image-generation-batches/prepare`. It validates one complete multi-view group, preserves member order, and persists all runs without reading credentials or invoking a Provider.
+- `POST /image-generations` remains compatible. An already prepared run executes only when identity and immutable snapshot match exactly and state is still `queued`; conflicts use `run_conflict`, and duplicate starts use `run_already_started` without overwriting the existing run.
+- The frontend saves all placeholders before batch prepare, starts independent members only after prepare succeeds, safely fails every placeholder when prepare fails, and resumes authorized queued members from immutable snapshots after interruption.
+- Fake Provider coverage completes reference generation, effect render, global edit, outpaint, point/bbox region redraw, erase, text edit, upscale, subject extraction, and multi-view while proving result localization precedes terminal success and lineage remains intact.
+
+No paid Seedream request was made. B3-B6 and B8-B9 live quality, cost, quota, and regional evidence remain deferred to the unified manual acceptance and separate cost authorization.
 
 ### Manual frontend acceptance finding: populated canvas becomes blank
 

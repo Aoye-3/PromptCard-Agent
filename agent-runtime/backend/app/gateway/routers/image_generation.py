@@ -180,6 +180,7 @@ async def generate_image(
                 "retryable": False,
             },
         )
+    _validate_operation_semantics(body)
     command = _command(body)
     response_error: HTTPException | None = None
     try:
@@ -197,6 +198,67 @@ async def generate_image(
     if response_error is not None:
         raise response_error from None
     return _response(result)
+
+
+def _validate_operation_semantics(body: ImageGenerationBody) -> None:
+    operation = body.operation
+    if operation is None:
+        return
+
+    if (
+        body.node_id is None
+        or body.conversation_id is not None
+        or operation.source.node_id != body.node_id
+    ):
+        _raise_operation_error("invalid_operation_context")
+
+    matching_inputs = [
+        item
+        for item in body.inputs
+        if item.asset_id == operation.source.provider_asset_id
+    ]
+    expected_role = "reference-image" if operation.operation == "reference-generate" else "source-image"
+    if (
+        len(matching_inputs) != 1
+        or matching_inputs[0].role != expected_role
+        or matching_inputs[0].source_asset_id != operation.source.original_asset_id
+    ):
+        _raise_operation_error("invalid_operation_source")
+
+    region_operations = {"region-redraw", "erase", "text-edit"}
+    expected_mode = (
+        "generate"
+        if operation.operation == "reference-generate"
+        else "region-edit" if operation.operation in region_operations else "edit"
+    )
+    if (
+        body.mode != expected_mode
+        or not operation.recipe_id.startswith(f"{operation.operation}/")
+        or (operation.operation in region_operations) != bool(body.regions)
+    ):
+        _raise_operation_error("invalid_operation_mode")
+
+    group_values = (
+        operation.operation_group_id,
+        operation.operation_item_id,
+        operation.view_spec,
+    )
+    if operation.operation == "multi-view":
+        if not all(group_values):
+            _raise_operation_error("invalid_operation_group")
+    elif any(value is not None for value in group_values):
+        _raise_operation_error("invalid_operation_group")
+
+
+def _raise_operation_error(code: str) -> None:
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "code": code,
+            "message": "Image operation request is inconsistent",
+            "retryable": False,
+        },
+    )
 
 
 def _command(body: ImageGenerationBody) -> GenerationCommand:

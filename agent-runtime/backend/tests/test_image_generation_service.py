@@ -1046,11 +1046,11 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
             "watermark": False,
             "promptOptimization": "fast",
             "operation": {
-                "operation": "effect-render",
-                "recipeId": "effect-render/product-sketch",
+                "operation": "region-redraw",
+                "recipeId": "region-redraw/product-sketch",
                 "recipeVersion": "1",
                 "source": {
-                    "nodeId": "node-source",
+                    "nodeId": "node-1",
                     "originalAssetId": "asset-original.heic",
                     "canvasAssetId": "asset-canvas.png",
                     "providerAssetId": "asset-input.png",
@@ -1090,17 +1090,120 @@ def test_router_maps_camel_case_request_and_returns_only_local_result(monkeypatc
     assert received[0].inputs[0].role == "source-image"
     assert received[0].inputs[0].source_asset_id == "asset-original.heic"
     assert received[0].operation_snapshot == {
-        "operation": "effect-render",
-        "recipeId": "effect-render/product-sketch",
+        "operation": "region-redraw",
+        "recipeId": "region-redraw/product-sketch",
         "recipeVersion": "1",
         "source": {
-            "nodeId": "node-source",
+            "nodeId": "node-1",
             "originalAssetId": "asset-original.heic",
             "canvasAssetId": "asset-canvas.png",
             "providerAssetId": "asset-input.png",
         },
         "preservationIntents": ["keep silhouette", "keep material"],
         "parameters": {"preset": "product-sketch", "referenceOrder": ["source"]},
+    }
+
+
+def valid_contextual_operation_payload() -> dict[str, Any]:
+    return {
+        "runId": "image-run-0123456789abcdef0123456789abcdef",
+        "projectId": "project-1",
+        "nodeId": "node-source",
+        "connectionId": "connection-1",
+        "modelId": "doubao-seedream-5-0-pro-260628",
+        "mode": "edit",
+        "promptDocument": {"segments": [{"type": "text", "text": "render"}]},
+        "inputs": [{
+            "referenceId": "subject",
+            "assetId": "asset-provider.png",
+            "sourceAssetId": "asset-original.png",
+            "role": "source-image",
+            "order": 0,
+        }],
+        "regions": [],
+        "resolution": "1K",
+        "aspectRatio": "smart",
+        "outputFormat": "png",
+        "operation": {
+            "operation": "effect-render",
+            "recipeId": "effect-render/product-sketch",
+            "recipeVersion": "1",
+            "source": {
+                "nodeId": "node-source",
+                "originalAssetId": "asset-original.png",
+                "canvasAssetId": "asset-canvas.png",
+                "providerAssetId": "asset-provider.png",
+            },
+            "preservationIntents": ["keep silhouette"],
+            "parameters": {"preset": "product-sketch"},
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("invalid_kind", "expected_code"),
+    [
+        ("conversation", "invalid_operation_context"),
+        ("source_node", "invalid_operation_context"),
+        ("source_asset", "invalid_operation_source"),
+        ("mode", "invalid_operation_mode"),
+        ("recipe", "invalid_operation_mode"),
+        ("missing_region", "invalid_operation_mode"),
+        ("unexpected_region", "invalid_operation_mode"),
+        ("incomplete_group", "invalid_operation_group"),
+    ],
+)
+def test_router_rejects_invalid_operation_semantics_before_service(
+    monkeypatch,
+    invalid_kind: str,
+    expected_code: str,
+) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
+
+    class UncalledService:
+        def generate(self, _generation_command: GenerationCommand) -> GenerationOutcome:
+            raise AssertionError("Invalid operation reached the generation service")
+
+    payload = valid_contextual_operation_payload()
+    operation = payload["operation"]
+    assert isinstance(operation, dict)
+    if invalid_kind == "conversation":
+        payload.pop("nodeId")
+        payload["conversationId"] = "conversation-1"
+    elif invalid_kind == "source_node":
+        operation["source"]["nodeId"] = "other-node"
+    elif invalid_kind == "source_asset":
+        operation["source"]["providerAssetId"] = "other-provider.png"
+    elif invalid_kind == "mode":
+        payload["mode"] = "region-edit"
+    elif invalid_kind == "recipe":
+        operation["recipeId"] = "outpaint/product-sketch"
+    elif invalid_kind == "missing_region":
+        operation["operation"] = "region-redraw"
+        operation["recipeId"] = "region-redraw/default"
+        payload["mode"] = "region-edit"
+    elif invalid_kind == "unexpected_region":
+        payload["regions"] = [{"type": "point", "referenceId": "subject", "x": 10, "y": 20}]
+    elif invalid_kind == "incomplete_group":
+        operation["operation"] = "multi-view"
+        operation["recipeId"] = "multi-view/default"
+        operation["operationGroupId"] = "group-1"
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: UncalledService()
+    response = TestClient(app).post("/api/promptcard/runtime/image-generations", json=payload)
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": {
+            "code": expected_code,
+            "message": "Image operation request is inconsistent",
+            "retryable": False,
+        }
     }
 
 

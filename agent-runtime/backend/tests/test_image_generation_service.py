@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
+import json
 import logging
 import threading
 import traceback
@@ -70,8 +72,20 @@ class FakeStorage:
 
     def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._record("create_run", payload)
+        if payload["id"] in self.runs:
+            raise StorageGatewayError(status_code=409)
         created = {**payload, "state": "queued"}
         self.runs[payload["id"]] = created
+        return created
+
+    def create_runs(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self._record("create_runs", payloads)
+        if len({payload["id"] for payload in payloads}) != len(payloads):
+            raise StorageGatewayError(status_code=409)
+        if any(payload["id"] in self.runs for payload in payloads):
+            raise StorageGatewayError(status_code=409)
+        created = [{**payload, "state": "queued"} for payload in payloads]
+        self.runs.update({item["id"]: item for item in created})
         return created
 
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
@@ -209,6 +223,110 @@ def test_queued_run_preserves_product_operation_snapshot() -> None:
     queued = _queued_run(replace(command("run-operation"), operation_snapshot=snapshot))
 
     assert queued["requestSnapshot"]["operation"] == snapshot
+
+
+def test_prepare_batch_persists_all_runs_without_credentials_or_provider() -> None:
+    connections = FakeConnections()
+    service, storage, provider, _fetcher = make_service(connections=connections)
+    commands = [replace(command(f"run-batch-{index}"), operation_snapshot={"operation": "multi-view"}) for index in range(3)]
+
+    result = service.prepare_batch(commands)
+
+    assert result == [
+        {"runId": "run-batch-0", "state": "queued"},
+        {"runId": "run-batch-1", "state": "queued"},
+        {"runId": "run-batch-2", "state": "queued"},
+    ]
+    assert [operation for operation, _payload in storage.operations] == ["create_runs"]
+    assert list(storage.runs) == ["run-batch-0", "run-batch-1", "run-batch-2"]
+    assert connections.metadata_reads == 0
+    assert connections.credential_reads == 0
+    assert provider.requests == []
+
+
+def test_prepare_batch_storage_failure_is_sanitized_and_does_not_call_provider() -> None:
+    class BatchFailureStorage(FakeStorage):
+        def create_runs(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            raise OSError("Authorization: Bearer raw-batch-secret")
+
+    connections = FakeConnections()
+    provider = FakeProvider()
+    service, _, _, _ = make_service(storage=BatchFailureStorage(), connections=connections, provider=provider)
+
+    with pytest.raises(GenerationError) as error:
+        service.prepare_batch([command("run-batch-failure")])
+
+    assert error.value.code == "storage_write_failed"
+    assert error.value.__context__ is None
+    assert "raw-batch-secret" not in "".join(traceback.format_exception(error.value))
+    assert connections.credential_reads == 0
+    assert provider.requests == []
+
+
+def test_prepared_run_executes_only_when_immutable_snapshot_matches() -> None:
+    connections = FakeConnections()
+    service, storage, provider, _fetcher = make_service(connections=connections)
+    prepared = command("run-prepared")
+    storage.create_runs([_queued_run(prepared)])
+    storage.operations.clear()
+
+    outcome = service.generate(prepared)
+
+    assert outcome.state == "succeeded"
+    assert provider.requests
+    assert connections.credential_reads == 1
+    assert storage.operations[0][0] == "create_run"
+    assert storage.operations[1] == ("get_run", "run-prepared")
+
+
+@pytest.mark.parametrize(("mutate", "expected_code"), [("snapshot", "run_conflict"), ("state", "run_already_started")])
+def test_prepared_run_rejects_conflict_or_duplicate_start_before_credentials_and_provider(
+    mutate: str,
+    expected_code: str,
+) -> None:
+    connections = FakeConnections()
+    service, storage, provider, _fetcher = make_service(connections=connections)
+    prepared = command("run-prepared-conflict")
+    storage.create_runs([_queued_run(prepared)])
+    storage.operations.clear()
+    request = prepared
+    if mutate == "snapshot":
+        request = replace(prepared, resolution="1K")
+    else:
+        storage.runs[prepared.run_id]["state"] = "running"
+
+    with pytest.raises(GenerationError) as error:
+        service.generate(request)
+
+    assert error.value.code == expected_code
+    assert error.value.retryable is False
+    assert provider.requests == []
+    assert connections.credential_reads == 0
+    assert storage.runs[prepared.run_id]["state"] == ("running" if mutate == "state" else "queued")
+
+
+def test_prepared_run_start_race_does_not_overwrite_running_run() -> None:
+    class StartRaceStorage(FakeStorage):
+        def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+            if patch == {"state": "running"}:
+                self.runs[run_id]["state"] = "running"
+                raise StorageGatewayError(status_code=400)
+            return super().update_run(run_id, patch)
+
+    storage = StartRaceStorage()
+    connections = FakeConnections()
+    provider = FakeProvider()
+    service, _, _, _ = make_service(storage=storage, connections=connections, provider=provider)
+    prepared = command("run-prepared-race")
+    storage.create_runs([_queued_run(prepared)])
+
+    with pytest.raises(GenerationError) as error:
+        service.generate(prepared)
+
+    assert error.value.code == "run_already_started"
+    assert storage.runs[prepared.run_id]["state"] == "running"
+    assert connections.credential_reads == 0
+    assert provider.requests == []
 
 
 def make_service(
@@ -518,6 +636,24 @@ def test_storage_client_preserves_not_found_status_without_retaining_response_bo
     error = exc_info.value
     assert error.status_code == 404
     assert raw_storage_body not in "".join(traceback.format_exception(error))
+    client.close()
+
+
+def test_storage_client_posts_batch_and_preserves_order() -> None:
+    captured: list[dict[str, Any]] = []
+
+    def storage_handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/image-generation-runs/batch"
+        captured.append(copy.deepcopy(json.loads(request.content)))
+        return httpx.Response(200, json={"runs": [{"id": "run-1"}, {"id": "run-2"}]})
+
+    client = httpx.Client(base_url="http://storage.test", transport=httpx.MockTransport(storage_handler))
+    storage = PromptCardStorageClient(client=client)
+
+    result = storage.create_runs([{"id": "run-1"}, {"id": "run-2"}])
+
+    assert result == [{"id": "run-1"}, {"id": "run-2"}]
+    assert captured == [{"runs": [{"id": "run-1"}, {"id": "run-2"}]}]
     client.close()
 
 
@@ -1138,6 +1274,111 @@ def valid_contextual_operation_payload() -> dict[str, Any]:
             "parameters": {"preset": "product-sketch"},
         },
     }
+
+
+def valid_multi_view_payload(index: int = 0) -> dict[str, Any]:
+    payload = copy.deepcopy(valid_contextual_operation_payload())
+    payload["runId"] = f"image-run-{index + 1:032x}"
+    operation = payload["operation"]
+    assert isinstance(operation, dict)
+    operation.update({
+        "operation": "multi-view",
+        "recipeId": "multi-view/product-turntable",
+        "operationGroupId": "group-1",
+        "operationItemId": f"item-{index + 1}",
+        "viewSpec": f"view-{index + 1}",
+    })
+    return payload
+
+
+def test_router_prepares_multi_view_batch_in_request_order(monkeypatch) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
+    received: list[GenerationCommand] = []
+
+    class EndpointService:
+        def prepare_batch(self, commands: list[GenerationCommand]) -> list[dict[str, str]]:
+            received.extend(commands)
+            return [{"runId": command.run_id, "state": "queued"} for command in commands]
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: EndpointService()
+    response = TestClient(app).post(
+        "/api/promptcard/runtime/image-generation-batches/prepare",
+        json={"members": [valid_multi_view_payload(index) for index in range(3)]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {"runId": f"image-run-{index + 1:032x}", "state": "queued"}
+        for index in range(3)
+    ]
+    assert [command.run_id for command in received] == [f"image-run-{index + 1:032x}" for index in range(3)]
+
+
+@pytest.mark.parametrize("code", ["run_conflict", "run_already_started"])
+def test_router_returns_conflict_for_duplicate_or_conflicting_run(monkeypatch, code: str) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
+
+    class ConflictService:
+        def generate(self, generation_command: GenerationCommand) -> GenerationOutcome:
+            raise GenerationError(code, "raw upstream detail", False, generation_command.run_id)
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: ConflictService()
+    response = TestClient(app).post(
+        "/api/promptcard/runtime/image-generations",
+        json=valid_contextual_operation_payload(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == code
+    assert "raw upstream detail" not in response.text
+
+
+@pytest.mark.parametrize("invalid_kind", ["mixed_group", "duplicate_run", "duplicate_item", "duplicate_view", "mixed_project"])
+def test_router_rejects_invalid_multi_view_batch_before_service(monkeypatch, invalid_kind: str) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
+
+    class UncalledService:
+        def prepare_batch(self, _commands: list[GenerationCommand]) -> list[dict[str, str]]:
+            raise AssertionError("Invalid batch reached the service")
+
+    members = [valid_multi_view_payload(index) for index in range(2)]
+    first_operation = members[0]["operation"]
+    second_operation = members[1]["operation"]
+    assert isinstance(first_operation, dict) and isinstance(second_operation, dict)
+    if invalid_kind == "mixed_group":
+        second_operation["operationGroupId"] = "group-2"
+    elif invalid_kind == "duplicate_run":
+        members[1]["runId"] = members[0]["runId"]
+    elif invalid_kind == "duplicate_item":
+        second_operation["operationItemId"] = first_operation["operationItemId"]
+    elif invalid_kind == "duplicate_view":
+        second_operation["viewSpec"] = first_operation["viewSpec"]
+    else:
+        members[1]["projectId"] = "project-2"
+
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: UncalledService()
+    response = TestClient(app).post(
+        "/api/promptcard/runtime/image-generation-batches/prepare",
+        json={"members": members},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "invalid_operation_group"
 
 
 @pytest.mark.parametrize(

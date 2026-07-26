@@ -166,6 +166,17 @@ class ImageGenerationResponse(BaseModel):
     height: int
 
 
+class ImageGenerationBatchPrepareBody(RequestModel):
+    members: list[ImageGenerationBody] = Field(min_length=1, max_length=11)
+
+
+class PreparedImageGenerationResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
+    run_id: str = Field(alias="runId")
+    state: Literal["queued"]
+
+
 @router.post("/image-generations", response_model=ImageGenerationResponse)
 async def generate_image(
     body: ImageGenerationBody,
@@ -198,6 +209,39 @@ async def generate_image(
     if response_error is not None:
         raise response_error from None
     return _response(result)
+
+
+@router.post(
+    "/image-generation-batches/prepare",
+    response_model=list[PreparedImageGenerationResponse],
+)
+async def prepare_image_generation_batch(
+    body: ImageGenerationBatchPrepareBody,
+    service: ImageGenerationService = Depends(get_image_generation_service),
+) -> list[PreparedImageGenerationResponse]:
+    if not _image_generation_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "image_generation_disabled",
+                "message": "Image generation is disabled by the server rollout gate",
+                "retryable": False,
+            },
+        )
+    _validate_batch_semantics(body.members)
+    try:
+        prepared = await run_in_threadpool(service.prepare_batch, [_command(member) for member in body.members])
+    except GenerationError as error:
+        raise HTTPException(
+            status_code=_status_code(error),
+            detail={
+                "code": error.code,
+                "message": _safe_error_message(error.code),
+                "retryable": error.retryable,
+                "runId": error.run_id,
+            },
+        ) from None
+    return [PreparedImageGenerationResponse.model_validate(item) for item in prepared]
 
 
 def _validate_operation_semantics(body: ImageGenerationBody) -> None:
@@ -247,6 +291,42 @@ def _validate_operation_semantics(body: ImageGenerationBody) -> None:
         if not all(group_values):
             _raise_operation_error("invalid_operation_group")
     elif any(value is not None for value in group_values):
+        _raise_operation_error("invalid_operation_group")
+
+
+def _validate_batch_semantics(members: list[ImageGenerationBody]) -> None:
+    for member in members:
+        _validate_operation_semantics(member)
+        if member.run_id is None or member.operation is None or member.operation.operation != "multi-view":
+            _raise_operation_error("invalid_operation_group")
+
+    first = members[0]
+    first_operation = first.operation
+    assert first_operation is not None
+    identity = (
+        first.project_id,
+        first.node_id,
+        first.connection_id,
+        first.model_id,
+        first_operation.operation_group_id,
+    )
+    if any(
+        member.operation is None
+        or (
+            member.project_id,
+            member.node_id,
+            member.connection_id,
+            member.model_id,
+            member.operation.operation_group_id,
+        ) != identity
+        for member in members[1:]
+    ):
+        _raise_operation_error("invalid_operation_group")
+
+    run_ids = [member.run_id for member in members]
+    item_ids = [member.operation.operation_item_id for member in members if member.operation is not None]
+    view_specs = [member.operation.view_spec for member in members if member.operation is not None]
+    if any(len(values) != len(set(values)) for values in (run_ids, item_ids, view_specs)):
         _raise_operation_error("invalid_operation_group")
 
 
@@ -325,6 +405,8 @@ def _status_code(error: GenerationError) -> int:
         return 404
     if error.code in {"generation_busy", "generation_capacity_reached", "rate_limited"}:
         return 429
+    if error.code in {"run_conflict", "run_already_started"}:
+        return 409
     if error.retryable:
         return 503
     return 422
@@ -364,6 +446,9 @@ def _safe_error_message(code: str) -> str:
         "unsupported_prompt_optimization": "The selected prompt optimization mode is unsupported",
         "invalid_image_role": "A reference image role is invalid",
         "too_many_source_images": "Only one source image is allowed",
+        "run_conflict": "The image generation run conflicts with an existing run",
+        "run_already_started": "The image generation run has already started",
+        "invalid_operation_group": "The image operation group is invalid",
     }.get(code, "Image generation failed")
 
 

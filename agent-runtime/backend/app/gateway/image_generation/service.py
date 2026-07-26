@@ -130,6 +130,8 @@ class GenerationOutcome:
 class ImageGenerationStorage(Protocol):
     def create_run(self, payload: dict[str, Any]) -> dict[str, Any]: ...
 
+    def create_runs(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]: ...
+
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]: ...
 
     def get_run(self, run_id: str, project_id: str) -> dict[str, Any]: ...
@@ -188,33 +190,7 @@ class ImageGenerationService:
             close_fetcher()
 
     def generate(self, command: GenerationCommand) -> GenerationOutcome:
-        create_failure: GenerationError | None = None
-        try:
-            self._storage.create_run(_queued_run(command))
-        except StorageGatewayError as error:
-            if command.conversation_id is not None and error.status_code == 404:
-                create_failure = GenerationError(
-                    "image_generation_conversation_not_found",
-                    "The image generation conversation is unavailable",
-                    False,
-                    command.run_id,
-                )
-            else:
-                create_failure = GenerationError(
-                    "storage_write_failed",
-                    "Image generation run could not be created",
-                    True,
-                    command.run_id,
-                )
-        except Exception:
-            create_failure = GenerationError(
-                "storage_write_failed",
-                "Image generation run could not be created",
-                True,
-                command.run_id,
-            )
-        if create_failure is not None:
-            raise create_failure from None
+        self._ensure_queued_run(command)
 
         self._start_run(command.run_id, command.project_id)
 
@@ -315,10 +291,100 @@ class ImageGenerationService:
             raise GenerationError("generation_failed", "Image generation failed", False, command.run_id)
         return outcome
 
+    def prepare_batch(self, commands: list[GenerationCommand]) -> list[dict[str, str]]:
+        if not commands:
+            raise GenerationError("invalid_operation_group", "Image generation batch is empty", False, "")
+        write_failed = False
+        try:
+            self._storage.create_runs([_queued_run(command) for command in commands])
+        except Exception:
+            write_failed = True
+        if write_failed:
+            raise GenerationError(
+                "storage_write_failed",
+                "Image generation batch could not be created",
+                True,
+                commands[0].run_id,
+            ) from None
+        return [{"runId": command.run_id, "state": "queued"} for command in commands]
+
+    def _ensure_queued_run(self, command: GenerationCommand) -> None:
+        expected = _queued_run(command)
+        create_failure: GenerationError | None = None
+        duplicate = False
+        try:
+            self._storage.create_run(expected)
+            return
+        except StorageGatewayError as error:
+            if error.status_code == 409:
+                duplicate = True
+            elif command.conversation_id is not None and error.status_code == 404:
+                create_failure = GenerationError(
+                    "image_generation_conversation_not_found",
+                    "The image generation conversation is unavailable",
+                    False,
+                    command.run_id,
+                )
+            else:
+                create_failure = GenerationError(
+                    "storage_write_failed",
+                    "Image generation run could not be created",
+                    True,
+                    command.run_id,
+                )
+        except Exception:
+            create_failure = GenerationError(
+                "storage_write_failed",
+                "Image generation run could not be created",
+                True,
+                command.run_id,
+            )
+        if create_failure is not None:
+            raise create_failure from None
+        if not duplicate:
+            return
+
+        read_failed = False
+        try:
+            existing = self._storage.get_run(command.run_id, command.project_id)
+        except Exception:
+            read_failed = True
+            existing = {}
+        if read_failed:
+            raise GenerationError(
+                "run_conflict",
+                "The image generation run conflicts with an existing run",
+                False,
+                command.run_id,
+            ) from None
+        if not _matches_immutable_run(existing, expected):
+            raise GenerationError(
+                "run_conflict",
+                "The image generation run conflicts with an existing run",
+                False,
+                command.run_id,
+            )
+        if existing.get("state") != "queued":
+            raise GenerationError(
+                "run_already_started",
+                "The image generation run has already started",
+                False,
+                command.run_id,
+            )
+
     def _start_run(self, run_id: str, project_id: str) -> None:
         start_failed = False
         try:
             self._storage.update_run(run_id, {"state": "running"})
+        except StorageGatewayError as error:
+            if error.status_code in {400, 409} and self._read_run_state(run_id, project_id) != "queued":
+                raise GenerationError(
+                    "run_already_started",
+                    "The image generation run has already started",
+                    False,
+                    run_id,
+                ) from None
+            start_failed = True
         except Exception:
             start_failed = True
         if not start_failed:
@@ -698,6 +764,13 @@ class PromptCardStorageClient:
     def create_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._json("POST", "/api/image-generation-runs", json=payload)
 
+    def create_runs(self, payloads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        response = self._json("POST", "/api/image-generation-runs/batch", json={"runs": payloads})
+        runs = response.get("runs")
+        if not isinstance(runs, list) or any(not isinstance(item, dict) for item in runs):
+            raise StorageGatewayError()
+        return runs
+
     def update_run(self, run_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         return self._json("PATCH", f"/api/image-generation-runs/{quote(run_id, safe='')}/state", json=patch)
 
@@ -796,6 +869,23 @@ def _queued_run(command: GenerationCommand) -> dict[str, Any]:
         },
         "outputAssetIds": [],
     }
+
+
+def _matches_immutable_run(existing: dict[str, Any], expected: dict[str, Any]) -> bool:
+    return all(
+        existing.get(key) == expected.get(key)
+        for key in (
+            "id",
+            "projectId",
+            "conversationId",
+            "nodeId",
+            "connectionId",
+            "providerId",
+            "modelId",
+            "requestSnapshot",
+            "outputAssetIds",
+        )
+    )
 
 
 def _provider_id_for_model(model_id: str) -> str:

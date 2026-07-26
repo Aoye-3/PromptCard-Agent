@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">PMAgent-Canvas</title>
+  <desc id="desc">面向 AIGC 创作者的本地桌面 Agent 画布，连接 Agent 对话、图片生成、Prompt 库与项目素材。</desc>
+  <defs>
+    <pattern id="canvas-grid" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#E7E2DB" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#FF5A1F"/>
+    </marker>
+  </defs>
+
+  <rect x="1" y="1" width="1198" height="418" rx="28" fill="#FFF9F3" stroke="#FED7C3" stroke-width="2"/>
+  <path d="M34 52V28H58 M1142 28H1166V52 M34 368V392H58 M1142 392H1166V368" fill="none" stroke="#FF9B70" stroke-width="2"/>
+
+  <g id="title-block" transform="translate(64 58)">
+    <g transform="translate(0 0)">
+      <rect width="42" height="42" rx="12" fill="#FF5A1F"/>
+      <text x="21" y="27" text-anchor="middle" fill="#FFFFFF" font-size="15" font-weight="800" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">PM</text>
+      <text x="58" y="27" fill="#FF5A1F" font-size="17" font-weight="700" letter-spacing="1.4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">LOCAL AIGC CREATION WORKSPACE</text>
+    </g>
+
+    <text x="0" y="115" fill="#111827" font-size="58" font-weight="800" letter-spacing="-1.8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">PMAgent-Canvas</text>
+    <text x="0" y="166" fill="#374151" font-size="26" font-weight="650" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">把 Agent、Prompt、参考素材与图像创作</text>
+    <text x="0" y="203" fill="#374151" font-size="26" font-weight="650" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">沉淀在同一个本地桌面画布中</text>
+
+    <g transform="translate(0 240)">
+      <rect width="230" height="46" rx="23" fill="#111827"/>
+      <circle cx="24" cy="23" r="7" fill="#FF5A1F"/>
+      <text x="42" y="29" fill="#FFFFFF" font-size="17" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">start-desktop.vbs</text>
+    </g>
+
+    <g transform="translate(0 310)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+      <rect width="252" height="40" rx="20" fill="#FFFFFF" stroke="#F3C8B4"/>
+      <text x="18" y="26" fill="#111827" font-size="16" font-weight="700">Seedream 5.0 Pro · 生成 / 编辑</text>
+      <rect x="264" width="252" height="40" rx="20" fill="#FFFFFF" stroke="#F3C8B4"/>
+      <text x="282" y="26" fill="#111827" font-size="16" font-weight="700">Doubao Seed 2.0 · Prompt / Agent</text>
+    </g>
+  </g>
+
+  <g id="canvas-system" transform="translate(690 48)">
+    <rect width="448" height="324" rx="24" fill="#FFFFFF" stroke="#E9E3DB" stroke-width="2"/>
+    <rect x="18" y="18" width="412" height="42" rx="14" fill="#F7F4EF"/>
+    <circle cx="42" cy="39" r="6" fill="#FF5A1F"/>
+    <text x="58" y="45" fill="#111827" font-size="17" font-weight="800" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">PMAgent · Free Canvas</text>
+    <circle cx="393" cy="39" r="4" fill="#9CA3AF"/>
+    <circle cx="408" cy="39" r="4" fill="#D1D5DB"/>
+
+    <rect x="18" y="76" width="412" height="226" rx="18" fill="url(#canvas-grid)" stroke="#EFEAE4"/>
+
+    <g transform="translate(34 96)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+      <rect width="102" height="174" rx="16" fill="#FFFFFF" stroke="#D9DDE3"/>
+      <rect x="14" y="14" width="74" height="29" rx="10" fill="#111827"/>
+      <text x="51" y="34" text-anchor="middle" fill="#FFFFFF" font-size="15" font-weight="800">Agent</text>
+      <rect x="14" y="58" width="74" height="8" rx="4" fill="#FED7C3"/>
+      <rect x="14" y="75" width="58" height="8" rx="4" fill="#E5E7EB"/>
+      <rect x="14" y="103" width="74" height="44" rx="10" fill="#FFF1E9" stroke="#FFBE9F"/>
+      <text x="51" y="123" text-anchor="middle" fill="#C2410C" font-size="13" font-weight="700">提示词</text>
+      <text x="51" y="140" text-anchor="middle" fill="#C2410C" font-size="13" font-weight="700">协作编辑</text>
+    </g>
+
+    <g transform="translate(157 96)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+      <rect width="136" height="174" rx="16" fill="#FFFDF9" stroke="#FF9B70" stroke-width="2"/>
+      <text x="16" y="27" fill="#FF5A1F" font-size="14" font-weight="800">CANVAS</text>
+      <rect x="16" y="43" width="104" height="54" rx="10" fill="#F3F4F6"/>
+      <rect x="25" y="52" width="34" height="36" rx="5" fill="#D1D5DB"/>
+      <rect x="66" y="52" width="45" height="8" rx="4" fill="#9CA3AF"/>
+      <rect x="66" y="68" width="37" height="8" rx="4" fill="#D1D5DB"/>
+      <rect x="16" y="109" width="49" height="45" rx="9" fill="#111827"/>
+      <path d="M27 142l11-12 8 8 8-10" fill="none" stroke="#FF8A55" stroke-width="3"/>
+      <rect x="73" y="109" width="47" height="45" rx="9" fill="#FFF1E9" stroke="#FFBE9F"/>
+      <text x="96.5" y="136" text-anchor="middle" fill="#C2410C" font-size="13" font-weight="800">生成</text>
+    </g>
+
+    <g transform="translate(314 96)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">
+      <rect width="100" height="174" rx="16" fill="#FFFFFF" stroke="#D9DDE3"/>
+      <rect x="12" y="14" width="76" height="29" rx="10" fill="#FFF1E9"/>
+      <text x="50" y="34" text-anchor="middle" fill="#C2410C" font-size="14" font-weight="800">Prompt 库</text>
+      <rect x="12" y="58" width="76" height="35" rx="9" fill="#F3F4F6"/>
+      <rect x="20" y="67" width="16" height="16" rx="4" fill="#FF8A55"/>
+      <rect x="44" y="68" width="34" height="6" rx="3" fill="#9CA3AF"/>
+      <rect x="44" y="79" width="27" height="6" rx="3" fill="#D1D5DB"/>
+      <rect x="12" y="102" width="76" height="35" rx="9" fill="#F3F4F6"/>
+      <rect x="20" y="111" width="16" height="16" rx="4" fill="#111827"/>
+      <rect x="44" y="112" width="34" height="6" rx="3" fill="#9CA3AF"/>
+      <rect x="44" y="123" width="27" height="6" rx="3" fill="#D1D5DB"/>
+    </g>
+
+    <path d="M136 183H151" stroke="#FF5A1F" stroke-width="3" marker-end="url(#arrow)"/>
+    <path d="M293 183H308" stroke="#FF5A1F" stroke-width="3" marker-end="url(#arrow)"/>
+    <text x="224" y="292" text-anchor="middle" fill="#6B7280" font-size="15" font-weight="700" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', sans-serif">对话 · 生成 · 编辑 · 沉淀</text>
+  </g>
+</svg>

@@ -1,153 +1,189 @@
 <p align="center">
-  <img src="./public/promptcard-manager-icon.png" alt="PMAgent logo" width="180" />
+  <img src="./public/promptcard-manager-icon.png" alt="PMAgent-Canvas logo" width="92">
 </p>
 
-<h1 align="center">PromptCard-Manager</h1>
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="PMAgent-Canvas：连接 Agent、Prompt、参考素材和图像创作的本地桌面画布">
+</p>
 
-<p align="center"><strong>面向 AIGC 视频创作者的跨平台复制、粘贴、存储工作台</strong></p>
+<p align="center">
+  <a href="#产品总览">产品总览</a> ·
+  <a href="#一条完整的本地创作链路">创作链路</a> ·
+  <a href="#核心功能">核心功能</a> ·
+  <a href="#快速启动">快速启动</a> ·
+  <a href="#技术架构">技术架构</a>
+</p>
 
-PromptCard-Manager 不做视频生成，也不试图替代 Runway、可灵、即梦、豆包、ComfyUI、LTX、Sora 或剪辑工具。它专注解决 AIGC 视频创作者在多个生成平台之间来回复制、粘贴、试错时最容易丢失的东西：**灵感参考图、分镜头、Prompt、Negative Prompt、生成参数、平台链接、生成结果与复盘经验**。
+PMAgent-Canvas 是面向 AIGC 创作者的本地桌面 Agent 画布。它把参考素材、Prompt、Agent 对话、图片生成、二次编辑和复盘结果放进同一个项目，让创作资料不再散落在聊天记录、生成平台和临时文件夹中。
 
-产品的核心角色是所有生成工具之前和之后的本地导演资料台：**把参考图、分镜、提示词和生成结果沉淀为可复制、可粘贴、可检索、可归档、可交付的镜头级资产。**
+当前核心模型：
 
-The maintained technical documentation starts at [docs/README.md](./docs/README.md).
+- **Seedream 5.0 Pro**：图片生成、参考图生成与图片编辑。
+- **Doubao Seed 2.0**：提示词生成、Prompt 优化与 Agent 对话。
 
-## 当前 MVP 方向
+> [!IMPORTANT]
+> 当前仓库提供的是 **Windows 桌面开发预览**。双击 `start-desktop.vbs` 可以启动可编辑源码对应的桌面壳；它不是已签名的免环境安装包。
 
-当前最小功能闭环优先建设：
+## 产品总览
 
-```text
-媒体 / 近期捕获前端页面
-  -> 悬浮采集工具栏
-  -> 截图选区并保存到近期捕获
-  -> 在近期捕获中补充 Prompt、备注、来源和分类
-  -> 注册到 Prompt 库，或放置到当前画布
-  -> 再加入录屏为视频资产
+画布是 PMAgent-Canvas 的中心层。左侧管理项目主体与素材，中间组织文本、参考图和生成结果，右侧在 Agent、图片生成与 Prompt 库之间切换。三部分围绕同一个项目上下文协作，而不是各自保存一份孤立数据。
+
+<p align="center">
+  <img src="./assets/readme/screenshots/canvas-overview.webp" width="100%" alt="PMAgent-Canvas 三栏画布：Agent 编辑、图片生成和 Prompt 库围绕中心画布协作">
+</p>
+
+## 一条完整的本地创作链路
+
+从参考素材进入项目，到 Agent 辅助编写提示词，再到图片生成、二次编辑和资产归档，所有关键上下文都留在本地项目中。
+
+<p align="center">
+  <img src="./assets/readme/workflow.svg" width="100%" alt="PMAgent-Canvas 从项目素材到 Prompt、图片生成、编辑标注和资产沉淀的工作流">
+</p>
+
+PMAgent-Canvas 不试图替代每一个外部生成或剪辑平台。它更关注生成前后的生产资料：参考图、分镜、Prompt、模型参数、生成结果、修改方向和复盘经验，让这些内容可以被继续搜索、复用和交付。
+
+## 核心功能
+
+### 图片生成与项目媒体素材库
+
+在画布中调用 Seedream 5.0 Pro 完成文生图、参考图生成和图片编辑。生成结果进入当前项目媒体库，可以继续加入画布、绑定参考关系或参与下一轮生成。
+
+- 项目主体和项目素材分层管理。
+- 支持多张参考图、比例与分辨率设置。
+- 可从 Prompt 库拉取媒体和提示词上下文。
+- 生成历史与项目资产持久化保存。
+
+<p align="center">
+  <img src="./assets/readme/screenshots/image-generation-media-library.webp" width="100%" alt="PMAgent-Canvas 图片生成面板、全能参考模式和项目媒体素材库">
+</p>
+
+### Prompt 库与媒体管理
+
+Prompt 不再只是一次性的文本。PMAgent-Canvas 将提示词、参考媒体、分类、来源和项目用途放在一起，既可供用户检索，也可由 Agent 在明确权限范围内读取和提出新增建议。
+
+- 按主体、动作、场景、风格、镜头、灯光等维度分类。
+- Prompt 与参考媒体深度绑定，便于在项目中复用。
+- 媒体管理页记录生成、截图和导入的项目素材。
+- Agent 写入采用用户确认的提案边界。
+
+<p align="center">
+  <img src="./assets/readme/screenshots/prompt-library.webp" width="100%" alt="PMAgent-Canvas Agent 管理、Prompt 库和项目媒体管理页面">
+</p>
+
+### 图片编辑、切割与二次标注
+
+围绕已有图片继续创作，而不是在每次修改时丢失原始上下文。Seedream 5.0 Pro 负责生成式修改，画布工具负责裁切、拆分、文字和箭头标注。
+
+- 局部修改、多角度生成、扩图、消除与场景图推导。
+- 按辅助线切割分镜板或多图素材。
+- 添加文字、箭头和区域标注。
+- 编辑结果继续回到画布和项目素材中。
+
+<p align="center">
+  <img src="./assets/readme/screenshots/image-editing-annotations.webp" width="100%" alt="PMAgent-Canvas 生成式图片编辑、切割、消除和标注流程">
+</p>
+
+### 快捷消息节点与 Agent 协作
+
+快捷消息节点是一类可沉淀、可编辑的提示词模板。用户可以在画布中调整内容与样式，也可以从 Prompt 库查看完整上下文，再由 Agent 在规则范围内补全和改写。
+
+<p align="center">
+  <img src="./assets/readme/screenshots/agent-collaboration.webp" width="100%" alt="PMAgent-Canvas 快捷消息节点、悬浮编辑工具和 Agent 协作面板">
+</p>
+
+## 使用场景
+
+### AIGC 分镜头指令图制作
+
+把前期收集的素材、分镜 Prompt、参考图和生成结果放进同一块画布，完成从指令图搭建、外部平台生成到结果复盘的闭环。
+
+<details>
+  <summary><strong>查看完整案例：分镜头指令图制作与编辑</strong></summary>
+  <br>
+  <img src="./assets/readme/screenshots/use-case-storyboard.webp" width="100%" alt="使用 PMAgent-Canvas 制作和编辑 AIGC 分镜头指令图的完整案例">
+</details>
+
+### 3D 效果图与初版拆分设计
+
+将三视图、材质参考、风格样本和多角度生成结果组织为可复用模板，再通过生成式编辑与标注完成细化和评审。
+
+<details>
+  <summary><strong>查看完整案例：3D 效果图与初版拆分设计</strong></summary>
+  <br>
+  <img src="./assets/readme/screenshots/use-case-3d-design.webp" width="100%" alt="使用 PMAgent-Canvas 完成 3D 效果图、多角度生成和初版拆分设计的案例">
+</details>
+
+## 快速启动
+
+### 环境要求
+
+当前一键启动路径面向 Windows 开发环境。首次启动前请确保以下工具可用：
+
+- Node.js 与 npm
+- `uv`（Python 运行时和依赖同步）
+- Rust / Cargo（首次构建或 Tauri 源码发生变化时使用）
+
+### 启动桌面壳
+
+```powershell
+git clone https://github.com/Aoye-3/PromptCard-Agent.git
+cd PromptCard-Agent
 ```
 
-底部导航中的正式分类名是 **媒体**；进入该页面后，页面大标题显示 **近期捕获**。它和项目、Prompt 库、设置属于同一级页面。
-
-近期捕获是 raw media inbox：截图、录屏、粘贴媒体会先进入这里，供用户批量浏览、补充信息、归档或注册。Prompt 库是 curated knowledge base：只有用户明确注册后的内容才进入 Prompt 库，并成为 Agent 可读取的提示词与参考资料。
-
-详细计划见 [Plan 001](./docs/Plan/001-cross-platform-clipboard-asset-workbench.md) 和 [Plan 002](./docs/Plan/002-floating-capture-video-asset-mvp.md)。
-
-## 核心定位
-
-生成平台通常强在模型能力、在线生成、云端协作和平台内素材管理。PromptCard-Manager 选择解决另一类更长期的问题：
-
-**当创作者跨平台复制 Prompt、粘贴参考图、保存结果、反复改镜头时，如何让这些生产资料不再散落、丢失和断链。**
-
-四个核心价值：
-
-1. **跨平台剪贴：复制、粘贴、保存成为产品主路径。** 文本、Prompt、参考图、截图、视频结果和平台链接都能快速进入项目。
-2. **镜头级归档：每个分镜头都有自己的生产资料袋。** 画面描述、镜头语言、Prompt、参考图、生成平台、参数、结果和备注被绑定在同一个镜头卡中。
-3. **灵感图资产化：参考图不只是文件。** 角色、场景、道具、构图、光影、色彩、风格和情绪都可以成为可复用的视觉资产。
-4. **经验可追溯：生成失败和成功都要沉淀。** 每次试错留下平台、参数、结果、问题、修改方向和下一版 Prompt。
-
-## 核心工作流
+然后在资源管理器中双击：
 
 ```text
-灵感 / 剧本 / 分镜想法
-  -> 粘贴参考图、文本、截图或平台链接
-  -> 整理为角色、场景、道具、风格与镜头资产
-  -> 建立镜头卡 Shot Card
-  -> 绑定 Prompt、Negative Prompt、参考图、平台和参数
-  -> 粘贴生成结果并记录复盘
-  -> 导出分镜表、Prompt 包、资产包和剪辑交接资料
+start-desktop.vbs
 ```
 
-镜头卡是核心生产单元，可承载剧情描述、画面描述、镜头语言、Prompt、Negative Prompt、角色、场景、风格参考、目标平台、生成参数、状态、输出文件、失败原因、复盘备注与版本记录。
+启动器会在需要时安装前端依赖、初始化本地服务并打开 PMAgent-Canvas 桌面壳。正常启动会复用现有桌面进程；Rust 或 Tauri 源码变化时会触发重新构建。
 
-## 差异化优势
+如果启动失败，运行可见终端版本查看完整日志：
 
-### 1. 跨平台复制粘贴中枢
+```powershell
+.\start-desktop.bat
+```
 
-- 从生成平台、网页、聊天工具、文件夹和剪辑软件中复制文本、图片、视频或链接
-- 粘贴后按内容类型沉淀为灵感参考图、角色图、场景图、分镜图、生成结果或 Prompt
-- 保留来源、平台、时间、备注和所属镜头，减少跨平台搬运时的信息损耗
+### 配置核心模型
 
-### 2. 灵感参考图存储
+打开桌面壳后，在 **Agent 面板 → 模型管理** 中配置连接并绑定模型：
 
-- 将参考图归类为角色、场景、道具、构图、光影、色彩、风格和情绪
-- 同一张图可以同时服务多个镜头、多个 Prompt 或多个项目
-- 参考图与生成结果分开存储，避免灵感素材被一次生成任务消耗掉
+| 能力槽位 | 当前核心模型 | 用途 |
+| --- | --- | --- |
+| 文本 / Agent | Doubao Seed 2.0 | Agent 对话、提示词生成与优化 |
+| 图片生成 / 编辑 | Seedream 5.0 Pro | 文生图、参考图生成与图片编辑 |
 
-### 3. 分镜头和提示词绑定存储
+模型凭据由后端写入操作系统密钥环，不进入浏览器存储、项目 JSON、生成历史或 API 响应。未配置凭据时，模型调用会返回 `credential_missing`。
 
-Prompt 不再是孤立文本，而是与分镜头、视觉参考、目标平台、生成参数、生产状态和输出结果建立关系的可执行镜头资产。
+## 本地项目与数据边界
 
-### 4. 生成前准备和生成后复盘
+- 项目数据、画布状态、Prompt、生成历史和素材索引保存在本地持久化存储中。
+- 图片结果不会因为删除画布节点或项目视图而直接删除底层历史资产。
+- Agent 面板、Prompt 库、画布与媒体分析使用隔离的会话上下文。
+- Prompt 库和画布写入采用显式提案与用户确认，不让 Agent 静默覆盖生产资料。
 
-- 生成前整理镜头意图、参考图、Prompt、参数和平台格式
-- 生成后粘贴结果，记录是否可用、失败原因、修改建议和下一版 Prompt
-- 让每一次试错都成为可复用经验，而不是聊天记录或平台历史里的碎片
+## 技术架构
 
-### 5. 本地项目主权
-
-- 本地项目库、素材索引、Prompt、分镜、版本快照和导出包
-- 敏感创意、客户资料和未发布 IP 无需强制上传云端
-- 可选同步而非强制上云，项目资产不被平台格式锁死
-
-### 6. 多平台中立
-
-PromptCard-Manager 不替代视频生成、图像生成或剪辑工具，而是为它们提供统一的资料沉淀层。生成平台会变化，但灵感、分镜、Prompt、参考图、结果和经验始终属于创作者。
-
-### 7. 可导出的生产交付件
-
-- 导出分镜表、镜头清单、Prompt 清单、参考图索引、生成结果索引和复盘备注
-- 为生成平台、剪辑师、美术、客户或团队生成不同版本的工作包
-- 一键形成包含镜头编号、Prompt、参考图、资产目录、平台信息和版本说明的项目包
-
-## 与云端产品的侧重点
-
-| 云端产品通常强调 | PromptCard-Manager 重点建设 |
+| 层级 | 当前实现 |
 | --- | --- |
-| 平台内生成、模型能力和云端历史 | 跨平台复制、粘贴、存储和归档 |
-| 在线协作、实时同步、多人评论 | 本地项目主权与可选同步 |
-| 平台内素材共享与查看 | 灵感图、分镜、Prompt、结果的镜头级绑定 |
-| 自动生成完整视频 | 生成前准备和生成后复盘 |
-| 平台内保存 | 可导出、可交付、可迁移的项目包 |
+| 桌面壳 | Tauri 2 |
+| 前端 | Vite、React、TypeScript、Tailwind CSS、Zustand |
+| 画布 | React Flow + PMAgent 自有媒体层 |
+| 本地存储 | SQLite + 项目资产目录 |
+| Agent Runtime | Python PromptCard Gateway + pi text Agent |
+| 模型管理 | Provider-neutral connection 与模型槽位绑定 |
 
-## Current Architecture
+更完整的工程资料：
 
-- Frontend: Vite, React, TypeScript, Tailwind, Zustand.
-- Durable app data: local `promptcard-storage` service writing SQLite and assets under `data/`.
-- Agent Runtime: Python PromptCard Gateway plus a separate pi text Agent, exposed to the frontend only through `/agent-api/promptcard/runtime/*`.
-- Model service: provider-neutral connection and model catalog managed from the Agent panel; chat and image slots bind `connectionId + modelId`.
-- Agent session isolation: each Agent surface has its own `sessionKey` and pi `threadId`.
-
-Key docs:
-
-- [System Architecture](./docs/architecture/system-architecture.md)
-- [Agent Runtime Boundary](./docs/architecture/agent-runtime-boundary.md)
+- [技术文档入口](./docs/README.md)
+- [系统架构](./docs/architecture/system-architecture.md)
+- [Agent Runtime 边界](./docs/architecture/agent-runtime-boundary.md)
 - [Agent Runtime API](./docs/api/agent-runtime-api.md)
-- [Frontend Application](./docs/frontend/app-shell.md)
-- [Agent Runtime Backend](./docs/backend/agent-runtime.md)
-- [Image Generation and Model Management](./docs/architecture/image-generation-and-model-management.md)
+- [前端应用结构](./docs/frontend/app-shell.md)
+- [图片生成与模型管理](./docs/architecture/image-generation-and-model-management.md)
 
-## Secure model connections and image generation
-
-The Agent Runtime starts and serves health/catalog routes without a configured model credential. Credentials are entered through model management and stored in the operating-system keyring; startup scripts do not read plaintext key files, extract `sk-` values, or write provider keys into environment variables. A model call without a configured credential returns `credential_missing`.
-
-Run `npm.cmd run agent:check` before enabling image generation. It verifies the Python keyring and Volcengine Ark SDK and prints a workspace-local F: repair command when either dependency is unavailable. Seedream generation history is durable in PromptCard Storage schema v3 and is not deleted when a canvas node or project is removed.
-
-## Free Canvas Builder Direction
-
-Free Canvas Builder is the top project-building mode for the next construction surface. The production canvas stack is React Flow (`@xyflow/react`) plus a lightweight PromptCard-owned media layer. tldraw remains a design reference for shape/store ideas only; it is not a production dependency because its production license does not match the current local-first distribution plan.
-
-Phase 1 keeps durable business data in the existing three-stage project model and stores canvas-specific view/media data in project JSON metadata:
-
-- Three-stage forms are projected into React Flow nodes for character, storyboard, and video-prompt editing.
-- Storyboard and video-prompt forms remain a bound pair and are represented by a canvas edge.
-- Node positions are stored in form `meta.canvas.position`.
-- Media nodes are stored under `threeStage.meta.freeCanvas.mediaNodes`.
-- Planned media node kinds are `imageAsset`, `textOverlay`, `arrowAnnotation`, and `mediaGroup`.
-- Image API results should become `imageAsset` canvas nodes and must not write directly to Prompt Library.
-- The fixed right-side Agent Chatbox still uses the PromptCard Runtime Boundary with `workspace-chatbot-agent` permission scope.
-
-The self-owned media layer is intentionally small in Phase 1: it persists image placement, crop metadata, text annotations, arrow annotations, grouping metadata, and future generation provenance (`assetId`, `imagePrompt`, `sourceNodeId`, `generatedFromAgent`) without implementing a full pixel editor.
-
-## Main Commands
+<details>
+  <summary><strong>开发命令</strong></summary>
 
 ```powershell
 npm.cmd run dev
@@ -167,50 +203,8 @@ $env:UV_CACHE_DIR='F:\.Agent-PromptCardManager\.uv-cache'
 uv run pytest tests -q -p no:cacheprovider
 ```
 
-## Agent Runtime Rules
+</details>
 
-- Frontend code should call the PromptCard Runtime Boundary, not pi or provider APIs directly.
-- Connection metadata is stored backend-side and provider credentials stay in the operating-system keyring; credentials must never enter browser storage, project JSON, generation history, logs, or API responses.
-- Agent panel diagnostics, Prompt Library Agent, Canvas, and Media Analysis must not share chat state.
-- Required session keys:
-  - `diagnostics:agent-panel`
-  - `prompt-library:global`
-  - `workspace:canvas:<projectId>`
-  - `media-analysis:<assetId>`
-- Existing pi `threadId` reuse must pass checks for `sessionKey`, `projectId`, and `mode`.
-- Canvas uses `workspace-chatbot-agent`; Prompt Library uses `prompt-library-agent`; media analysis is read-only.
+## 当前状态
 
-## 产品能力主线
-
-| 层级 | 建设方向 | 代表能力 |
-| --- | --- | --- |
-| 1. 媒体 / 近期捕获 | 建立截图、录屏、粘贴媒体的中间层 | 底部导航媒体页、近期捕获列表、Prompt/备注/来源/分类补充、批量浏览 |
-| 2. 跨平台剪贴入口 | 让复制、粘贴、保存成为主路径 | 文本、Prompt、Negative Prompt、图片、视频、截图、平台链接快速入库 |
-| 3. 灵感参考图资产库 | 把视觉灵感变成可复用资料 | 角色、场景、道具、构图、光影、色彩、风格、情绪标签与检索 |
-| 4. 镜头级资料袋 | 把分镜头和提示词绑定存储 | Shot Card、画面描述、镜头语言、Prompt、参考图、平台、参数、状态 |
-| 5. 生成结果与复盘 | 沉淀生成后的经验 | 结果文件、失败原因、可用版本、修改建议、下一版 Prompt、版本记录 |
-| 6. 导出分发 | 形成专业交付与跨平台流转能力 | 分镜表、Prompt 包、参考图包、生成结果索引、剪辑交接包、项目归档包 |
-
-Keep future work inside the current ownership boundaries:
-
-- Add new project builders by creating a new workspace context builder, a stable project-level session key, and explicit proposal validation before connecting to `AIChatbotBox`.
-- Extend Agent capabilities through the PromptCard Runtime Boundary first; avoid coupling UI code directly to pi internals.
-- Keep Agent configuration unified in the Agent panel. Do not reintroduce a second browser-local AI model settings path.
-- Treat pi `threadId` as process-local runtime state, not product identity. PromptCard project identity must remain `projectId` plus `sessionKey`.
-- Expand ToolUse by visibility and permission review first. Tool permissions should remain narrower than the UI affordance.
-- Preserve proposal approval boundaries: Prompt Library writes are additive and user-approved; Canvas text proposals also require explicit Apply.
-- Update docs in the same change whenever API routes, storage behavior, runtime session logic, model config, ToolUse, or user-visible Agent workflows change.
-
-Recommended verification for Agent-related changes:
-
-```powershell
-npm.cmd test -- --run src/stores/agent.store.test.ts src/services/agent-runtime-service.test.ts src/utils/agent-workspace.test.ts
-npm.cmd run build
-npm.cmd run agent:check
-cd agent-runtime/backend
-uv run pytest tests/test_promptcard_runtime_boundary.py tests/test_model_config.py
-```
-
-## Repository Boundary
-
-The repository root is `PromptCard-Manager`. The parent folder is a workspace container and may contain local-only reference materials or secrets, such as `API-Key.txt`. Do not move those files into this repository.
+PMAgent-Canvas 仍处于活跃开发阶段。当前重点是稳定自由画布、图片生成与编辑、Prompt/媒体资产沉淀、Agent 会话隔离和本地桌面启动链路。对外使用前请以仓库中的实际实现和技术文档为准。

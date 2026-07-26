@@ -354,6 +354,44 @@ class ImageRunAppContractTest(unittest.TestCase):
         self.assertEqual(terminal_reversal.status_code, 400)
         self.assertEqual(self.client.delete("/api/image-generation-runs/run-state").status_code, 405)
 
+    def test_batch_create_is_ordered_and_atomic(self) -> None:
+        members = [
+            run_payload("run-batch-one", created_at=100),
+            run_payload("run-batch-two", created_at=101),
+        ]
+
+        created = self.client.post("/api/image-generation-runs/batch", json={"runs": members})
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual([item["id"] for item in created.json()["runs"]], [
+            "run-batch-one",
+            "run-batch-two",
+        ])
+        self.assertEqual(
+            self.store.get_image_generation_run("run-batch-one", project_id="project-one")["state"],
+            "queued",
+        )
+
+        invalid_members = [
+            run_payload("run-batch-rollback-one", created_at=102),
+            {**run_payload("run-batch-rollback-two", created_at=103), "state": "running"},
+        ]
+        invalid = self.client.post("/api/image-generation-runs/batch", json={"runs": invalid_members})
+
+        self.assertEqual(invalid.status_code, 400)
+        with self.assertRaises(MissingItem):
+            self.store.get_image_generation_run("run-batch-rollback-one", project_id="project-one")
+
+        duplicate_members = [
+            run_payload("run-batch-new", created_at=104),
+            run_payload("run-batch-one", created_at=105),
+        ]
+        duplicate = self.client.post("/api/image-generation-runs/batch", json={"runs": duplicate_members})
+
+        self.assertEqual(duplicate.status_code, 409)
+        with self.assertRaises(MissingItem):
+            self.store.get_image_generation_run("run-batch-new", project_id="project-one")
+
     def test_lists_runs_with_filters_cursor_and_limit_validation(self) -> None:
         for fixture in (
             run_payload("run-one", created_at=100),

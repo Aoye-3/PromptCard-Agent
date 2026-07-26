@@ -828,45 +828,55 @@ class SqliteStore:
         return {"projects": imported_projects, "presets": imported_presets, "alreadyApplied": False}
 
     def create_image_generation_run(self, item: dict[str, Any]) -> dict[str, Any]:
-        created = normalize_new_image_run(item, now_ms())
+        return self.create_image_generation_runs([item])[0]
+
+    def create_image_generation_runs(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not isinstance(items, list) or not 1 <= len(items) <= 11:
+            raise ValueError("Image generation run batch must contain between 1 and 11 runs")
+        timestamp = now_ms()
+        created_runs = [normalize_new_image_run(item, timestamp) for item in items]
+        run_ids = [item["id"] for item in created_runs]
+        if len(run_ids) != len(set(run_ids)):
+            raise DuplicateItem("Image generation run IDs must be unique")
+
         with self._transaction() as connection:
-            conversation_id = created.get("conversationId")
-            if conversation_id is not None:
-                conversation = connection.execute(
-                    "SELECT project_id FROM image_generation_conversations WHERE id=?",
-                    (conversation_id,),
-                ).fetchone()
-                if conversation is None:
+            for created in created_runs:
+                conversation_id = created.get("conversationId")
+                if conversation_id is not None:
+                    conversation = connection.execute(
+                        "SELECT project_id FROM image_generation_conversations WHERE id=?",
+                        (conversation_id,),
+                    ).fetchone()
+                    if conversation is None:
+                        connection.execute(
+                            "INSERT INTO image_generation_conversations(id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                            (
+                                conversation_id,
+                                created["projectId"],
+                                image_conversation_title(created["requestSnapshot"], created["createdAt"]),
+                                created["createdAt"],
+                                created["createdAt"],
+                            ),
+                        )
+                    elif conversation[0] != created["projectId"]:
+                        raise MissingItem()
+                try:
                     connection.execute(
-                        "INSERT INTO image_generation_conversations(id, project_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                        "INSERT INTO image_generation_runs(id, project_id, node_id, conversation_id, connection_id, provider_id, model_id, state, created_at, started_at, finished_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                         (
-                            conversation_id,
-                            created["projectId"],
-                            image_conversation_title(created["requestSnapshot"], created["createdAt"]),
-                            created["createdAt"],
-                            created["createdAt"],
+                            created["id"], created["projectId"], created.get("nodeId"), conversation_id,
+                            created["connectionId"], created["providerId"], created["modelId"], created["state"], created["createdAt"],
+                            None, None, _json(created),
                         ),
                     )
-                elif conversation[0] != created["projectId"]:
-                    raise MissingItem()
-            try:
-                connection.execute(
-                    "INSERT INTO image_generation_runs(id, project_id, node_id, conversation_id, connection_id, provider_id, model_id, state, created_at, started_at, finished_at, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        created["id"], created["projectId"], created.get("nodeId"), conversation_id,
-                        created["connectionId"],
-                        created["providerId"], created["modelId"], created["state"], created["createdAt"],
-                        None, None, _json(created),
-                    ),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise DuplicateItem(created["id"]) from exc
-            if conversation_id is not None:
-                connection.execute(
-                    "UPDATE image_generation_conversations SET updated_at=MAX(updated_at, ?) WHERE id=?",
-                    (created["createdAt"], conversation_id),
-                )
-        return created
+                except sqlite3.IntegrityError as exc:
+                    raise DuplicateItem(created["id"]) from exc
+                if conversation_id is not None:
+                    connection.execute(
+                        "UPDATE image_generation_conversations SET updated_at=MAX(updated_at, ?) WHERE id=?",
+                        (created["createdAt"], conversation_id),
+                    )
+        return created_runs
 
     def get_image_generation_run(self, run_id: str, *, project_id: str) -> dict[str, Any]:
         if not isinstance(project_id, str) or not project_id:

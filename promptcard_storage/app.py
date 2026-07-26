@@ -198,6 +198,11 @@ def create_app(storage: SqliteStore) -> FastAPI:
     def create_image_generation_run(item: dict[str, Any]) -> dict[str, Any]:
         return _handle(lambda: storage.create_image_generation_run(item))
 
+    @application.post("/api/image-generation-runs/batch")
+    def create_image_generation_runs_batch(item: dict[str, Any]) -> dict[str, Any]:
+        runs = item.get("runs") if isinstance(item, dict) else None
+        return _handle(lambda: {"runs": storage.create_image_generation_runs(runs)})
+
     @application.get("/api/image-generation-runs")
     def list_image_generation_runs(
         projectId: str,

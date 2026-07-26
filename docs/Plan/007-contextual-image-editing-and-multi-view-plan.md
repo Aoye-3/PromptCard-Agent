@@ -4,7 +4,7 @@
 
 - Status: `Active`
 - Created: `2026-07-24`
-- Last reviewed: `2026-07-25`
+- Last reviewed: `2026-07-26`
 - Scope owner: Free Canvas, Image Generation, Agent Runtime, PromptCard Storage
 - Current reference implementation: Seedream 5.0 Pro
 - Explicit UI freeze: this plan must not change or repurpose the existing right-side `Agent / 图片生成 / Prompt库` structure; `作为参考` is the sole state-level bridge and may append to the existing 图片生成 Composer
@@ -49,6 +49,8 @@ Frontend-first acceptance order requested by the user:
 4. do not perform paid live Seedream evaluations without explicit cost authorization; record their absence rather than inferring a pass.
 
 The complete frontend Vitest suite passed on `2026-07-26` through `npm.cmd run test:frontend`: four bounded sequential shards completed 106 test files and 634 tests without leaving a Runtime process behind. This supersedes the two interrupted full-suite attempts from `2026-07-24`. Production build, browser E2E, viewport/zoom, focus, accessibility and reload acceptance remain separate gates.
+
+The canonical human browser procedure is maintained in [Manual Frontend Acceptance](../quality/manual-frontend-acceptance.md). Complete its F1-F7 gates and retain the required evidence before changing any `Implemented; frontend acceptance pending` ledger entry to accepted. Paid live-provider evaluation remains a separate explicitly authorized gate.
 
 ### Manual frontend acceptance finding: populated canvas becomes blank
 

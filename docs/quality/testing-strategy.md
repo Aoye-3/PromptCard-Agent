@@ -70,6 +70,8 @@ For browser-facing changes, start the local stack and read the active browser UR
 Get-Content logs\dev-runtime.json
 ```
 
+After the automated browser checks pass, complete the [manual frontend acceptance checklist](manual-frontend-acceptance.md). It is the canonical procedure for populated-canvas visibility, viewport and zoom behavior, keyboard focus, right-workspace isolation, non-destructive export, multi-view recovery, and capability-limited states. Record browser evidence without credentials, authorization headers, temporary provider URLs, or raw provider responses.
+
 The Playwright smoke suite runs through:
 
 ```powershell

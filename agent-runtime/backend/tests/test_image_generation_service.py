@@ -1448,6 +1448,92 @@ def test_router_rejects_invalid_operation_semantics_before_service(
     }
 
 
+@pytest.mark.parametrize(
+    ("operation_name", "mode", "role", "region"),
+    [
+        ("reference-generate", "generate", "reference-image", None),
+        ("effect-render", "edit", "source-image", None),
+        ("global-edit", "edit", "source-image", None),
+        ("outpaint", "edit", "source-image", None),
+        ("region-redraw", "region-edit", "source-image", {"type": "point", "referenceId": "subject", "x": 20, "y": 30}),
+        ("region-redraw", "region-edit", "source-image", {"type": "bbox", "referenceId": "subject", "x1": 10, "y1": 20, "x2": 80, "y2": 90}),
+        ("erase", "region-edit", "source-image", {"type": "bbox", "referenceId": "subject", "x1": 10, "y1": 20, "x2": 80, "y2": 90}),
+        ("text-edit", "region-edit", "source-image", {"type": "bbox", "referenceId": "subject", "x1": 10, "y1": 20, "x2": 80, "y2": 90}),
+        ("upscale", "edit", "source-image", None),
+        ("subject-extract", "edit", "source-image", None),
+        ("multi-view", "edit", "source-image", None),
+    ],
+)
+def test_all_contextual_operations_complete_fake_provider_lifecycle_with_lineage(
+    monkeypatch,
+    operation_name: str,
+    mode: str,
+    role: str,
+    region: dict[str, Any] | None,
+) -> None:
+    from app.gateway.deps import get_image_generation_service
+    from app.gateway.routers.image_generation import router
+
+    monkeypatch.setenv("PROMPTCARD_IMAGE_GENERATION_NODE_V1", "true")
+    case_number = len(operation_name) * 100 + (1 if region and region["type"] == "bbox" else 0)
+    payload = valid_contextual_operation_payload()
+    payload["runId"] = f"image-run-{case_number:032x}"
+    payload["mode"] = mode
+    payload["regions"] = [] if region is None else [region]
+    payload["inputs"][0]["role"] = role
+    operation = payload["operation"]
+    assert isinstance(operation, dict)
+    operation["operation"] = operation_name
+    operation["recipeId"] = f"{operation_name}/fake-provider-contract"
+    operation["parameters"] = {"case": operation_name, "referenceOrder": ["subject"]}
+    if operation_name == "multi-view":
+        operation.update({
+            "operationGroupId": "group-fake-provider",
+            "operationItemId": "item-front",
+            "viewSpec": "front",
+        })
+
+    service, storage, provider, fetcher = make_service()
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_image_generation_service] = lambda: service
+    response = TestClient(app).post("/api/promptcard/runtime/image-generations", json=payload)
+
+    assert response.status_code == 200, response.text
+    run = storage.runs[payload["runId"]]
+    snapshot = run["requestSnapshot"]
+    assert snapshot["operation"] == operation
+    assert snapshot["inputAssets"] == [{
+        "referenceId": "subject",
+        "assetId": "asset-provider.png",
+        "sourceAssetId": "asset-original.png",
+        "role": role,
+        "order": 0,
+    }]
+    assert snapshot["regions"] == payload["regions"]
+    assert run["state"] == "succeeded"
+    assert run["outputAssetIds"] == ["asset-generated.png"]
+    assert len(provider.requests) == 1
+    assert provider.requests[0].inputs[0].role == role
+    assert provider.requests[0].inputs[0].source_asset_id == "asset-original.png"
+    assert fetcher.urls == [REMOTE_URL]
+    capture = next(item for action, item in storage.operations if action == "create_capture")
+    assert capture["assetId"] == "asset-generated.png"
+    assert capture["linkedCanvasNodeId"] == "node-source"
+    assert capture["origin"] == {
+        "type": "image-generation",
+        "runId": payload["runId"],
+        "modelId": payload["modelId"],
+    }
+    upload_index = next(index for index, item in enumerate(storage.operations) if item[0] == "upload_asset")
+    succeeded_index = next(
+        index
+        for index, item in enumerate(storage.operations)
+        if item[0] == "update_run" and item[1][1].get("state") == "succeeded"
+    )
+    assert upload_index < succeeded_index
+
+
 def test_router_rejects_invalid_client_generated_run_id(monkeypatch) -> None:
     from app.gateway.deps import get_image_generation_service
     from app.gateway.routers.image_generation import router

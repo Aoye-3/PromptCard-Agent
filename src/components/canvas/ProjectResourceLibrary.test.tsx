@@ -185,4 +185,64 @@ describe('ProjectResourceLibrary', () => {
     }))
     expect(renderer!.root.find(node => node.props.title === 'Dragged subject')).toBeTruthy()
   })
+
+  test('lets external image drops pass through material layout drop targets to the uploader', async () => {
+    mocks.getSnapshot.mockResolvedValue({ folders: [], resources: [] })
+    mocks.createResource.mockResolvedValue({
+      ...subject,
+      id: 'material-upload',
+      kind: 'material',
+      name: 'Dragged material',
+      sourceAssetId: 'source-upload',
+      previewAssetId: 'preview-upload',
+      providerAssetId: 'provider-upload'
+    })
+    let renderer: ReactTestRenderer
+    await act(async () => {
+      renderer = create(
+        <ProjectResourceLibrary
+          projectId="project-1"
+          expanded
+          onExpandedChange={vi.fn()}
+          onPlaceMaterial={vi.fn()}
+          onAddSubject={vi.fn(() => ({ reason: null }))}
+        />
+      )
+    })
+    act(() => renderer!.root.findByProps({ title: '素材' }).props.onClick())
+
+    const file = new File(['image'], 'Dragged material.png', { type: 'image/png' })
+    const dataTransfer = { files: [file], types: ['Files'], dropEffect: 'none' }
+    const materialContent = renderer!.root.find(node => (
+      node.props.className === 'min-h-0 flex-1 overflow-y-auto p-2'
+    ))
+    const internalPreventDefault = vi.fn()
+    const internalStopPropagation = vi.fn()
+
+    materialContent.props.onDrop({
+      preventDefault: internalPreventDefault,
+      stopPropagation: internalStopPropagation,
+      dataTransfer
+    })
+
+    expect(internalPreventDefault).not.toHaveBeenCalled()
+    expect(internalStopPropagation).not.toHaveBeenCalled()
+
+    const dropzone = renderer!.root.findByProps({ 'data-project-resource-dropzone': true })
+    await act(async () => {
+      await dropzone.props.onDrop({
+        preventDefault: vi.fn(),
+        stopPropagation: vi.fn(),
+        dataTransfer
+      })
+    })
+
+    expect(mocks.importImage).toHaveBeenCalledWith(file)
+    expect(mocks.createResource).toHaveBeenCalledWith('project-1', expect.objectContaining({
+      kind: 'material',
+      name: 'Dragged material',
+      folderId: null
+    }))
+    expect(renderer!.root.find(node => node.props.title === 'Dragged material')).toBeTruthy()
+  })
 })

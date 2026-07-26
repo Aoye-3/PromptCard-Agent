@@ -418,6 +418,7 @@ export const ProjectResourceLibrary = ({
   }
 
   const dropIntoFolder = (event: DragEvent, parentId: string | null) => {
+    if (isExternalFileDrag(event)) return
     event.preventDefault()
     event.stopPropagation()
     const dragged = readDragItem(event)
@@ -452,6 +453,7 @@ export const ProjectResourceLibrary = ({
   }
 
   const dropBeforeResource = (event: DragEvent, target: ProjectResource) => {
+    if (isExternalFileDrag(event)) return
     event.preventDefault()
     event.stopPropagation()
     const dragged = readDragItem(event)
@@ -482,6 +484,7 @@ export const ProjectResourceLibrary = ({
   }
 
   const dropBeforeFolder = (event: DragEvent, target: ProjectResourceFolder) => {
+    if (isExternalFileDrag(event)) return
     event.preventDefault()
     event.stopPropagation()
     const dragged = readDragItem(event)

@@ -532,6 +532,66 @@ describe('project-level free canvas image generation entry', () => {
     expect(deletedCanvas.selectedNodeId).toBeNull()
   })
 
+  it('promotes a React Flow selection to canonical selection after the pane clears it', async () => {
+    const node = createFreeCanvasTextNode('React Flow selection', { x: 120, y: 160 }, 1)
+    const activeProject = { id: 'project-a', title: 'Project A' } as IPromptProject
+    const onChange = vi.fn()
+    vi.stubGlobal('HTMLElement', class HTMLElement {})
+    const props = {
+      activeProject,
+      imageGenerationNodeV1: true,
+      onBack: vi.fn(),
+      onRenameProject: vi.fn(),
+      onSave: vi.fn(),
+      onChange
+    }
+    let canvas = createFreeCanvasProject(1, { nodes: [node], selectedNodeId: node.id })
+    let renderer!: ReturnType<typeof create>
+    await act(async () => {
+      renderer = create(<FreeCanvasBuilderScreen {...props} freeCanvas={canvas} />)
+    })
+
+    const getReactFlow = () => renderer.root.find(candidate => (
+      typeof candidate.props.onNodesChange === 'function' && Array.isArray(candidate.props.nodes)
+    ))
+
+    act(() => getReactFlow().props.onPaneClick())
+    canvas = onChange.mock.calls[onChange.mock.calls.length - 1][0]
+    expect(canvas.selectedNodeId).toBeNull()
+    await act(async () => {
+      renderer.update(<FreeCanvasBuilderScreen {...props} freeCanvas={canvas} />)
+    })
+
+    act(() => getReactFlow().props.onSelectionChange({
+      nodes: [getReactFlow().props.nodes[0]],
+      edges: []
+    }))
+    const selectedCanvas = onChange.mock.calls[onChange.mock.calls.length - 1][0]
+    expect(selectedCanvas.selectedNodeId).toBe(node.id)
+    expect(getReactFlow().props.nodes.filter((candidate: { selected?: boolean }) => candidate.selected))
+      .toHaveLength(1)
+
+    const keydownHandlers = vi.mocked(window.addEventListener).mock.calls
+      .filter(([eventName]) => eventName === 'keydown')
+      .map(([, handler]) => handler as EventListener)
+    const event = {
+      key: 'Delete',
+      target: null,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      preventDefault: vi.fn()
+    } as unknown as KeyboardEvent
+
+    act(() => keydownHandlers.forEach(handler => handler(event)))
+
+    const deletedCanvas = onChange.mock.calls[onChange.mock.calls.length - 1][0]
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(deletedCanvas.nodes).toEqual([])
+    expect(deletedCanvas.selectedNodeId).toBeNull()
+  })
+
   it('deletes the selected text node with Backspace outside text editing', async () => {
     const node = createFreeCanvasTextNode('Delete me', { x: 120, y: 160 }, 1)
     const onChange = vi.fn()

@@ -487,9 +487,13 @@ const FreeCanvasBuilderInner = ({
     { type: 'custom', label: cardTypeLabel('custom') }
   ], [cardTypeLabel])
 
-  const commitCanvasSelection = useCallback((canvas: IFreeCanvasProject, nodeId: string | null) => {
+  const commitCanvasSelection = useCallback((
+    canvas: IFreeCanvasProject,
+    nodeId: string | null,
+    visualNodeIds = nodeId ? [nodeId] : []
+  ) => {
     const nextCanvas = { ...canvas, selectedNodeId: nodeId }
-    setSelectedNodeIds(nodeId ? [nodeId] : [])
+    setSelectedNodeIds(visualNodeIds)
     emitGenerationCanvas(nextCanvas)
     return nextCanvas
   }, [emitGenerationCanvas])
@@ -2154,13 +2158,21 @@ const FreeCanvasBuilderInner = ({
 
   const handleSelectionChange = useCallback<OnSelectionChangeFunc<FreeCanvasFlowNode>>(({ nodes: selection }) => {
     const nextNodeIds = selection.map(node => node.id)
-    setSelectedNodeIds(current => (
-      current.length === nextNodeIds.length && current.every((nodeId, index) => nodeId === nextNodeIds[index])
-        ? current
-        : nextNodeIds
-    ))
+    const currentCanvas = freeCanvasRef.current
+    const currentNodeId = currentCanvas.selectedNodeId || null
+    const nextNodeId = nextNodeIds.length === 0
+      ? null
+      : currentNodeId && nextNodeIds.includes(currentNodeId) ? currentNodeId : nextNodeIds[0]
+    if (nextNodeId !== currentNodeId) commitCanvasSelection(currentCanvas, nextNodeId, nextNodeIds)
+    else {
+      setSelectedNodeIds(current => (
+        current.length === nextNodeIds.length && current.every((nodeId, index) => nodeId === nextNodeIds[index])
+          ? current
+          : nextNodeIds
+      ))
+    }
     setNodeContextMenu(null)
-  }, [])
+  }, [commitCanvasSelection])
 
   const cancelImageCrop = () => setCropNodeId(null)
 

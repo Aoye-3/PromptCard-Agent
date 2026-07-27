@@ -58,6 +58,12 @@ Commit subject: `Restore Playwright acceptance baseline`. The report is included
 - The strict placeholder assertion exposed a real React Flow measurement race: the running image node existed and was selected, but its wrapper remained `visibility: hidden` until ResizeObserver populated dimensions. Image nodes now provide their already-known width and height through React Flow's `initialWidth` and `initialHeight`, making the placeholder visible from its first committed render. Before this fix the isolated spec could pass while the affected suite failed 18/19 at this assertion; afterward both the isolated spec and all 19 affected tests passed.
 - Review verification: targeted component test 18/18 passed; image-generation E2E 1/1 passed; affected E2E 19/19 passed; build and `git diff --check` passed; ports 38100-38102 were released after the run.
 
+### Review round 2
+
+- React Flow's `onSelectionChange` now synchronizes canonical selection without collapsing marquee selection: an empty selection clears `selectedNodeId`; a selection that still contains the canonical node preserves it; otherwise the first selected node becomes canonical. The shared helper accepts the complete visual ID list so canonical and visual state are committed together when promotion or clearing is required.
+- Added a regression for pane clear → React Flow selects a node → canonical node promotion → Delete removes that visually selected node. The existing two-node marquee regression remains green.
+- Round 2 verification: targeted component test 19/19 passed; selection E2E 5/5 passed; affected E2E 19/19 passed; build and `git diff --check` passed; ports 38100-38102 were released after the runs.
+
 ## Concerns
 
 No blocking concerns. Build warnings listed above predate and are unrelated to this task. The runner's failure-summary guard intentionally depends on the configured Playwright `list` reporter format in addition to the child exit code; if the repository changes reporters, that guard should be updated with it.

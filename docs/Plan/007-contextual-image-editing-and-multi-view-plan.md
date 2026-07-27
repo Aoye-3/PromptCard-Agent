@@ -4,16 +4,16 @@
 
 - Status: `Active`
 - Created: `2026-07-24`
-- Last reviewed: `2026-07-26`
+- Last reviewed: `2026-07-27`
 - Scope owner: Free Canvas, Image Generation, Agent Runtime, PromptCard Storage
 - Current reference implementation: Seedream 5.0 Pro
 - Explicit UI freeze: this plan must not change or repurpose the existing right-side `Agent / 图片生成 / Prompt库` structure; `作为参考` is the sole state-level bridge and may append to the existing 图片生成 Composer
-- Staged backend acceptance: `B1/B2/B7 code and Fake Provider closure complete; unified human acceptance pending`
+- Staged backend acceptance: `B0/B1/B2/B7 automated zero-cost evidence ready; unified human approval pending; no live Provider used`
 - Review trigger: before the first implementation task, after any model-catalog contract change, and before enabling multi-view outside development
 
 ## Implementation Ledger
 
-Last implementation update: `2026-07-26`.
+Last implementation update: `2026-07-27`.
 
 Status meanings:
 
@@ -33,9 +33,9 @@ Status meanings:
 | 7. Shared operation workbench | Implemented + targeted verified | Reference, effect, region, erase, outpaint, text, enhance and subject configurations submit only from explicit Generate. |
 | 8. Explicit durable recipe snapshots | Implemented + backend verified | Provider-neutral operation snapshots cross the browser/Runtime/Storage boundary and inconsistent context/source/mode/group requests are rejected before credentials or Provider access. |
 | 9. Minimum creative lineage | Implemented + targeted verified | Source identities, recipe/version, preservation intent and optional group/item/view are immutable run metadata; no schema-v8 table added. |
-| 10. Multi-view workbench | Implemented; frontend acceptance pending | Exact visible request count, 3×3 discrete camera positions, supplemental 3/4/rear views, the `正视 / 左视 / 俯视` model-three-view shortcut, focus behavior and 3D limitation have component coverage; browser E2E remains. |
+| 10. Multi-view workbench | Implemented; frontend acceptance pending | Exact visible request count, 3×3 discrete camera positions, supplemental 3/4/rear views, the `正视 / 左视 / 俯视` model-three-view shortcut, focus behavior and 3D limitation have component and zero-cost browser E2E coverage; unified human visual acceptance remains. |
 | 11. Multi-view persistence/scheduling | Implemented + backend verified | N stable placeholders are saved, then N queued runs are created atomically through batch prepare before the first independent Provider request. |
-| 12. Group recovery/presentation | Implemented + targeted verified; final human acceptance pending | Queued authorized members rebuild the exact request from immutable snapshots at concurrency 1; running members only poll; active/scheduled run IDs prevent duplicate browser submission. |
+| 12. Group recovery/presentation | Implemented + targeted verified; final human acceptance pending | Queued authorized members rebuild the exact request from immutable snapshots at concurrency 1; running members only poll; active/scheduled run IDs prevent duplicate browser submission. Local Fake Provider E2E covers partial recovery, failed-member-only retry, geometry preservation, reload and project-switch deduplication. |
 | 13. Visible export | Implemented; frontend acceptance pending | Copy/download rasterize crop, flip and annotations without creating an asset; original download remains separate. Clipboard/browser-error E2E remains. |
 | 14. Subject extraction | Implemented experimental; evaluation pending | Executable solid-background redraw workbench; never described as transparent alpha extraction. |
 | 15. Text edit | Implemented experimental; evaluation pending | Executable region-guided workbench with exact replacement instruction; CJK/Latin/layout live fixtures remain unrun. |
@@ -48,9 +48,23 @@ Backend-complete-then-human-acceptance order requested by the user:
 3. perform one unified human acceptance after the backend closure instead of stopping between implementation gates;
 4. do not perform paid live Seedream evaluations without explicit cost authorization; record their absence rather than inferring a pass.
 
-The complete frontend Vitest suite passed on `2026-07-26` through `npm.cmd run test:frontend`: four bounded sequential shards completed 106 test files and 639 tests without leaving a Runtime process behind. This supersedes the two interrupted full-suite attempts from `2026-07-24`. Production build, browser E2E, viewport/zoom, focus, accessibility and reload acceptance remain separate gates.
+The complete frontend Vitest suite passed on `2026-07-27` through `npm.cmd run test:frontend`: four bounded sequential shards completed 79 test files and 642 tests. The production build and the repository-local Playwright runner also pass; the full E2E suite completed 24/24 in 52.7 seconds and released its local service ports. Viewport/zoom, focus, accessibility and the remaining human observations remain separate gates.
 
 The canonical human browser procedure is maintained in [Manual Frontend Acceptance](../quality/manual-frontend-acceptance.md). Complete its F1-F7 gates and retain the required evidence before changing any `Implemented; frontend acceptance pending` ledger entry to accepted. Paid live-provider evaluation remains a separate explicitly authorized gate.
+
+### Zero-cost unified evidence (2026-07-27)
+
+Evidence was captured at `997eb9f` after the local commit chain `8306a6f -> 9319533 -> 3a21d5a -> 3e1896e -> 595c54f -> 997eb9f`. The sanitized request, Run, Storage, recovery, Console/Network and screenshot package is under [`output/playwright/plan-007/`](../../output/playwright/plan-007/); it contains no credentials, authorization headers, temporary Provider URLs, raw Provider responses, or local secrets.
+
+| Evidence | Result |
+| --- | --- |
+| Existing browser baseline | 24/24 E2E passed in 52.7s; repository-local browser cache and clean service shutdown verified. |
+| Multi-view image configuration | 3/3 passed twice; dedicated F6 suite passed 2/2 in 47.2s. |
+| Frontend / Runtime / Storage | 642 frontend tests, 96 Runtime image-generation tests, and 87 Storage tests passed. |
+| Build and static gates | Production build, `agent:check`, `git diff --check`, and credential/URL/schema/test-route scans passed. |
+| Browser evidence harness | 1/1 passed in 41.3s at Chromium 1280x720 and 100% browser text zoom. |
+
+B0, B1, B2, and B7 are **automated evidence ready, not human accepted**. Unified human approval remains pending. F1 has open finding E-001, F4 is limited to the multi-view pre-submit boundary, and F2/F3/F5/F7 still require human observation. No live Provider request was made; B3-B6 and B8-B9 remain unexecuted and require separate paid-call authorization.
 
 ### Backend closure result (2026-07-26)
 
@@ -169,6 +183,8 @@ Before requesting human acceptance, provide:
 
 **Description:** Verify the current Gateway, PromptCard Storage, connection, credential, assignment, catalog, and rollout boundaries without submitting an image request. This gate may add or correct focused diagnostics/tests only when the existing evidence is insufficient.
 
+**2026-07-27 status:** Automated zero-cost evidence is ready in `output/playwright/plan-007/b0-readiness.json`; this gate is not human accepted and its checkboxes remain open.
+
 **Acceptance criteria:**
 
 - [ ] Gateway and PromptCard Storage start and report health without a configured image credential.
@@ -198,6 +214,8 @@ Before requesting human acceptance, provide:
 
 **Description:** Accept the provider-neutral operation payload as durable product meaning without invoking a provider. Structural validation already exists; this gate proves or adds the semantic cross-field rules needed to reject inconsistent recipes, sources, and multi-view member metadata before credential access.
 
+**2026-07-27 status:** Sanitized automated snapshot and reload evidence is ready in `output/playwright/plan-007/b1-snapshot.json`; this gate is not human accepted and its checkboxes remain open.
+
 **Acceptance criteria:**
 
 - [ ] operation, recipe ID/version, source identities, preservation intents, parameters, and optional group/item/view fields round-trip unchanged.
@@ -225,6 +243,8 @@ Before requesting human acceptance, provide:
 ### Gate B2: Fake-provider effect-render vertical slice
 
 **Description:** Run one effect-render recipe from an already persisted placeholder through Gateway, fake provider, output localization, Storage, terminal run state, and in-place canvas hydration. This gate proves lifecycle and lineage without cost.
+
+**2026-07-27 status:** Automated zero-cost lifecycle tests and the browser pre-submit boundary record in `output/playwright/plan-007/b2-lifecycle.json` are ready; this gate is not human accepted and its checkboxes remain open.
 
 **Acceptance criteria:**
 
@@ -353,6 +373,8 @@ Before requesting human acceptance, provide:
 ### Gate B7: Fake-provider durable multi-view group
 
 **Description:** Accept application-batch multi-view semantics with no live provider. Multi-view is N independent durable member runs linked by one group ID, not one provider-native multi-output request.
+
+**2026-07-27 status:** Automated local Fake Provider recovery evidence is ready in `output/playwright/plan-007/b7-multiview.json`; this gate is not human accepted and its checkboxes remain open.
 
 **Acceptance criteria:**
 

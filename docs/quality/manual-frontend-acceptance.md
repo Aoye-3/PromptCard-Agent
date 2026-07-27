@@ -42,6 +42,29 @@ For every failure, record:
 
 Do not include credentials, authorization headers, raw provider responses, temporary provider URLs, or local secrets in the evidence.
 
+## Plan 007 Run Record (2026-07-27)
+
+This record covers commit `997eb9f` using workspace-local frontend, Runtime fixture, Storage fixture, and local Fake Provider only. Sanitized evidence is stored under [`output/playwright/plan-007/`](../../output/playwright/plan-007/). The evidence harness passed 1/1 in 41.3 seconds at Chromium 1280x720 and 100% browser text zoom; the dedicated F6 suite passed 2/2 in 47.2 seconds. Every human decision below remains **Pending unified human acceptance**; this record does not claim user approval.
+
+| Gate | Automated evidence | Human status / remaining observation |
+| --- | --- | --- |
+| F1 | Functional slice PASS: three nodes and the source asset were present before and after save/reload; Fit View and restored visibility were exercised. | Pending unified human acceptance. E-001 remains open, so this is not a clean Console pass. |
+| F2 | Not executed in this run. | Pending unified human acceptance: four-corner containment, 25/100/200% canvas zoom, selection behavior, and dismissal consistency. |
+| F3 | Not executed in this run. | Pending unified human acceptance: keyboard/focus checks and real Windows high-contrast plus 200% text-zoom readability; no pass is inferred. |
+| F4 | Multi-view pre-submit slice PASS: 0 generation POSTs, 0 Runs, 0 Fake Provider calls; right-side draft and active image-generation tab remained stable. | Pending unified human acceptance: all other enabled workbenches and the `As reference` append-only flow. |
+| F5 | Not executed in this run. | Pending unified human acceptance: non-destructive editing, Undo/Redo, original-versus-visible export, reload, and source retention after result deletion. |
+| F6 | Automated Fake Provider closure PASS: success, partial, failed-member-only retry, geometry, reload/project-switch deduplication, order, and lineage. | Pending unified human acceptance: visual review is still required. |
+| F7 | Not executed in this run. | Pending unified human acceptance: document/image/draft/run separation and supported versus capability-limited model behavior. |
+
+Recorded findings:
+
+| ID | Observation | Owner | Severity | Release disposition |
+| --- | --- | --- | --- | --- |
+| E-001 | A PUT was cancelled near reload and surfaced one `StorageHttpError`; before/after Storage evidence still retained all three nodes and the source asset. | Codex / test harness | Medium | Triage before unified approval. If normal manual save/reload reproduces it, approval is blocked. |
+| E-002 | The Fake fixture returned 404 for four generic Runtime/status probes, and the screenshot showed disconnected status. This does not establish a production Runtime defect. | Codex / test fixture | Low | Mock/document the fixture route or confirm manually before relying on Agent-tab status visuals. |
+
+B3-B6 and B8-B9 were not executed. They remain subject to their existing paid-call authorization and live-provider acceptance requirements.
+
 ## F1: Populated Canvas Visibility
 
 1. Open the populated canvas and wait for initial measurement to settle.

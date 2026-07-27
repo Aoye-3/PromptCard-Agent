@@ -45,7 +45,7 @@ test('creates a project without refetching the full project list', async ({ page
   releaseCreateRequest()
 })
 
-test('creates an object board node from the free-canvas toolbar', async ({ page }) => {
+test('creates a text node from the free-canvas toolbar', async ({ page }) => {
   await page.route('**/storage-api/projects', async route => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { projects: [] } })
@@ -58,11 +58,13 @@ test('creates an object board node from the free-canvas toolbar', async ({ page 
   await page.goto('/')
   await page.getByText('Create project').click()
   await page.locator('[data-builder-template-id]').first().click()
-  await page.getByTitle('物品版').click()
+  await page.getByTitle('Text').click()
+  const editor = page.locator('[data-free-canvas-text-node] [contenteditable="true"]')
+  await expect(editor).toBeVisible()
+  await editor.fill('Toolbar-created text node')
+  await editor.evaluate(element => (element as HTMLElement).blur())
 
-  await expect(page.locator('[data-free-canvas-screen]').getByText('物品版 #1', { exact: true }).first()).toBeVisible()
-  await expect(page.locator('[data-free-canvas-screen]').getByText('物品设定批注', { exact: true }).first()).toBeVisible()
-  await expect(page.getByRole('button', { name: '复制物品版 #1' })).toBeVisible()
+  await expect(page.locator('[data-free-canvas-text-node]').filter({ hasText: 'Toolbar-created text node' })).toHaveCount(1)
 })
 
 test('keeps a deleted free-canvas node removed after a delayed stale save response', async ({ page }) => {
@@ -104,18 +106,21 @@ test('keeps a deleted free-canvas node removed after a delayed stale save respon
   await page.goto('/')
   await page.getByText('Create project').click()
   await page.locator('[data-builder-template-id]').first().click()
-  await page.locator('[data-free-canvas-toolbar] button[title="物品版"]').click()
+  await page.getByTitle('Text').click()
+  const editor = page.locator('[data-free-canvas-text-node] [contenteditable="true"]')
+  await editor.fill('Delayed save text node')
+  await editor.evaluate(element => (element as HTMLElement).blur())
 
-  const objectNode = page.locator('.react-flow__node').filter({ hasText: '物品版 #1' })
-  await expect(objectNode).toBeVisible()
+  const textNode = page.locator('.react-flow__node').filter({ hasText: 'Delayed save text node' })
+  await expect(textNode).toBeVisible()
   await updateStarted
-  await objectNode.click()
-  await objectNode.focus()
+  await textNode.click()
+  await textNode.focus()
   await page.keyboard.press('Delete')
-  await expect(objectNode).toBeHidden({ timeout: 500 })
+  await expect(textNode).toBeHidden({ timeout: 500 })
 
   releaseUpdate()
-  await expect(objectNode).toBeHidden()
+  await expect(textNode).toBeHidden()
 })
 
 test('removes a project from the list before the trash request resolves', async ({ page }) => {
@@ -183,7 +188,7 @@ test('retries a failed optimistic create as POST when the user saves', async ({ 
   await page.locator('[data-builder-template-id]').first().click()
   await expect(page.getByText('保存失败')).toBeVisible()
 
-  await page.getByRole('button', { name: '保存项目' }).click()
+  await page.getByTitle('Save').click()
   await expect(page.getByText('保存失败')).toBeHidden()
 
   expect(createAttempts).toBe(2)

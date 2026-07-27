@@ -2073,7 +2073,7 @@ const FreeCanvasBuilderInner = ({
     id: node.id,
     type: node.kind === 'image-generator' ? 'imageGeneratorNode' : 'freeCanvasNode',
     position: node.position,
-    selected: node.id === freeCanvas.selectedNodeId,
+    selected: selectedNodeIds.includes(node.id),
     deletable: !isRunningFreeCanvasImageGeneration(node),
     style: node.kind === 'image' ? { width: node.width, height: node.height } : undefined,
     data: {
@@ -2102,7 +2102,7 @@ const FreeCanvasBuilderInner = ({
         referenceCount: freeCanvas.edges.filter(edge => edge.target === node.id && edge.targetHandle === 'reference-image').length
       } : undefined
     }
-  })), [activeProject.id, continueLegacyImageCreation, copyTextNode, editingNodeId, executeImageCommand, freeCanvas.edges, freeCanvas.nodes, freeCanvas.selectedNodeId, onConfigureImageModel, replaceTextRange, resizeImageNode, selectedImageCommands, selectedImageNode?.id, updateTextStyle])
+  })), [activeProject.id, continueLegacyImageCreation, copyTextNode, editingNodeId, executeImageCommand, freeCanvas.edges, freeCanvas.nodes, onConfigureImageModel, replaceTextRange, resizeImageNode, selectedImageCommands, selectedImageNode?.id, selectedNodeIds, updateTextStyle])
 
   const [flowNodes, setFlowNodes] = useState<FreeCanvasFlowNode[]>(nodes)
   useEffect(() => {

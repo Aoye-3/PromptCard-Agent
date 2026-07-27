@@ -5,6 +5,10 @@ test('dragging empty canvas creates a multi-selection box instead of panning', a
   await openFreeCanvasProject(page)
 
   const firstNode = await createFilledTextNode(page, 'Selection node one')
+  const firstNodeBeforeMove = await requiredBox(firstNode)
+  await dragFromLocator(page, firstNode.getByText('Selection node one'), -300, 220)
+  const firstNodeAfterMove = await requiredBox(firstNode)
+  expect(firstNodeAfterMove.x).toBeLessThan(firstNodeBeforeMove.x - 200)
   const secondNode = await createFilledTextNode(page, 'Selection node two')
   await expect(firstNode).toHaveCount(1)
   await expect(secondNode).toHaveCount(1)
@@ -17,6 +21,8 @@ test('dragging empty canvas creates a multi-selection box instead of panning', a
   await expect(page.locator('.react-flow__node.selected')).toHaveCount(2)
   await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(0)
 
+  const pane = await requiredBox(page.locator('.react-flow__pane'))
+  await page.mouse.click(pane.x + 4, pane.y + 4)
   await firstNode.click()
   await expect(page.locator('.react-flow__node.selected')).toHaveCount(1)
   await expect(page.getByRole('button', { name: 'Edit' })).toHaveCount(1)
@@ -157,6 +163,7 @@ async function dragPane(page: Page, startX: number, startY: number, deltaX: numb
 
 async function dragSelectionAround(page: Page, locators: Locator[]) {
   const boxes = await Promise.all(locators.map(requiredBox))
+  const pane = await requiredBox(page.locator('.react-flow__pane'))
   const left = Math.min(...boxes.map(box => box.x))
   const top = Math.min(...boxes.map(box => box.y))
   const right = Math.max(...boxes.map(box => box.x + box.width))
@@ -164,10 +171,10 @@ async function dragSelectionAround(page: Page, locators: Locator[]) {
 
   await dragPane(
     page,
-    Math.max(80, left - 120),
-    Math.max(180, top - 120),
-    right - left + 240,
-    bottom - top + 240
+    Math.max(pane.x + 1, left - 48),
+    Math.max(pane.y + 1, top - 48),
+    Math.min(pane.x + pane.width - 1, right + 48) - Math.max(pane.x + 1, left - 48),
+    Math.min(pane.y + pane.height - 1, bottom + 48) - Math.max(pane.y + 1, top - 48)
   )
 }
 

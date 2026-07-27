@@ -70,7 +70,7 @@ test('drops an image and creates cropped nodes from manual grid lines', async ({
   })
   expect(acceptsSystemFileDrag).toBe(true)
 
-  await page.locator('[data-free-canvas-screen]').evaluate(target => {
+  await page.locator('[data-free-canvas-dropzone]').evaluate(target => {
     const event = new Event('dragenter', { bubbles: true, cancelable: true })
     Object.defineProperty(event, 'dataTransfer', {
       value: { items: [], files: [], types: ['Files'], dropEffect: 'none' }
@@ -79,7 +79,7 @@ test('drops an image and creates cropped nodes from manual grid lines', async ({
   })
   await expect(page.getByText('松开以添加图片')).toBeVisible()
 
-  await page.locator('[data-free-canvas-screen] .react-flow').evaluate((target, bytes) => {
+  await page.locator('[data-free-canvas-dropzone]').evaluate((target, bytes) => {
     const dataTransfer = new DataTransfer()
     dataTransfer.items.add(new File([new Uint8Array(bytes)], 'board.png'))
     target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))
@@ -166,7 +166,7 @@ async function dragRulerToImageCenter(page: Page, rulerLabel: string, xRatio: nu
 }
 
 async function dropImage(page: Page) {
-  await page.locator('[data-free-canvas-screen] .react-flow').evaluate((target, bytes) => {
+  await page.locator('[data-free-canvas-dropzone]').evaluate((target, bytes) => {
     const dataTransfer = new DataTransfer()
     dataTransfer.items.add(new File([new Uint8Array(bytes)], 'board.png'))
     target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))

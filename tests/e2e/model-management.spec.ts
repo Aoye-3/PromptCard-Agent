@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 test.setTimeout(90_000)
 
@@ -7,13 +7,19 @@ const catalog = {
   providers: [{
     id: 'volcengine-ark',
     displayName: 'Volcengine Ark',
-    defaultApiBase: 'https://ark.cn-beijing.volces.com/api/v3'
+    defaultApiBase: 'https://ark.cn-beijing.volces.com/api/v3',
+    integrationGroups: {
+      image: { id: 'volcengine-ark-sdk', displayName: 'Ark SDK', kind: 'sdk' }
+    }
   }],
   models: [{
     id: 'doubao-seedream-5-0-pro-260628',
     providerId: 'volcengine-ark',
     displayName: 'Seedream 5 Pro',
     modality: 'image',
+    integrationGroup: { id: 'volcengine-ark-sdk', displayName: 'Ark SDK', kind: 'sdk' },
+    source: 'provider-catalog',
+    assignable: true,
     capabilities: {
       modes: ['generate', 'edit', 'region-edit'],
       maxReferenceImages: 10,
@@ -28,10 +34,14 @@ test('creates a credential-backed image connection and assigns image.primary wit
   const assignments: Array<Record<string, string>> = []
   let createBody: Record<string, unknown> | null = null
   let assignmentBody: Record<string, unknown> | null = null
+  let catalogRequests = 0
 
   await routeAppStorage(page)
   await routeAgentBootstrap(page)
-  await page.route('**/agent-api/promptcard/runtime/model-catalog', route => route.fulfill({ json: catalog }))
+  await page.route('**/agent-api/promptcard/runtime/model-catalog', route => {
+    catalogRequests += 1
+    return route.fulfill({ json: catalog })
+  })
   await page.route('**/agent-api/promptcard/runtime/model-connections', async route => {
     if (route.request().method() === 'GET') {
       await route.fulfill({ json: { connections } })
@@ -56,6 +66,9 @@ test('creates a credential-backed image connection and assigns image.primary wit
     connections[0].lastTest = { ok: true, checkedAt: 1, message: 'Connection ok.' }
     await route.fulfill({ json: { success: true, message: 'Connection ok.' } })
   })
+  await page.route('**/agent-api/promptcard/runtime/model-connections/ark-task15/models', route => route.fulfill({
+    json: { connectionId: 'ark-task15', providerId: 'volcengine-ark', models: catalog.models }
+  }))
   await page.route('**/agent-api/promptcard/runtime/model-assignments', route => route.fulfill({ json: { assignments } }))
   await page.route('**/agent-api/promptcard/runtime/model-assignments/image.primary', async route => {
     assignmentBody = route.request().postDataJSON() as Record<string, unknown>
@@ -87,6 +100,9 @@ test('creates a credential-backed image connection and assigns image.primary wit
 
   const panel = page.locator('[data-model-management-panel]')
   await expect(panel).toBeVisible()
+  await expect.poll(() => catalogRequests).toBe(1)
+  await expect(panel.locator('option[value="volcengine-ark"]')).toHaveCount(1)
+  await panel.getByRole('combobox', { name: '提供商' }).selectOption('volcengine-ark')
   await panel.locator('input').nth(0).fill('Task15 Ark')
   await expect(panel.getByRole('textbox', { name: 'API 地址' })).toHaveValue('https://ark.cn-beijing.volces.com/api/v3')
   await expect(panel.getByRole('textbox', { name: 'API 地址' })).toHaveAttribute('readonly', '')
@@ -126,28 +142,18 @@ async function routeAppStorage(page: Page) {
 }
 
 async function routeAgentBootstrap(page: Page) {
-  await page.route('**/agent-api/**', async (route: Route) => {
-    const path = new URL(route.request().url()).pathname
-    if (path.endsWith('/health')) {
-      await route.fulfill({ json: { ok: true } })
-      return
-    }
-    if (path.endsWith('/bootstrap')) {
-      await route.fulfill({ json: { user: { id: 'task15', email: 'task15@example.test' } } })
-      return
-    }
-    if (path.endsWith('/me')) {
-      await route.fulfill({ json: { id: 'task15', email: 'task15@example.test' } })
-      return
-    }
-    if (path.endsWith('/catalog')) {
-      await route.fulfill({ json: { models: [], skills: [], tools: [], builtinTools: [] } })
-      return
-    }
-    if (path.endsWith('/model-config')) {
-      await route.fulfill({ json: { modelName: '', apiKeyConfigured: false, availableModels: [] } })
-      return
-    }
-    await route.fulfill({ status: 404, json: { detail: 'unmocked agent route' } })
-  })
+  await page.route('**/agent-api/health', route => route.fulfill({ json: { ok: true } }))
+  await page.route('**/agent-api/promptcard/runtime/status', route => route.fulfill({ json: { ok: true } }))
+  await page.route('**/agent-api/promptcard/runtime/bootstrap', route => route.fulfill({
+    json: { user: { id: 'task15', email: 'task15@example.test' } }
+  }))
+  await page.route('**/agent-api/promptcard/runtime/catalog', route => route.fulfill({
+    json: { models: [], skills: [], tools: [], builtinTools: [] }
+  }))
+  await page.route('**/agent-api/promptcard/runtime/model-config', route => route.fulfill({
+    json: { modelName: '', apiKeyConfigured: false, availableModels: [] }
+  }))
+  await page.route('**/agent-api/promptcard/runtime/me', route => route.fulfill({
+    json: { id: 'task15', email: 'task15@example.test' }
+  }))
 }

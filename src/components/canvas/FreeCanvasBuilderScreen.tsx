@@ -487,17 +487,23 @@ const FreeCanvasBuilderInner = ({
     { type: 'custom', label: cardTypeLabel('custom') }
   ], [cardTypeLabel])
 
+  const commitCanvasSelection = useCallback((canvas: IFreeCanvasProject, nodeId: string | null) => {
+    const nextCanvas = { ...canvas, selectedNodeId: nodeId }
+    setSelectedNodeIds(nodeId ? [nodeId] : [])
+    emitGenerationCanvas(nextCanvas)
+    return nextCanvas
+  }, [emitGenerationCanvas])
+
   const setSelectedNodeId = useCallback((nodeId: string | null) => {
-    onChange({ ...freeCanvas, selectedNodeId: nodeId })
-  }, [freeCanvas, onChange])
+    commitCanvasSelection(freeCanvasRef.current, nodeId)
+  }, [commitCanvasSelection])
 
   const addNode = useCallback((node: IFreeCanvasNode) => {
-    onChange({
+    commitCanvasSelection({
       ...freeCanvas,
-      nodes: [...freeCanvas.nodes, node],
-      selectedNodeId: node.id
-    })
-  }, [freeCanvas, onChange])
+      nodes: [...freeCanvas.nodes, node]
+    }, node.id)
+  }, [commitCanvasSelection, freeCanvas])
 
   const createText = useCallback(() => {
     const node = createFreeCanvasTextNode('', nextNodePosition(reactFlow, freeCanvas.nodes.length))
@@ -526,15 +532,14 @@ const FreeCanvasBuilderInner = ({
       setUploadError(null)
       const uploaded = await uploadFreeCanvasImageFiles(imageFiles, position)
       const imageNodes = uploaded.map(node => createFreeCanvasImageNodeFromMedia(node))
-      onChange({
+      commitCanvasSelection({
         ...freeCanvas,
-        nodes: [...freeCanvas.nodes, ...imageNodes],
-        selectedNodeId: imageNodes[0]?.id || freeCanvas.selectedNodeId || null
-      })
+        nodes: [...freeCanvas.nodes, ...imageNodes]
+      }, imageNodes[0]?.id || freeCanvas.selectedNodeId || null)
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Image upload failed.')
     }
-  }, [freeCanvas, onChange])
+  }, [commitCanvasSelection, freeCanvas])
 
   const placeProjectMaterialAt = useCallback((
     resource: ProjectMaterialCanvasSource,
@@ -559,12 +564,11 @@ const FreeCanvasBuilderInner = ({
       }
     }
     const node = createFreeCanvasImageNodeFromMedia(media)
-    onChange({
+    commitCanvasSelection({
       ...freeCanvas,
-      nodes: [...freeCanvas.nodes, node],
-      selectedNodeId: node.id
-    })
-  }, [freeCanvas, onChange])
+      nodes: [...freeCanvas.nodes, node]
+    }, node.id)
+  }, [commitCanvasSelection, freeCanvas])
 
   const placeProjectMaterial = useCallback((resource: ProjectResource) => {
     const leftInset = resourceLibraryExpanded && window.innerWidth >= 1440 ? 280 : 44
@@ -635,11 +639,10 @@ const FreeCanvasBuilderInner = ({
         })),
         meta: { ...copied.meta, duplicatedFromNodeId: copied.id }
       }
-      onChange({
+      commitCanvasSelection({
         ...current,
-        nodes: [...current.nodes, duplicate],
-        selectedNodeId: duplicate.id
-      })
+        nodes: [...current.nodes, duplicate]
+      }, duplicate.id)
       setClipboardNotice('已粘贴图片节点')
     }
 
@@ -649,7 +652,7 @@ const FreeCanvasBuilderInner = ({
       window.removeEventListener('keydown', handleCopy)
       document.removeEventListener('paste', handlePaste)
     }
-  }, [addImageFiles, annotationEditorNodeId, cropNodeId, onChange, reactFlow])
+  }, [addImageFiles, annotationEditorNodeId, commitCanvasSelection, cropNodeId, reactFlow])
 
   const replaceTextRange = useCallback((nodeId: string, range: { start: number; end: number }, insertedText: string, color: string) => {
     onChange(replaceFreeCanvasTextRange(freeCanvas, nodeId, range, insertedText, color))
@@ -1141,10 +1144,9 @@ const FreeCanvasBuilderInner = ({
       })
       canvasWithPlaceholder = {
         ...current,
-        nodes: [...current.nodes, placeholder],
-        selectedNodeId: placeholder.id
+        nodes: [...current.nodes, placeholder]
       }
-      emitGenerationCanvas(canvasWithPlaceholder)
+      canvasWithPlaceholder = commitCanvasSelection(canvasWithPlaceholder, placeholder.id)
     }
     if (identity.activateConversation && identity.conversationId) {
       imageConversationIntentRef.current = 'active'
@@ -1262,7 +1264,7 @@ const FreeCanvasBuilderInner = ({
         setImageGenerationBusy(false)
       }
     }
-  }, [activeProject.id, emitGenerationCanvas, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversationRuns, loadImageConversations, onPersistCanvas, processPendingImagePlacements, reactFlow, selectedImageModel?.displayName])
+  }, [activeProject.id, commitCanvasSelection, emitGenerationCanvas, imageGenerationBusy, imageGenerationNodeV1, imageModelUsable, loadImageConversationRuns, loadImageConversations, onPersistCanvas, processPendingImagePlacements, reactFlow, selectedImageModel?.displayName])
 
   useEffect(() => {
     const projectId = activeProject.id
@@ -1460,7 +1462,7 @@ const FreeCanvasBuilderInner = ({
       const current = freeCanvasRef.current
       const existing = current.nodes.find(node => node.meta?.generationRunId === turn.id)
       if (existing) {
-        emitGenerationCanvas({ ...current, selectedNodeId: existing.id })
+        commitCanvasSelection(current, existing.id)
         return
       }
       const sourceRun = Object.values(imageConversationRuns).flat().find(run => run.id === turn.id)
@@ -1486,7 +1488,7 @@ const FreeCanvasBuilderInner = ({
           source: 'image-generation-conversation'
         }
       })
-      emitGenerationCanvas({ ...current, nodes: [...current.nodes, image], selectedNodeId: image.id })
+      commitCanvasSelection({ ...current, nodes: [...current.nodes, image] }, image.id)
       return
     }
     restoreImageTurnToComposer(turn)
@@ -1505,7 +1507,7 @@ const FreeCanvasBuilderInner = ({
         }]
       }))
     }
-  }, [emitGenerationCanvas, imageConversationRuns, onOpenMedia, reactFlow, restoreImageTurnToComposer])
+  }, [commitCanvasSelection, imageConversationRuns, onOpenMedia, reactFlow, restoreImageTurnToComposer])
 
   const openImageOperationWorkbench = useCallback(async (
     node: IFreeCanvasImageNode,
@@ -1647,9 +1649,8 @@ const FreeCanvasBuilderInner = ({
   const selectMultiViewMember = useCallback((nodeId: string) => {
     const current = freeCanvasRef.current
     if (!current.nodes.some(node => node.id === nodeId)) return
-    emitGenerationCanvas({ ...current, selectedNodeId: nodeId })
-    setSelectedNodeIds([nodeId])
-  }, [emitGenerationCanvas])
+    commitCanvasSelection(current, nodeId)
+  }, [commitCanvasSelection])
 
   const addCanvasImageAsComposerReference = useCallback((node: IFreeCanvasImageNode) => {
     setRightPanelMode('image-generation')
@@ -1709,8 +1710,10 @@ const FreeCanvasBuilderInner = ({
       command
     )
     canvasCommandHistoryRef.current = applied.history
-    if (applied.project !== freeCanvasRef.current) emitGenerationCanvas(applied.project)
-  }, [emitGenerationCanvas])
+    if (applied.project !== freeCanvasRef.current) {
+      commitCanvasSelection(applied.project, applied.project.selectedNodeId || null)
+    }
+  }, [commitCanvasSelection])
 
   const closeNodeContextMenu = useCallback(() => {
     setNodeContextMenu(current => {
@@ -1726,7 +1729,6 @@ const FreeCanvasBuilderInner = ({
       ? selectedNodeIds
       : [nodeId]
     applyCanvasCommand({ kind: 'delete-nodes', nodeIds })
-    setSelectedNodeIds([])
   }, [applyCanvasCommand, selectedNodeIds])
 
   const rasterVisibleImageNode = useCallback(async (node: IFreeCanvasImageNode): Promise<Blob> => {
@@ -1779,7 +1781,6 @@ const FreeCanvasBuilderInner = ({
     if (commandId === 'duplicate') {
       const duplicate = duplicateCanvasImageNode(node, createLocalId('free-image-copy'))
       applyCanvasCommand({ kind: 'insert-node', node: duplicate, index: current.nodes.length })
-      setSelectedNodeIds([duplicate.id])
       return
     }
     if (commandId === 'delete') {
@@ -1874,14 +1875,14 @@ const FreeCanvasBuilderInner = ({
           ? redoCanvasLocalCommand(canvasCommandHistoryRef.current, freeCanvasRef.current)
           : undoCanvasLocalCommand(canvasCommandHistoryRef.current, freeCanvasRef.current)
         canvasCommandHistoryRef.current = applied.history
-        emitGenerationCanvas(applied.project)
+        commitCanvasSelection(applied.project, applied.project.selectedNodeId || null)
         return
       }
       if (modifier && key === 'y') {
         event.preventDefault()
         const applied = redoCanvasLocalCommand(canvasCommandHistoryRef.current, freeCanvasRef.current)
         canvasCommandHistoryRef.current = applied.history
-        emitGenerationCanvas(applied.project)
+        commitCanvasSelection(applied.project, applied.project.selectedNodeId || null)
         return
       }
       if (modifier && key === 'd') {
@@ -1906,7 +1907,7 @@ const FreeCanvasBuilderInner = ({
     }
     window.addEventListener('keydown', handleLocalShortcut)
     return () => window.removeEventListener('keydown', handleLocalShortcut)
-  }, [deleteCanvasNodes, emitGenerationCanvas, executeImageCommand, isCanvasKeyboardLocked])
+  }, [commitCanvasSelection, deleteCanvasNodes, executeImageCommand, isCanvasKeyboardLocked])
 
   const maximumOperationInputs = selectedImageModel?.capabilities?.references?.maxCount
     ?? selectedImageModel?.capabilities?.maxReferenceImages
@@ -2001,12 +2002,10 @@ const FreeCanvasBuilderInner = ({
       frame
       })
     })
-    const canvasWithGroup = {
+    const canvasWithGroup = commitCanvasSelection({
       ...current,
-      nodes: [...current.nodes, ...placeholders],
-      selectedNodeId: placeholders[0].id
-    }
-    emitGenerationCanvas(canvasWithGroup)
+      nodes: [...current.nodes, ...placeholders]
+    }, placeholders[0].id)
 
     let saved = false
     try {
@@ -2067,7 +2066,7 @@ const FreeCanvasBuilderInner = ({
     ).finally(() => {
       members.forEach(member => scheduledGenerationRunIdsRef.current.delete(member.runId))
     })
-  }, [activeProject.id, emitGenerationCanvas, executeImageDraft, imageComposerDraft.outputFormat, imageComposerDraft.promptOptimization, imageComposerDraft.watermark, onPersistCanvas, selectedImageConnection, selectedImageModel])
+  }, [activeProject.id, commitCanvasSelection, emitGenerationCanvas, executeImageDraft, imageComposerDraft.outputFormat, imageComposerDraft.promptOptimization, imageComposerDraft.watermark, onPersistCanvas, selectedImageConnection, selectedImageModel])
 
   const nodes = useMemo<FreeCanvasFlowNode[]>(() => freeCanvas.nodes.map(node => ({
     id: node.id,
@@ -2075,6 +2074,8 @@ const FreeCanvasBuilderInner = ({
     position: node.position,
     selected: selectedNodeIds.includes(node.id),
     deletable: !isRunningFreeCanvasImageGeneration(node),
+    initialWidth: node.kind === 'image' ? node.width : undefined,
+    initialHeight: node.kind === 'image' ? node.height : undefined,
     style: node.kind === 'image' ? { width: node.width, height: node.height } : undefined,
     data: {
       canvasNode: node,
@@ -2145,7 +2146,8 @@ const FreeCanvasBuilderInner = ({
     }
     const removedNodeIds = changes.filter(change => change.type === 'remove').map(change => change.id)
     if (removedNodeIds.length > 0 && !isCanvasKeyboardLocked) {
-      emitGenerationCanvas(removeFreeCanvasProjectNodes(freeCanvasRef.current, removedNodeIds))
+      const nextCanvas = removeFreeCanvasProjectNodes(freeCanvasRef.current, removedNodeIds)
+      commitCanvasSelection(nextCanvas, nextCanvas.selectedNodeId || null)
       setEditingNodeId(current => current && removedNodeIds.includes(current) ? null : current)
     }
   }
@@ -2166,18 +2168,16 @@ const FreeCanvasBuilderInner = ({
     if (!cropNode) return
     const croppedNodes = createFreeCanvasCroppedNodes(imageNodeToMedia(cropNode), lines)
       .map(media => createFreeCanvasImageNodeFromMedia(media))
-    onChange({
+    commitCanvasSelection({
       ...freeCanvas,
-      nodes: [...freeCanvas.nodes, ...croppedNodes],
-      selectedNodeId: croppedNodes[0]?.id || freeCanvas.selectedNodeId || null
-    })
+      nodes: [...freeCanvas.nodes, ...croppedNodes]
+    }, croppedNodes[0]?.id || freeCanvas.selectedNodeId || null)
     setCropNodeId(null)
   }
 
   const handleNodeClick: NodeMouseHandler<FreeCanvasFlowNode> = (_event, node) => {
     setNodeContextMenu(null)
     setSelectedEdgeId(null)
-    setSelectedNodeIds([node.id])
     setSelectedNodeId(node.id)
   }
 
@@ -2192,7 +2192,6 @@ const FreeCanvasBuilderInner = ({
     }
     const preservesSelection = selectedNodeIds.includes(node.id) || freeCanvas.selectedNodeId === node.id
     if (!preservesSelection) {
-      setSelectedNodeIds([node.id])
       setSelectedNodeId(node.id)
     }
     setNodeContextMenu({
@@ -2311,7 +2310,7 @@ const FreeCanvasBuilderInner = ({
         proposal.userText,
         nextNodePosition(reactFlow, freeCanvas.nodes.length)
       )
-      onChange({
+      commitCanvasSelection({
         ...freeCanvas,
         nodes: [
           ...freeCanvas.nodes,
@@ -2319,9 +2318,8 @@ const FreeCanvasBuilderInner = ({
             ...node,
             title: proposal.title?.trim() || node.title
           }
-        ],
-        selectedNodeId: node.id
-      })
+        ]
+      }, node.id)
     }
   }
 
@@ -2425,7 +2423,6 @@ const FreeCanvasBuilderInner = ({
             onEdgeClick={handleEdgeClick}
             onPaneClick={() => {
               setNodeContextMenu(null)
-              setSelectedNodeIds([])
               setSelectedNodeId(null)
               setSelectedEdgeId(null)
               setEditingNodeId(null)

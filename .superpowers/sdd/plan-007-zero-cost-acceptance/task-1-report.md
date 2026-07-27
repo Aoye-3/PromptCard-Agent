@@ -50,6 +50,14 @@ Commit subject: `Restore Playwright acceptance baseline`. The report is included
 - Assertions still cover creation, deletion, retries, two-node selection, image-generation persistence/provider behavior, secret non-echoing, and default model assignment.
 - Exact model-management mocks prevent accidental real Runtime dependence.
 
+## Review fixes
+
+- Added `commitCanvasSelection`, a single-node selection helper that updates both the persisted `freeCanvas.selectedNodeId` and React Flow's visual `selectedNodeIds`. Toolbar creation, uploads, material placement, paste/duplicate, generation placeholders, history placement, multi-view selection, crop output, Agent creation, node removal, and command execute/undo/redo paths now use the same synchronization point. Marquee selection continues to retain multiple visual node IDs.
+- Added a component regression that starts with an existing selection, creates Text from the toolbar, verifies only the new node is visually selected, and verifies Delete removes that visually selected node while retaining the original.
+- Restored exact contenteditable assertions for injected/restored prompt text and restored `toBeVisible` for the running generation placeholder.
+- The strict placeholder assertion exposed a real React Flow measurement race: the running image node existed and was selected, but its wrapper remained `visibility: hidden` until ResizeObserver populated dimensions. Image nodes now provide their already-known width and height through React Flow's `initialWidth` and `initialHeight`, making the placeholder visible from its first committed render. Before this fix the isolated spec could pass while the affected suite failed 18/19 at this assertion; afterward both the isolated spec and all 19 affected tests passed.
+- Review verification: targeted component test 18/18 passed; image-generation E2E 1/1 passed; affected E2E 19/19 passed; build and `git diff --check` passed; ports 38100-38102 were released after the run.
+
 ## Concerns
 
 No blocking concerns. Build warnings listed above predate and are unrelated to this task. The runner's failure-summary guard intentionally depends on the configured Playwright `list` reporter format in addition to the child exit code; if the repository changes reporters, that guard should be updated with it.

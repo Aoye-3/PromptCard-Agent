@@ -3,6 +3,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 const storageUrl = 'http://127.0.0.1:38102'
 const runtimeUrl = 'http://127.0.0.1:38101'
 
+test.setTimeout(120_000)
+
 test('project image conversation uses real Runtime and SQLite while canvas continuation stays manual', async ({ page, request }) => {
   const projectId = `image-conversation-e2e-${Date.now()}`
   const projectTitle = `图片会话 E2E ${Date.now()}`

@@ -2,11 +2,11 @@
 
 ## Outcome
 
-The repository's normal `npm.cmd run test:e2e` entry point now pins Playwright to the repository-local `.playwright-browsers` directory, propagates failed runs as a non-zero exit, bounds hung runs, and tears down the Playwright process tree. All 19 tests in the six affected specs pass with one worker. No live image provider was called; the image-generation test used the local deterministic fixture runtime and SQLite storage service.
+The repository's normal `npm.cmd run test:e2e` entry point now pins Playwright to the repository-local `.playwright-browsers` directory and invokes the locally installed Playwright command directly through npm's native Windows command process. The complete 24-test suite passes and exits normally. No live image provider was called; the image-generation test used the local deterministic fixture runtime and SQLite storage service.
 
 ## Diagnoses and fixes
 
-- The package script invoked Playwright without setting `PLAYWRIGHT_BROWSERS_PATH`, so Windows could resolve the browser cache on `C:`. `scripts/run-e2e-tests.ps1` now resolves the browser directory under the repository, invokes the installed Playwright Node CLI, captures logs, enforces a bounded timeout, kills the owned process tree on timeout, and preserves a failed test result even when the Windows child process reports zero after Playwright printed a failure summary.
+- The package script invoked Playwright without setting `PLAYWRIGHT_BROWSERS_PATH`, so Windows could resolve the browser cache on `C:`. The npm script now sets that variable to `%CD%\.playwright-browsers` and directly invokes npm's local `playwright` binary, preserving native command exit and teardown behavior without an intermediate PowerShell process.
 - Image file drops targeted a React Flow descendant rather than the actual drop handler. The crop spec now dispatches to `[data-free-canvas-dropzone]`.
 - React Flow node selection was derived from only `selectedNodeId`, which lost the multi-selection visual invariant. Flow nodes now derive `selected` from `selectedNodeIds`; the marquee test explicitly verifies two selected nodes and subsequent single-selection behavior.
 - Current toolbar actions create text nodes rather than removed object-board UI, and the save control is icon-labelled `Save`. The optimistic-update tests now exercise those current flows without weakening the create/delete/retry assertions.
@@ -64,6 +64,14 @@ Commit subject: `Restore Playwright acceptance baseline`. The report is included
 - Added a regression for pane clear → React Flow selects a node → canonical node promotion → Delete removes that visually selected node. The existing two-node marquee regression remains green.
 - Round 2 verification: targeted component test 19/19 passed; selection E2E 5/5 passed; affected E2E 19/19 passed; build and `git diff --check` passed; ports 38100-38102 were released after the runs.
 
+### Entry-point follow-up
+
+- The first no-argument PowerShell implementation passed a null entry to `Start-Process -ArgumentList`. Later synchronous PowerShell variants launched Playwright correctly but remained alive after the test worker and web servers had finished.
+- A bare `npm.cmd run test:e2e` successfully launched all 24 tests, confirming the no-argument path. The first full run exposed two long-chain specs at the previous global 30-second timeout; the project image-conversation chain now declares a scoped 120-second timeout, while the global Playwright timeout is unchanged.
+- Direct terminal `npx.cmd playwright test` runs exited normally, while PowerShell-to-Playwright variants hung with the same config and tests. The final npm script therefore stays in npm's native Windows command process, sets the local browser path inline, and invokes the installed `playwright` binary directly. The diagnostic global-config experiments were reverted completely.
+- Final native-entry verification: bare `npm.cmd run test:e2e` passed 24/24 in 52.7 seconds with exit code 0, and ports 38100-38102 were released.
+- Forwarded arguments and failure propagation were verified without modifying fixtures: `npm.cmd run test:e2e -- --grep=__intentional_no_match__` reached Playwright, reported `No tests found`, returned exit code 1, and released ports 38100-38102.
+
 ## Concerns
 
-No blocking concerns. Build warnings listed above predate and are unrelated to this task. The runner's failure-summary guard intentionally depends on the configured Playwright `list` reporter format in addition to the child exit code; if the repository changes reporters, that guard should be updated with it.
+No blocking concerns. Build warnings listed above predate and are unrelated to this task.

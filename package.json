@@ -21,7 +21,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:frontend": "powershell -ExecutionPolicy Bypass -File scripts/run-frontend-tests.ps1",
-    "test:e2e": "powershell -ExecutionPolicy Bypass -File scripts/run-e2e-tests.ps1"
+    "test:e2e": "set \"PLAYWRIGHT_BROWSERS_PATH=%CD%\\.playwright-browsers\" && playwright test"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "^0.80.8",

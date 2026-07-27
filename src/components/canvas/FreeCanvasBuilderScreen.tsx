@@ -1012,7 +1012,11 @@ const FreeCanvasBuilderInner = ({
     let timeoutId: ReturnType<typeof setTimeout> | null = null
     const reconcile = async () => {
       const projectId = activeProject.id
-      const runningNodes = freeCanvasRef.current.nodes.filter(isRunningFreeCanvasImageGeneration)
+      const runningNodes = freeCanvasRef.current.nodes.filter(node => {
+        if (!isRunningFreeCanvasImageGeneration(node)) return false
+        const runId = String(node.meta?.generationRunId || '')
+        return !scheduledGenerationRunIdsRef.current.has(runId)
+      })
       if (runningNodes.length === 0) return
       const runs = await Promise.all(runningNodes.map(async node => {
         const runId = String(node.meta?.generationRunId || '')
@@ -2011,6 +2015,7 @@ const FreeCanvasBuilderInner = ({
       nodes: [...current.nodes, ...placeholders]
     }, placeholders[0].id)
 
+    members.forEach(member => scheduledGenerationRunIdsRef.current.add(member.runId))
     let saved = false
     try {
       saved = Boolean(await onPersistCanvas?.(canvasWithGroup))
@@ -2018,6 +2023,7 @@ const FreeCanvasBuilderInner = ({
       saved = false
     }
     if (!saved) {
+      members.forEach(member => scheduledGenerationRunIdsRef.current.delete(member.runId))
       const failedCanvas = members.reduce(
         (canvas, member) => failFreeCanvasImageGeneration(canvas, member.runId, 'storage_write_failed'),
         freeCanvasRef.current
@@ -2027,19 +2033,20 @@ const FreeCanvasBuilderInner = ({
       throw new Error('多角度占位节点保存失败，未发起任何模型请求。')
     }
 
-    const requests = members.map(member => {
-      const request = buildConversationGenerationRequest(
-        activeProject.id,
-        `image-operation-${member.runId}`,
-        member.snapshot
-      )
-      delete request.conversationId
-      request.nodeId = draft.source.nodeId
-      return { ...request, runId: member.runId }
-    })
     try {
+      const requests = members.map(member => {
+        const request = buildConversationGenerationRequest(
+          activeProject.id,
+          `image-operation-${member.runId}`,
+          member.snapshot
+        )
+        delete request.conversationId
+        request.nodeId = draft.source.nodeId
+        return { ...request, runId: member.runId }
+      })
       await prepareImageGenerationBatch(requests)
     } catch (error) {
+      members.forEach(member => scheduledGenerationRunIdsRef.current.delete(member.runId))
       const errorCode = safeGenerationErrorCode(
         error instanceof ImageGenerationClientError ? error.code : 'storage_write_failed'
       )
@@ -2053,7 +2060,6 @@ const FreeCanvasBuilderInner = ({
     }
 
     setActiveImageOperationDraft(null)
-    members.forEach(member => scheduledGenerationRunIdsRef.current.add(member.runId))
     void scheduleMultiViewMembers(
       members,
       member => {

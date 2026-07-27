@@ -1,8 +1,8 @@
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act, create } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { IPromptProject } from '@/models/PromptHistory.model'
+import type { IFreeCanvasProject, IPromptProject } from '@/models/PromptHistory.model'
 import {
   createFreeCanvasImageGenerationPlaceholder,
   createFreeCanvasImageNodeFromMedia,
@@ -915,6 +915,96 @@ describe('project-level free canvas image generation entry', () => {
     expect(failedGroup.nodes.filter((node: { meta: { generationState?: string } }) => (
       node.meta.generationState === 'failed'
     ))).toHaveLength(3)
+  })
+
+  it('keeps persisted multi-view placeholders running while batch preparation is pending', async () => {
+    configureReadyImageModel()
+    vi.stubGlobal('HTMLElement', class HTMLElement {})
+    const source = createFreeCanvasImageNodeFromMedia({
+      id: 'node-source',
+      kind: 'imageAsset',
+      title: 'Source',
+      position: { x: 100, y: 120 },
+      width: 320,
+      height: 320,
+      assetId: 'asset-source.png',
+      imageUrl: '/storage-api/assets/asset-source.png',
+      imagePrompt: '',
+      sourceNodeId: null,
+      generatedFromAgent: false,
+      crop: null,
+      text: '',
+      color: '#111827',
+      meta: {}
+    })
+    const initialCanvas: IFreeCanvasProject = {
+      ...createFreeCanvasProject(1, { nodes: [source] }),
+      selectedNodeId: source.id
+    }
+    const persistedCanvases: IFreeCanvasProject[] = []
+    const onPersistCanvas = vi.fn(async (nextCanvas: IFreeCanvasProject) => {
+      persistedCanvases.push(nextCanvas)
+      return true
+    })
+    mocks.prepareGeneration.mockImplementation(() => new Promise(() => undefined))
+
+    const Harness = () => {
+      const [canvas, setCanvas] = useState(initialCanvas)
+      return (
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={setCanvas}
+          onPersistCanvas={async nextCanvas => {
+            const saved = await onPersistCanvas(nextCanvas)
+            setCanvas(nextCanvas)
+            return saved
+          }}
+        />
+      )
+    }
+
+    let renderer!: ReturnType<typeof create>
+    await act(async () => {
+      renderer = create(<Harness />)
+    })
+    const reactFlow = renderer.root.find(candidate => (
+      typeof candidate.props.onNodeContextMenu === 'function' && Array.isArray(candidate.props.nodes)
+    ))
+    await act(async () => {
+      reactFlow.props.nodes[0].data.onImageCommand(source.id, 'multi-view')
+      await Promise.resolve()
+    })
+    const dialog = renderer.root.findByProps({ 'data-image-operation-workbench': 'multi-view' })
+    await act(async () => {
+      dialog.findByType('textarea').props.onChange({ target: { value: 'Keep the same product identity' } })
+      await Promise.resolve()
+    })
+    await act(async () => {
+      renderer.root.findByProps({ 'aria-label': 'Generate 3' }).props.onClick()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mocks.prepareGeneration).toHaveBeenCalledTimes(1)
+    const latestCanvas = persistedCanvases[persistedCanvases.length - 1]
+    const placeholders = latestCanvas.nodes.filter(node => Boolean(node.meta.generationRunId))
+    expect(placeholders).toHaveLength(3)
+    expect(mocks.getRunById.mock.calls).toEqual(expect.arrayContaining(
+      placeholders.map(node => [node.meta.generationRunId, 'project-a'])
+    ))
+    expect(placeholders.every(node => node.meta.generationState === 'running')).toBe(true)
+    expect(placeholders.every(node => node.meta.generationErrorCode !== 'generation_run_missing')).toBe(true)
+    expect(onPersistCanvas.mock.invocationCallOrder[0]).toBeLessThan(mocks.prepareGeneration.mock.invocationCallOrder[0])
+    expect(mocks.requestGeneration).not.toHaveBeenCalled()
+
+    await act(async () => {
+      renderer.unmount()
+    })
   })
 
   it('hydrates an existing generation node in place before marking the placement', async () => {

@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import os
+import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
 import uvicorn
 from fastapi import FastAPI
+from pydantic import BaseModel, Field
 
 from app.gateway.deps import get_image_generation_service
-from app.gateway.image_generation.contracts import ImageGenerationRequest, ImageGenerationResult, ProviderImage
+from app.gateway.image_generation.contracts import (
+    ImageGenerationRequest,
+    ImageGenerationResult,
+    ProviderError,
+    ProviderImage,
+)
 from app.gateway.image_generation.result_fetcher import FetchedImage
 from app.gateway.image_generation.service import (
     ConnectionMetadata,
@@ -21,6 +29,79 @@ from app.gateway.routers import image_generation
 MODEL_ID = "doubao-seedream-5-0-pro-260628"
 CONNECTION_ID = "e2e-ark-image"
 GENERATED_IMAGE_BYTES = (Path(__file__).resolve().parents[2] / "public" / "app-icon.png").read_bytes()
+PLAN_007_SESSION_PATTERN = re.compile(r"PLAN007_MULTI_VIEW:([A-Za-z0-9_-]{1,96})")
+VIEW_INSTRUCTIONS = {
+    "front": "从主体正面平视观察",
+    "left": "从主体左侧平视观察",
+    "top": "从主体正上方俯视观察",
+}
+
+
+class ProviderControlRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9_-]+$")
+    paused: bool = False
+    fail_calls: list[int] = Field(default_factory=list, alias="failCalls")
+    fail_views: list[str] = Field(default_factory=list, alias="failViews")
+
+
+class ProviderSessionRequest(BaseModel):
+    token: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9_-]+$")
+
+
+class TestProviderControl:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._release = threading.Event()
+        self._release.set()
+        self._requests: list[dict[str, Any]] = []
+        self._call_count = 0
+        self._fail_calls: set[int] = set()
+        self._fail_views: set[str] = set()
+
+    def reset(self, *, paused: bool, fail_calls: list[int], fail_views: list[str]) -> dict[str, Any]:
+        with self._lock:
+            self._release.set()
+            self._release = threading.Event()
+            if not paused:
+                self._release.set()
+            self._requests.clear()
+            self._call_count = 0
+            self._fail_calls = {call for call in fail_calls if call > 0}
+            self._fail_views = {view for view in fail_views if view in VIEW_INSTRUCTIONS}
+        return self.snapshot()
+
+    def pause(self) -> dict[str, Any]:
+        with self._lock:
+            self._release.clear()
+        return self.snapshot()
+
+    def release(self) -> dict[str, Any]:
+        with self._lock:
+            self._release.set()
+        return self.snapshot()
+
+    def record(self, request: ImageGenerationRequest) -> tuple[int, str | None, bool, threading.Event]:
+        view_spec = _request_view_spec(request)
+        with self._lock:
+            self._call_count += 1
+            call = self._call_count
+            should_fail = call in self._fail_calls or view_spec in self._fail_views
+            self._requests.append(_sanitized_request(request, call=call, view_spec=view_spec))
+            release = self._release
+        return call, view_spec, should_fail, release
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            requests = [dict(request) for request in self._requests]
+            fail_calls = sorted(self._fail_calls)
+            fail_views = sorted(self._fail_views)
+            paused = not self._release.is_set()
+        return {
+            "paused": paused,
+            "failCalls": fail_calls,
+            "failViews": fail_views,
+            "requests": requests,
+        }
 
 
 class FakeConnections:
@@ -44,24 +125,37 @@ class RecordingProvider:
         self._requests = requests
 
     def generate(self, request: ImageGenerationRequest) -> ImageGenerationResult:
-        self._requests.append(
-            {
-                "segments": [
-                    {"type": "text", "text": segment.text}
-                    if hasattr(segment, "text")
-                    else {"type": "reference", "referenceId": segment.reference_id, "label": segment.label}
-                    for segment in request.prompt_document.segments
-                ],
-                "inputCount": len(request.inputs),
-                "regionCount": len(request.regions),
-                "resolution": request.resolution,
-                "aspectRatio": request.aspect_ratio,
-            }
-        )
+        plan_007_call: int | None = None
+        plan_007_session = _plan_007_session(request)
+        if plan_007_session is not None:
+            control = _test_provider_control(plan_007_session)
+            if control is None:
+                raise ProviderError(
+                    "test_provider_session_missing",
+                    "Test provider session was not reset",
+                    False,
+                    "e2e-provider-session-missing",
+                )
+            call, _view_spec, should_fail, release = control.record(request)
+            plan_007_call = call
+            release.wait()
+            if should_fail:
+                raise ProviderError(
+                    "test_provider_failure",
+                    "Deterministic test provider failure",
+                    True,
+                    f"e2e-provider-{call}",
+                )
+        else:
+            self._requests.append(_sanitized_request(request))
         time.sleep(1.2)
         return ImageGenerationResult(
             image=ProviderImage(url="https://e2e.invalid/generated.png"),
-            request_id=f"e2e-provider-{len(self._requests)}",
+            request_id=(
+                f"e2e-provider-plan007-{plan_007_session}-{plan_007_call}"
+                if plan_007_call is not None
+                else f"e2e-provider-{len(self._requests)}"
+            ),
         )
 
 
@@ -79,9 +173,20 @@ class FakeResultFetcher:
         return None
 
 
+class TestStorageClient(PromptCardStorageClient):
+    def create_capture(self, payload: dict[str, Any]) -> dict[str, Any]:
+        origin = payload.get("origin")
+        run_id = origin.get("runId") if isinstance(origin, dict) else None
+        if not isinstance(run_id, str) or not run_id:
+            raise ValueError("Test image-generation capture requires a runId")
+        return super().create_capture({**payload, "id": f"capture-{run_id}"})
+
+
 provider_requests: list[dict[str, Any]] = []
+test_provider_controls: dict[str, TestProviderControl] = {}
+test_provider_controls_lock = threading.Lock()
 service = ImageGenerationService(
-    storage=PromptCardStorageClient(),
+    storage=TestStorageClient(),
     connections=FakeConnections(),
     provider_factory=lambda _connection: RecordingProvider(provider_requests),
     result_fetcher=FakeResultFetcher(),
@@ -181,6 +286,82 @@ def image_generation_status() -> dict[str, Any]:
 @app.get("/__test__/provider-requests")
 def recorded_provider_requests() -> dict[str, Any]:
     return {"requests": provider_requests}
+
+
+@app.get("/__test__/multi-view-provider")
+def multi_view_provider_state(token: str) -> dict[str, Any]:
+    control = _test_provider_control(token)
+    return control.snapshot() if control is not None else {"paused": False, "failCalls": [], "failViews": [], "requests": []}
+
+
+@app.post("/__test__/multi-view-provider/reset")
+def reset_multi_view_provider(body: ProviderControlRequest) -> dict[str, Any]:
+    with test_provider_controls_lock:
+        control = test_provider_controls.setdefault(body.token, TestProviderControl())
+    return control.reset(
+        paused=body.paused,
+        fail_calls=body.fail_calls,
+        fail_views=body.fail_views,
+    )
+
+
+@app.post("/__test__/multi-view-provider/pause")
+def pause_multi_view_provider(body: ProviderSessionRequest) -> dict[str, Any]:
+    control = _test_provider_control(body.token)
+    return control.pause() if control is not None else {"paused": False, "failCalls": [], "failViews": [], "requests": []}
+
+
+@app.post("/__test__/multi-view-provider/release")
+def release_multi_view_provider(body: ProviderSessionRequest) -> dict[str, Any]:
+    control = _test_provider_control(body.token)
+    return control.release() if control is not None else {"paused": False, "failCalls": [], "failViews": [], "requests": []}
+
+
+def _test_provider_control(token: str) -> TestProviderControl | None:
+    with test_provider_controls_lock:
+        return test_provider_controls.get(token)
+
+
+def _plan_007_session(request: ImageGenerationRequest) -> str | None:
+    prompt = "\n".join(
+        getattr(segment, "text", "")
+        for segment in request.prompt_document.segments
+    )
+    match = PLAN_007_SESSION_PATTERN.search(prompt)
+    return match.group(1) if match else None
+
+
+def _request_view_spec(request: ImageGenerationRequest) -> str | None:
+    prompt = "\n".join(
+        getattr(segment, "text", "")
+        for segment in request.prompt_document.segments
+    )
+    return next((view for view, instruction in VIEW_INSTRUCTIONS.items() if instruction in prompt), None)
+
+
+def _sanitized_request(
+    request: ImageGenerationRequest,
+    *,
+    call: int | None = None,
+    view_spec: str | None = None,
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "segments": [
+            {"type": "text", "text": segment.text}
+            if hasattr(segment, "text")
+            else {"type": "reference", "referenceId": segment.reference_id, "label": segment.label}
+            for segment in request.prompt_document.segments
+        ],
+        "inputCount": len(request.inputs),
+        "regionCount": len(request.regions),
+        "resolution": request.resolution,
+        "aspectRatio": request.aspect_ratio,
+    }
+    if call is not None:
+        result["call"] = call
+    if view_spec is not None:
+        result["viewSpec"] = view_spec
+    return result
 
 
 if __name__ == "__main__":

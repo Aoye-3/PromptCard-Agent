@@ -9,7 +9,7 @@ const service = (name: 'storage' | 'runtime' | 'frontend', port: number) => ({
 
 export default defineConfig({
   testDir: './tests/e2e',
-  testMatch: 'image-generation-node.spec.ts',
+  testMatch: ['image-generation-node.spec.ts', 'free-canvas-multi-view.spec.ts'],
   timeout: 120_000,
   fullyParallel: false,
   reporter: 'list',

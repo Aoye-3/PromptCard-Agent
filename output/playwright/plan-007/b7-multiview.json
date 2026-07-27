@@ -1,0 +1,19 @@
+{
+  "gate": "B7",
+  "result": "automated-pass-from-dedicated-suite",
+  "command": "npx playwright test -c playwright.image-generation.config.ts tests/e2e/free-canvas-multi-view.spec.ts",
+  "tests": "2/2 passed",
+  "duration": "47.2s",
+  "provider": "local Fake Provider",
+  "paidProviderCalls": 0,
+  "coverage": [
+    "pre-release persistence",
+    "success",
+    "partial",
+    "failed-member-only retry",
+    "geometry",
+    "reload",
+    "project switch",
+    "lineage"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "gate": "B2",
+  "result": "automated-pass-human-approval-pending",
+  "fakeProviderLifecycle": {
+    "placeholderAndRunPersistedBeforeProviderInvocation": true,
+    "providerResultLocalizedBeforeSuccess": true,
+    "successfulResultHydratesExistingPlaceholder": true,
+    "normalizedFailureAndRetryHistoryRetained": true,
+    "sourceRetainedAfterResultDeletion": true,
+    "reloadAndProjectSwitchIdempotent": true,
+    "lineageTraceable": true
+  },
+  "preSubmitBrowserBoundary": {
+    "workbench": "multi-view",
+    "generationPosts": 0,
+    "generationRuns": 0,
+    "providerRequests": 0,
+    "rightPanel": "image-generation",
+    "draftStable": true,
+    "cancelledWithoutSubmit": true,
+    "screenshot": "f4-pre-submit.png"
+  },
+  "automatedSuites": {
+    "runtimeImageGeneration": "96 passed",
+    "storage": "87 passed"
+  },
+  "humanApproval": "pending"
+}

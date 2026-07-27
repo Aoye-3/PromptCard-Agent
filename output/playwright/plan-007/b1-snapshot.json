@@ -1,0 +1,34 @@
+{
+  "gate": "B1",
+  "result": "automated-pass-human-approval-pending",
+  "contractEvidence": {
+    "sharedSemanticValidator": "single-generation and batch preparation use the same cross-field validator",
+    "immutableSnapshot": "operation, source identities, recipe ID/version, and optional group/item/view meaning round-trip without provider-specific inference",
+    "invalidMeaningRejectedBeforeRun": true,
+    "providerRequestsBeforeDurableRun": 0,
+    "seedreamSpecificFieldsInSnapshotContract": 0
+  },
+  "automatedSuites": {
+    "runtimeImageGeneration": "96 passed",
+    "storage": "87 passed"
+  },
+  "browserStorageRoundtripSupplement": {
+    "projectId": "[evidence-project]",
+    "before": {
+      "revision": 4,
+      "nodeCount": 3,
+      "nodeKinds": ["image", "text", "text"],
+      "sourceAssetRetained": true
+    },
+    "afterReload": {
+      "revision": 6,
+      "nodeCount": 3,
+      "nodeKinds": ["image", "text", "text"],
+      "sourceAssetRetained": true
+    },
+    "fitViewExercised": true,
+    "screenshots": ["f1-loaded.png", "f1-reloaded.png"],
+    "finding": "E-001"
+  },
+  "humanApproval": "pending"
+}

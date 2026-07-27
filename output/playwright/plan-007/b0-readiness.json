@@ -1,0 +1,30 @@
+{
+  "gate": "B0",
+  "result": "automated-ready-with-fixture-finding",
+  "paidProviderCalls": 0,
+  "commit": "997eb9f0e8b857d46e78bc7a6c036c2b3315edbe",
+  "browser": "chromium",
+  "browserVersion": "Mozilla/5.0 (platform redacted) AppleWebKit/537.36 (platform redacted) Chrome/147.0.7727.15 Safari/537.36",
+  "viewport": {
+    "width": 1280,
+    "height": 720
+  },
+  "browserTextZoom": "100%",
+  "canvasZoom": "fit-view exercised",
+  "readiness": {
+    "storageHealth": "pass",
+    "imageGenerationStatus": "pass",
+    "modelCatalog": "pass",
+    "modelAssignments": "pass",
+    "modelConnections": "pass",
+    "generationRunsCreated": 0,
+    "providerRequestsCreated": 0
+  },
+  "finding": {
+    "id": "E-002",
+    "owner": "Test infrastructure",
+    "severity": "Low",
+    "releaseHandling": "Document or mock the fixture-only Runtime status route before treating Console readiness as clean"
+  },
+  "humanApproval": "pending"
+}

@@ -1,0 +1,58 @@
+{
+  "scope": "Sanitized API-level summary from the existing browser run; no rerun performed",
+  "sanitization": {
+    "included": ["method", "redacted pathname", "status", "count"],
+    "excluded": ["host", "query", "headers", "body", "authorization", "provider response", "local path"]
+  },
+  "console": [
+    {
+      "type": "error",
+      "summary": "One project PUT was aborted around reload and surfaced a StorageHttpError; successful Storage snapshots before and after reload retained the canvas",
+      "count": 1,
+      "findingId": "E-001"
+    },
+    {
+      "type": "error",
+      "summary": "The fixture-only Runtime status probe returned 404 while image-generation readiness, catalog, assignments, and connections returned 200",
+      "count": 4,
+      "findingId": "E-002"
+    }
+  ],
+  "findings": [
+    {
+      "id": "E-001",
+      "owner": "Engineering",
+      "severity": "Medium",
+      "releaseHandling": "Triage the navigation/autosave overlap before unified approval; the functional Storage roundtrip does not imply a clean-console pass"
+    },
+    {
+      "id": "E-002",
+      "owner": "Test infrastructure",
+      "severity": "Low",
+      "releaseHandling": "Document or mock the fixture readiness route before treating the Console gate as clean"
+    }
+  ],
+  "network": [
+    { "method": "GET", "pathname": "/agent-api/promptcard/runtime/image-generation-status", "status": 200, "count": 4 },
+    { "method": "GET", "pathname": "/agent-api/promptcard/runtime/model-assignments", "status": 200, "count": 4 },
+    { "method": "GET", "pathname": "/agent-api/promptcard/runtime/model-catalog", "status": 200, "count": 4 },
+    { "method": "GET", "pathname": "/agent-api/promptcard/runtime/model-connections", "status": 200, "count": 4 },
+    { "method": "GET", "pathname": "/agent-api/promptcard/runtime/status", "status": 404, "count": 4 },
+    { "method": "GET", "pathname": "/storage-api/assets/[asset]", "status": 200, "count": 2 },
+    { "method": "GET", "pathname": "/storage-api/health", "status": 200, "count": 4 },
+    { "method": "GET", "pathname": "/storage-api/image-generation-conversations", "status": 200, "count": 2 },
+    { "method": "GET", "pathname": "/storage-api/image-generation-conversations", "status": "FAILED", "count": 2 },
+    { "method": "GET", "pathname": "/storage-api/image-generation-placements", "status": 200, "count": 10 },
+    { "method": "GET", "pathname": "/storage-api/presets", "status": 200, "count": 2 },
+    { "method": "GET", "pathname": "/storage-api/projects", "status": 200, "count": 2 },
+    { "method": "GET", "pathname": "/storage-api/projects/[evidence-project]/resources", "status": 200, "count": 3 },
+    { "method": "GET", "pathname": "/storage-api/projects/[evidence-project]/resources", "status": "FAILED", "count": 2 },
+    { "method": "GET", "pathname": "/storage-api/projects/trash", "status": 200, "count": 2 },
+    { "method": "PUT", "pathname": "/storage-api/projects/[evidence-project]", "status": 200, "count": 5 },
+    { "method": "PUT", "pathname": "/storage-api/projects/[evidence-project]", "status": "FAILED", "count": 1 }
+  ],
+  "excludedDevAssetFailures": {
+    "count": 40,
+    "reason": "Vite module requests cancelled by navigation/reload; individual development asset paths omitted"
+  }
+}

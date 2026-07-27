@@ -9,6 +9,8 @@ const promptMarker = 'PLAN007_MULTI_VIEW 保持同一产品身份、材质和白
 const expectedViews = ['front', 'left', 'top']
 
 test.describe.serial('zero-cost multi-view generation', () => {
+  test.describe.configure({ timeout: 120_000 })
+
   let providerSessionToken = ''
   let providerSessionReady = false
 

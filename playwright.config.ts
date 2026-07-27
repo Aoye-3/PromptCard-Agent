@@ -1,9 +1,16 @@
 import { defineConfig, devices } from '@playwright/test'
+import { delimiter, resolve } from 'node:path'
+
+const repoRoot = resolve('.')
+const backendRoot = resolve('agent-runtime/backend')
+const python = resolve(backendRoot, '.venv/Scripts/python.exe')
+const pythonPath = [repoRoot, backendRoot].join(delimiter)
 
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
   fullyParallel: true,
+  workers: 2,
   reporter: 'list',
   use: {
     baseURL: 'http://127.0.0.1:38100',
@@ -17,20 +24,35 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'powershell -ExecutionPolicy Bypass -File tests/fixtures/start_image_generation_e2e_service.ps1 -Service storage',
+      command: `"${python}" -m promptcard_storage`,
       url: 'http://127.0.0.1:38102/health',
+      env: {
+        PYTHONPATH: pythonPath,
+        PROMPTCARD_STORAGE_DATA_DIR: resolve('tests/.runtime/image-generation-storage'),
+        PROMPTCARD_STORAGE_PORT: '38102'
+      },
       reuseExistingServer: false,
       timeout: 120_000
     },
     {
-      command: 'powershell -ExecutionPolicy Bypass -File tests/fixtures/start_image_generation_e2e_service.ps1 -Service runtime',
+      command: `"${python}" "${resolve('tests/fixtures/image_generation_runtime.py')}"`,
       url: 'http://127.0.0.1:38101/health',
+      env: {
+        PYTHONPATH: pythonPath,
+        PROMPTCARD_STORAGE_URL: 'http://127.0.0.1:38102',
+        PORT: '38101'
+      },
       reuseExistingServer: false,
       timeout: 120_000
     },
     {
-      command: 'powershell -ExecutionPolicy Bypass -File tests/fixtures/start_image_generation_e2e_service.ps1 -Service frontend',
+      command: `"${process.execPath}" "${resolve('node_modules/vite/bin/vite.js')}" --host 127.0.0.1 --port 38100 --strictPort`,
       url: 'http://127.0.0.1:38100',
+      env: {
+        PROMPTCARD_AGENT_URL: 'http://127.0.0.1:38101',
+        PROMPTCARD_STORAGE_URL: 'http://127.0.0.1:38102',
+        PROMPTCARD_DESKTOP_DEV: '1'
+      },
       reuseExistingServer: false,
       timeout: 120_000
     }

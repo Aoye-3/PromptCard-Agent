@@ -1522,6 +1522,7 @@ const FreeCanvasBuilderInner = ({
     operation: ImageProductOperation,
     options?: {
       operationGroupId?: string
+      operationItemId?: string
       viewSpec?: string
     }
   ) => {
@@ -1569,6 +1570,7 @@ const FreeCanvasBuilderInner = ({
           ? imageComposerDraft.aspectRatio
           : aspectRatios.find(value => value !== 'custom') || '1:1',
         ...(options?.operationGroupId ? { operationGroupId: options.operationGroupId } : {}),
+        ...(options?.operationItemId ? { operationItemId: options.operationItemId } : {}),
         ...(options?.viewSpec ? { viewSpec: options.viewSpec } : {})
       })
     } catch {
@@ -1699,6 +1701,7 @@ const FreeCanvasBuilderInner = ({
     if (!sourceNode?.assetId || !groupId) return
     void openImageOperationWorkbench(sourceNode, 'multi-view', {
       operationGroupId: groupId,
+      operationItemId: member.itemId,
       viewSpec: member.viewId
     })
   }, [openImageOperationWorkbench])
@@ -1978,7 +1981,11 @@ const FreeCanvasBuilderInner = ({
       sourceDraft: draft,
       selectedViewIds,
       groupId,
-      createItemId: view => createLocalId(`multi-view-${view.id}`)
+      createItemId: view => (
+        draft.operationItemId && selectedViewIds.length === 1 && view.id === draft.viewSpec
+          ? draft.operationItemId
+          : createLocalId(`multi-view-${view.id}`)
+      )
     }).map(member => {
       const runId = createImageGenerationRunId()
       const snapshot = compileImageOperationDraft(member.draft, {
@@ -1997,22 +2004,38 @@ const FreeCanvasBuilderInner = ({
     if (!sourceNode || sourceNode.kind !== 'image') throw new Error('多角度源图片已不在当前画布中。')
     const frame = imageGenerationPlaceholderFrame(members[0].snapshot)
     const groupMemberOffset = current.nodes.filter(node => node.meta.operationGroupId === groupId).length
+    const replacementNodeIds = new Set<string>()
     const placeholders = members.map((member, index) => {
+      const existingMember = current.nodes.find((node): node is IFreeCanvasImageNode => (
+        node.kind === 'image'
+        && node.meta.operationGroupId === groupId
+        && node.meta.operationItemId === member.itemId
+        && node.meta.generationState === 'failed'
+      ))
       const placementIndex = groupMemberOffset + index
-      return createOperationPlaceholder({
-      snapshot: member.snapshot,
-      runId: member.runId,
-      conversationId: `image-operation-${member.runId}`,
-      position: {
-        x: sourceNode.position.x + sourceNode.width + 48 + (placementIndex % 3) * (frame.width + 24),
-        y: sourceNode.position.y + Math.floor(placementIndex / 3) * (frame.height + 48)
-      },
-      frame
+      const placeholder = createOperationPlaceholder({
+        snapshot: member.snapshot,
+        runId: member.runId,
+        conversationId: `image-operation-${member.runId}`,
+        position: existingMember?.position || {
+          x: sourceNode.position.x + sourceNode.width + 48 + (placementIndex % 3) * (frame.width + 24),
+          y: sourceNode.position.y + Math.floor(placementIndex / 3) * (frame.height + 48)
+        },
+        frame: existingMember
+          ? { width: existingMember.width, height: existingMember.height }
+          : frame
       })
+      if (!existingMember) return placeholder
+      replacementNodeIds.add(existingMember.id)
+      return { ...placeholder, id: existingMember.id }
     })
+    const placeholdersByNodeId = new Map(placeholders.map(node => [node.id, node]))
     const canvasWithGroup = commitCanvasSelection({
       ...current,
-      nodes: [...current.nodes, ...placeholders]
+      nodes: [
+        ...current.nodes.map(node => placeholdersByNodeId.get(node.id) || node),
+        ...placeholders.filter(node => !replacementNodeIds.has(node.id))
+      ]
     }, placeholders[0].id)
 
     members.forEach(member => scheduledGenerationRunIdsRef.current.add(member.runId))

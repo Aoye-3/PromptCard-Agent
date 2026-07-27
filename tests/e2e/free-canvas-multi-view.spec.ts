@@ -38,13 +38,13 @@ test.describe.serial('zero-cost multi-view generation', () => {
     await page.goto('/', { waitUntil: 'networkidle' })
     await openProject(page, projectTitle)
     const dialog = await openMultiViewWorkbench(page)
+    await dialog.getByRole('textbox').fill(`${promptMarker} PLAN007_MULTI_VIEW:${providerSessionToken}`)
     await expect(dialog).toContainText('不是精确 3D 重建')
     await dialog.getByRole('button', { name: '选择模型三视图（正视、左视、俯视）' }).click()
     await expect(dialog.locator('[data-multi-view-request-count]')).toHaveText('3')
     await expectSelectedViews(dialog, expectedViews)
     expect((await providerState(request, providerSessionToken)).requests).toHaveLength(0)
 
-    await dialog.getByRole('textbox').fill(`${promptMarker} PLAN007_MULTI_VIEW:${providerSessionToken}`)
     await dialog.getByRole('button', { name: 'Generate 3' }).click()
     await expect(dialog).toBeHidden()
     await expect.poll(async () => (await providerState(request, providerSessionToken)).requests.length).toBe(1)
@@ -138,7 +138,10 @@ test.describe.serial('zero-cost multi-view generation', () => {
     const failedMember = initialMembers.find(node => node.meta.operationViewSpec === 'left')
     expect(failedMember?.meta.generationState).toBe('failed')
     const failedRunId = failedMember!.meta.generationRunId
+    const failedNodeId = failedMember!.id
+    const failedItemId = failedMember!.meta.operationItemId
     const groupId = failedMember!.meta.operationGroupId
+    const initialNodeIds = initialMembers.map(node => node.id)
     const succeededAssetIds = initialMembers
       .filter(node => node.meta.generationState === 'succeeded')
       .map(node => node.assetId)
@@ -157,23 +160,40 @@ test.describe.serial('zero-cost multi-view generation', () => {
     await expect.poll(async () => (await providerState(request, providerSessionToken)).requests.length, { timeout: 30_000 }).toBe(4)
     await expect.poll(async () => terminalRunStates(request, projectId), { timeout: 30_000 })
       .toEqual(['failed', 'succeeded', 'succeeded', 'succeeded'])
-    const retriedProject = await waitForGroup(request, projectId, 4)
+    const retriedProject = await waitForGenerationStates(request, projectId, ['succeeded', 'succeeded', 'succeeded'])
     const retriedMembers = multiViewNodes(retriedProject)
     const leftMembers = retriedMembers.filter(node => node.meta.operationViewSpec === 'left')
-    expect(leftMembers).toHaveLength(2)
-    expect(leftMembers.map(node => node.meta.operationGroupId)).toEqual([groupId, groupId])
-    expect(leftMembers.map(node => node.meta.generationRunId)).toContain(failedRunId)
-    const newLeft = leftMembers.find(node => node.meta.generationRunId !== failedRunId)
-    expect(newLeft?.meta.generationState).toBe('succeeded')
-    expect(newLeft?.meta.generationRunId).not.toBe(failedRunId)
+    expect(retriedMembers.map(node => node.id)).toEqual(initialNodeIds)
+    expect(leftMembers).toHaveLength(1)
+    const retriedLeft = leftMembers[0]
+    expect(retriedLeft).toMatchObject({
+      id: failedNodeId,
+      meta: {
+        operationGroupId: groupId,
+        operationItemId: failedItemId,
+        operationViewSpec: 'left',
+        generationState: 'succeeded'
+      }
+    })
+    expect(retriedLeft.meta.generationRunId).not.toBe(failedRunId)
     expect(retriedMembers.filter(node => node.meta.operationViewSpec === 'front')).toHaveLength(1)
     expect(retriedMembers.filter(node => node.meta.operationViewSpec === 'top')).toHaveLength(1)
     expect(retriedMembers.filter(node => succeededAssetIds.includes(node.assetId))).toHaveLength(2)
 
+    const succeededPanel = page.getByRole('region', { name: '多角度结果组' })
+    await expect(succeededPanel).toContainText('全部成功')
+    await expect(succeededPanel).toContainText('3/3 成功 · 0 失败')
+    await expect(succeededPanel.getByRole('button', { name: '重试此视角' })).toHaveCount(0)
+
     const runs = await generationRuns(request, projectId)
     const historicalFailure = runs.find(run => run.id === failedRunId)
     expect(historicalFailure).toMatchObject({ state: 'failed', error: { code: 'test_provider_failure', retryable: true } })
-    expect(runs.filter(run => run.requestSnapshot.operation.viewSpec === 'left')).toHaveLength(2)
+    const leftRuns = runs.filter(run => run.requestSnapshot.operation.viewSpec === 'left')
+    expect(leftRuns).toHaveLength(2)
+    expect(leftRuns.map(run => run.requestSnapshot.operation.operationItemId))
+      .toEqual([failedItemId, failedItemId])
+    expect(leftRuns.map(run => run.id)).toContain(failedRunId)
+    expect(leftRuns.map(run => run.id)).toContain(retriedLeft.meta.generationRunId)
     expect((await providerState(request, providerSessionToken)).requests.map((item: ProviderRequest) => item.viewSpec))
       .toEqual(['front', 'left', 'top', 'left'])
   })

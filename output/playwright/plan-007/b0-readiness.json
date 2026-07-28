@@ -2,7 +2,8 @@
   "gate": "B0",
   "result": "automated-ready-with-fixture-finding",
   "paidProviderCalls": 0,
-  "commit": "997eb9f0e8b857d46e78bc7a6c036c2b3315edbe",
+  "browserCaptureCommit": "997eb9f0e8b857d46e78bc7a6c036c2b3315edbe",
+  "finalReviewCommit": "37a721246e225e548068b78b5b95867b85bf469b",
   "browser": "chromium",
   "browserVersion": "Mozilla/5.0 (platform redacted) AppleWebKit/537.36 (platform redacted) Chrome/147.0.7727.15 Safari/537.36",
   "viewport": {

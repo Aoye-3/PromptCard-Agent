@@ -4,7 +4,7 @@
 
 - Status: `Active`
 - Created: `2026-07-24`
-- Last reviewed: `2026-07-27`
+- Last reviewed: `2026-07-28`
 - Scope owner: Free Canvas, Image Generation, Agent Runtime, PromptCard Storage
 - Current reference implementation: Seedream 5.0 Pro
 - Explicit UI freeze: this plan must not change or repurpose the existing right-side `Agent / 图片生成 / Prompt库` structure; `作为参考` is the sole state-level bridge and may append to the existing 图片生成 Composer
@@ -13,7 +13,7 @@
 
 ## Implementation Ledger
 
-Last implementation update: `2026-07-27`.
+Last implementation update: `2026-07-28`.
 
 Status meanings:
 
@@ -35,7 +35,7 @@ Status meanings:
 | 9. Minimum creative lineage | Implemented + targeted verified | Source identities, recipe/version, preservation intent and optional group/item/view are immutable run metadata; no schema-v8 table added. |
 | 10. Multi-view workbench | Implemented; frontend acceptance pending | Exact visible request count, 3×3 discrete camera positions, supplemental 3/4/rear views, the `正视 / 左视 / 俯视` model-three-view shortcut, focus behavior and 3D limitation have component and zero-cost browser E2E coverage; unified human visual acceptance remains. |
 | 11. Multi-view persistence/scheduling | Implemented + backend verified | N stable placeholders are saved, then N queued runs are created atomically through batch prepare before the first independent Provider request. |
-| 12. Group recovery/presentation | Implemented + targeted verified; final human acceptance pending | Queued authorized members rebuild the exact request from immutable snapshots at concurrency 1; running members only poll; active/scheduled run IDs prevent duplicate browser submission. Local Fake Provider E2E covers partial recovery, failed-member-only retry, geometry preservation, reload and project-switch deduplication. |
+| 12. Group recovery/presentation | Implemented + targeted verified; final human acceptance pending | Queued authorized members rebuild the exact request from immutable snapshots at concurrency 1; running members only poll; active/scheduled run IDs prevent duplicate browser submission. The retry UI locks the failed member's original view, and submission rejects synchronous `viewSpec`/selection tampering. A valid retry reuses node/item/group/view identities, creates only a new Run, retains the failed Run in history, and finishes with the same three members and a succeeded group. Local Fake Provider E2E also covers geometry preservation, reload and project-switch deduplication. |
 | 13. Visible export | Implemented; frontend acceptance pending | Copy/download rasterize crop, flip and annotations without creating an asset; original download remains separate. Clipboard/browser-error E2E remains. |
 | 14. Subject extraction | Implemented experimental; evaluation pending | Executable solid-background redraw workbench; never described as transparent alpha extraction. |
 | 15. Text edit | Implemented experimental; evaluation pending | Executable region-guided workbench with exact replacement instruction; CJK/Latin/layout live fixtures remain unrun. |
@@ -48,19 +48,19 @@ Backend-complete-then-human-acceptance order requested by the user:
 3. perform one unified human acceptance after the backend closure instead of stopping between implementation gates;
 4. do not perform paid live Seedream evaluations without explicit cost authorization; record their absence rather than inferring a pass.
 
-The complete frontend Vitest suite passed on `2026-07-27` through `npm.cmd run test:frontend`: four bounded sequential shards completed 79 test files and 642 tests. The production build and the repository-local Playwright runner also pass; the full E2E suite completed 24/24 in 52.7 seconds and released its local service ports. Viewport/zoom, focus, accessibility and the remaining human observations remain separate gates.
+The complete frontend Vitest suite passed through `npm.cmd run test:frontend`: four bounded sequential shards completed 106 test files and 644 tests, including retry-integrity and exact-node binding defenses. At final reviewed code commit `37a7212` (including runner ownership in `2d372a0` and deterministic Fake Provider gating in `f6887b1`), the production build and `agent:check` passed; a direct shell invocation of bare `npm.cmd run test:e2e` completed 24/24 in 51.4 seconds (73.5 seconds shell elapsed) with exit code 0 and released its local service ports. The intentional no-match invocation returned exit code 1. Viewport/zoom, focus, accessibility and the remaining human observations remain separate gates.
 
 The canonical human browser procedure is maintained in [Manual Frontend Acceptance](../quality/manual-frontend-acceptance.md). Complete its F1-F7 gates and retain the required evidence before changing any `Implemented; frontend acceptance pending` ledger entry to accepted. Paid live-provider evaluation remains a separate explicitly authorized gate.
 
-### Zero-cost unified evidence (2026-07-27)
+### Zero-cost unified evidence (2026-07-28)
 
-Evidence was captured at `997eb9f` after the local commit chain `8306a6f -> 9319533 -> 3a21d5a -> 3e1896e -> 595c54f -> 997eb9f`. The sanitized request, Run, Storage, recovery, Console/Network and screenshot package is under [`output/playwright/plan-007/`](../../output/playwright/plan-007/); it contains no credentials, authorization headers, temporary Provider URLs, raw Provider responses, or local secrets.
+The F1/F4 browser capture originated at `997eb9f`; the evidence package and retry-specific assertions were reviewed and refreshed through final code fix `37a7212`. The sanitized request, Run, Storage, recovery, Console/Network and screenshot package is under [`output/playwright/plan-007/`](../../output/playwright/plan-007/); it contains no credentials, authorization headers, temporary Provider URLs, raw Provider responses, or local secrets.
 
 | Evidence | Result |
 | --- | --- |
-| Existing browser baseline | 24/24 E2E passed in 52.7s; repository-local browser cache and clean service shutdown verified. |
-| Multi-view image configuration | 3/3 passed twice; dedicated F6 suite passed 2/2 in 47.2s. |
-| Frontend / Runtime / Storage | 642 frontend tests, 96 Runtime image-generation tests, and 87 Storage tests passed. |
+| Existing browser baseline | Direct shell bare `npm.cmd run test:e2e` passed 24/24 in 51.4s (73.5s shell elapsed) with exit code 0; repository-local browser cache, port release, and no-match exit code 1 verified. |
+| Multi-view image configuration | 3/3 passed in 52.6s (71.6s shell elapsed) with exit code 0; pipeline EOF multi-view also passed 2/2 in 45.1s with exit code 0. Ports were released. The retry UI locks the original failed view, submission rejects synchronous view/selection tampering, and a valid retry binds the exact failed node while reusing item/group/view with one new Run and retaining the failed Run; the same three-member group succeeded. |
+| Frontend / Runtime / Storage | 106 frontend files and 644 tests, 96 Runtime image-generation tests, and 87 Storage tests passed. |
 | Build and static gates | Production build, `agent:check`, `git diff --check`, and credential/URL/schema/test-route scans passed. |
 | Browser evidence harness | 1/1 passed in 41.3s at Chromium 1280x720 and 100% browser text zoom. |
 

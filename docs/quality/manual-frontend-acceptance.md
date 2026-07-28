@@ -42,9 +42,9 @@ For every failure, record:
 
 Do not include credentials, authorization headers, raw provider responses, temporary provider URLs, or local secrets in the evidence.
 
-## Plan 007 Run Record (2026-07-27)
+## Plan 007 Run Record (2026-07-28)
 
-This record covers commit `997eb9f` using workspace-local frontend, Runtime fixture, Storage fixture, and local Fake Provider only. Sanitized evidence is stored under [`output/playwright/plan-007/`](../../output/playwright/plan-007/). The evidence harness passed 1/1 in 41.3 seconds at Chromium 1280x720 and 100% browser text zoom; the dedicated F6 suite passed 2/2 in 47.2 seconds. Every human decision below remains **Pending unified human acceptance**; this record does not claim user approval.
+This record is reviewed through final code fix `37a7212`, including runner ownership in `2d372a0` and deterministic Fake Provider gating in `f6887b1`, using workspace-local frontend, Runtime fixture, Storage fixture, and local Fake Provider only. The unchanged F1/F4 screenshots were captured earlier at `997eb9f`; sanitized evidence is stored under [`output/playwright/plan-007/`](../../output/playwright/plan-007/). The evidence harness passed 1/1 in 41.3 seconds at Chromium 1280x720 and 100% browser text zoom. Final image-generation configuration passed 3/3 in 52.6 seconds (71.6 seconds shell elapsed), pipeline EOF multi-view passed 2/2 in 45.1 seconds, and direct-shell bare full E2E passed 24/24 in 51.4 seconds (73.5 seconds shell elapsed); all returned exit code 0 and released their ports. Frontend completed 106 files and 644 tests. Every human decision below remains **Pending unified human acceptance**; this record does not claim user approval.
 
 | Gate | Automated evidence | Human status / remaining observation |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ This record covers commit `997eb9f` using workspace-local frontend, Runtime fixt
 | F3 | Not executed in this run. | Pending unified human acceptance: keyboard/focus checks and real Windows high-contrast plus 200% text-zoom readability; no pass is inferred. |
 | F4 | Multi-view pre-submit slice PASS: 0 generation POSTs, 0 Runs, 0 Fake Provider calls; right-side draft and active image-generation tab remained stable. | Pending unified human acceptance: all other enabled workbenches and the `As reference` append-only flow. |
 | F5 | Not executed in this run. | Pending unified human acceptance: non-destructive editing, Undo/Redo, original-versus-visible export, reload, and source retention after result deletion. |
-| F6 | Automated Fake Provider closure PASS: success, partial, failed-member-only retry, geometry, reload/project-switch deduplication, order, and lineage. | Pending unified human acceptance: visual review is still required. |
+| F6 | Automated Fake Provider closure PASS: success, partial, geometry, reload/project-switch deduplication, order, and lineage. The retry UI locked the original failed view, submission rejected synchronous `viewSpec`/selection tampering, duplicate-lineage regression proved exact `nodeId` binding, and a valid retry reused its node/item/group/view, created only a new Run, retained the failed Run in history, and ended with the same three members and a succeeded group. | Pending unified human acceptance: visual review is still required. |
 | F7 | Not executed in this run. | Pending unified human acceptance: document/image/draft/run separation and supported versus capability-limited model behavior. |
 
 Recorded findings:

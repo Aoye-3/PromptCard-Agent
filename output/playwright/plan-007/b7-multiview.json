@@ -1,19 +1,33 @@
 {
   "gate": "B7",
-  "result": "automated-pass-from-dedicated-suite",
-  "command": "npx playwright test -c playwright.image-generation.config.ts tests/e2e/free-canvas-multi-view.spec.ts",
-  "tests": "2/2 passed",
-  "duration": "47.2s",
+  "result": "automated-pass-from-image-generation-config",
+  "finalReviewCommit": "37a721246e225e548068b78b5b95867b85bf469b",
+  "command": "npm.cmd run test:e2e -- -c playwright.image-generation.config.ts",
+  "tests": "3/3 passed",
+  "duration": "52.6s",
+  "shellElapsed": "71.6s",
+  "exitCode": 0,
+  "servicePortsReleased": true,
   "provider": "local Fake Provider",
   "paidProviderCalls": 0,
   "coverage": [
     "pre-release persistence",
     "success",
     "partial",
-    "failed-member-only retry",
+    "retry UI locks the original failed view",
+    "submission rejects synchronous viewSpec and selection tampering",
+    "duplicate-lineage regression binds retry to the exact original nodeId",
+    "failed member retry reuses the original node, item, group, and view identities",
+    "retry creates one new Run and retains the failed Run in history",
+    "the same three-member group reaches succeeded",
     "geometry",
     "reload",
     "project switch",
     "lineage"
-  ]
+  ],
+  "pipelineEofVerification": {
+    "tests": "2/2 passed",
+    "duration": "45.1s",
+    "exitCode": 0
+  }
 }

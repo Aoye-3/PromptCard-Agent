@@ -118,6 +118,40 @@ describe('MultiViewWorkbenchDialog', () => {
     expect(onGenerate.mock.calls[0][1]).toEqual(['front', 'front-three-quarter', 'left'])
   })
 
+  it('locks a failed-member retry to its original view', async () => {
+    const onGenerate = vi.fn().mockResolvedValue(undefined)
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(
+        <MultiViewWorkbenchDialog
+          initialDraft={{
+            ...initialDraft,
+            operationGroupId: 'group-1',
+            operationItemId: 'item-left',
+            viewSpec: 'left'
+          }}
+          initialSelectedViewIds={['left']}
+          modelLabel="Fake image model"
+          onCancel={vi.fn()}
+          onGenerate={onGenerate}
+        />
+      )
+    })
+
+    expect(renderer.root.findAllByProps({ 'data-camera-direction-grid': true })).toHaveLength(0)
+    expect(renderer.root.findAllByProps({
+      'aria-label': '选择模型三视图（正视、左视、俯视）'
+    })).toHaveLength(0)
+    expect(renderer.root.findByProps({ 'data-multi-view-locked-view': true }).findByType('strong').children).toEqual(['左视'])
+    expect(renderer.root.findByProps({ 'data-multi-view-request-count': true }).children).toEqual(['1'])
+
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'Generate 1' }).props.onClick()
+    })
+
+    expect(onGenerate).toHaveBeenCalledWith(expect.any(Object), ['left'])
+  })
+
   it('states that inferred views are not precise 3D reconstruction', () => {
     let renderer!: ReactTestRenderer
     act(() => {

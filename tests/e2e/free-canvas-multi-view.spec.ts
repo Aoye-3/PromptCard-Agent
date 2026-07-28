@@ -153,8 +153,12 @@ test.describe.serial('zero-cost multi-view generation', () => {
     await panel.getByRole('button', { name: '重试此视角' }).click()
     const retryDialog = page.getByRole('dialog', { name: '多角度工作台' })
     await expect(retryDialog.locator('[data-multi-view-request-count]')).toHaveText('1')
-    await expectSelectedViews(retryDialog, ['left'])
+    await expect(retryDialog.locator('[data-multi-view-locked-view]')).toContainText('左视')
+    await expect(retryDialog.locator('[data-camera-direction-grid]')).toHaveCount(0)
+    await expect(retryDialog.getByRole('button', { name: '选择模型三视图（正视、左视、俯视）' })).toHaveCount(0)
+    await expect(retryDialog.getByRole('button', { name: /选择补充视角/ })).toHaveCount(0)
     await retryDialog.getByRole('textbox').fill(`${promptMarker} PLAN007_MULTI_VIEW:${providerSessionToken} retry`)
+    await expect(retryDialog.locator('[data-multi-view-request-count]')).toHaveText('1')
     await retryDialog.getByRole('button', { name: 'Generate 1' }).click()
 
     await expect.poll(async () => (await providerState(request, providerSessionToken)).requests.length, { timeout: 30_000 }).toBe(4)

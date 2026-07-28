@@ -49,9 +49,14 @@ export const MultiViewWorkbenchDialog = ({
 }: MultiViewWorkbenchDialogProps) => {
   const dialogRef = useRef<HTMLDivElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+  const lockedRetryView = initialDraft.operationItemId
+    ? defaultMultiViewSpecs.find(view => view.id === initialDraft.viewSpec)
+    : undefined
   const [draft, setDraft] = useState<ImageOperationDraft>(() => cloneDraft(initialDraft))
   const [selectedViewIds, setSelectedViewIds] = useState<string[]>(() => (
-    initialSelectedViewIds?.length
+    initialDraft.operationItemId
+      ? lockedRetryView ? [lockedRetryView.id] : []
+      : initialSelectedViewIds?.length
       ? defaultMultiViewSpecs.filter(view => initialSelectedViewIds.includes(view.id)).map(view => view.id)
       : [...defaultMultiViewSelectionIds]
   ))
@@ -166,75 +171,84 @@ export const MultiViewWorkbenchDialog = ({
           </section>
 
           <section className="space-y-5 p-6">
-            <fieldset>
-              <legend className="sr-only">摄像机方位</legend>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="text-xs font-black text-gray-700" aria-hidden="true">摄像机方位</div>
-                <button
-                  type="button"
-                  aria-label="选择模型三视图（正视、左视、俯视）"
-                  className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-gray-700 transition hover:border-[#c96442] hover:text-[#8f3f29] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c96442]/35"
-                  onClick={() => setSelectedViewIds([...modelThreeViewIds])}
-                >
-                  <Box className="h-3.5 w-3.5" aria-hidden="true" />
-                  模型三视图
-                </button>
+            {initialDraft.operationItemId ? (
+              <div
+                data-multi-view-locked-view
+                className="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600"
+              >
+                本次只重试失败视角：<strong className="text-gray-950">{lockedRetryView?.label || initialDraft.viewSpec}</strong>
               </div>
-              <div data-camera-direction-grid className="grid grid-cols-3 gap-2">
-                {cameraDirectionSpecs.map(view => {
-                  const selected = selectedViewIds.includes(view.id)
-                  return (
-                    <button
-                      key={view.id}
-                      type="button"
-                      aria-label={`选择方位 ${view.label}`}
-                      aria-pressed={selected}
-                      title={view.instruction}
-                      className={`relative flex min-h-11 items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c96442]/35 ${
-                        selected
-                          ? 'border-[#c96442] bg-[#fff7f3] text-[#8f3f29]'
-                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-                      }`}
-                      onClick={() => toggleView(view.id)}
-                    >
-                      <CameraDirectionIcon viewId={view.id} />
-                      <span className="text-xs font-black">{view.label}</span>
-                      {selected && <Check className="absolute right-1.5 top-1.5 h-3 w-3" aria-hidden="true" />}
-                    </button>
-                  )
-                })}
-              </div>
-              <div className="mt-3">
-                <div className="mb-1.5 text-[10px] font-bold text-gray-500">补充视角</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {supplementalSpecs.map(view => {
+            ) : (
+              <fieldset>
+                <legend className="sr-only">摄像机方位</legend>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <div className="text-xs font-black text-gray-700" aria-hidden="true">摄像机方位</div>
+                  <button
+                    type="button"
+                    aria-label="选择模型三视图（正视、左视、俯视）"
+                    className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-gray-700 transition hover:border-[#c96442] hover:text-[#8f3f29] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c96442]/35"
+                    onClick={() => setSelectedViewIds([...modelThreeViewIds])}
+                  >
+                    <Box className="h-3.5 w-3.5" aria-hidden="true" />
+                    模型三视图
+                  </button>
+                </div>
+                <div data-camera-direction-grid className="grid grid-cols-3 gap-2">
+                  {cameraDirectionSpecs.map(view => {
                     const selected = selectedViewIds.includes(view.id)
                     return (
                       <button
                         key={view.id}
                         type="button"
-                        aria-label={`选择补充视角 ${view.label}`}
+                        aria-label={`选择方位 ${view.label}`}
                         aria-pressed={selected}
                         title={view.instruction}
-                        className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c96442]/35 ${
+                        className={`relative flex min-h-11 items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c96442]/35 ${
                           selected
                             ? 'border-[#c96442] bg-[#fff7f3] text-[#8f3f29]'
                             : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
                         }`}
                         onClick={() => toggleView(view.id)}
                       >
+                        <CameraDirectionIcon viewId={view.id} />
                         <span className="text-xs font-black">{view.label}</span>
-                        <span className={`flex h-4 w-4 items-center justify-center rounded border ${
-                          selected ? 'border-[#c96442] bg-[#c96442] text-white' : 'border-gray-300'
-                        }`}>
-                          {selected && <Check className="h-3 w-3" aria-hidden="true" />}
-                        </span>
+                        {selected && <Check className="absolute right-1.5 top-1.5 h-3 w-3" aria-hidden="true" />}
                       </button>
                     )
                   })}
                 </div>
-              </div>
-            </fieldset>
+                <div className="mt-3">
+                  <div className="mb-1.5 text-[10px] font-bold text-gray-500">补充视角</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {supplementalSpecs.map(view => {
+                      const selected = selectedViewIds.includes(view.id)
+                      return (
+                        <button
+                          key={view.id}
+                          type="button"
+                          aria-label={`选择补充视角 ${view.label}`}
+                          aria-pressed={selected}
+                          title={view.instruction}
+                          className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c96442]/35 ${
+                            selected
+                              ? 'border-[#c96442] bg-[#fff7f3] text-[#8f3f29]'
+                              : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                          }`}
+                          onClick={() => toggleView(view.id)}
+                        >
+                          <span className="text-xs font-black">{view.label}</span>
+                          <span className={`flex h-4 w-4 items-center justify-center rounded border ${
+                            selected ? 'border-[#c96442] bg-[#c96442] text-white' : 'border-gray-300'
+                          }`}>
+                            {selected && <Check className="h-3 w-3" aria-hidden="true" />}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </fieldset>
+            )}
 
             <label className="block">
               <span className="mb-2 block text-xs font-black text-gray-700">身份与场景要求</span>

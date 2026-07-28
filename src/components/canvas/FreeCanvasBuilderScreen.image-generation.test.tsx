@@ -109,6 +109,7 @@ vi.mock('@/storage/storage-service-client', async importOriginal => {
 
 import { CanvasBottomToolbar, FreeCanvasBuilderScreen } from './FreeCanvasBuilderScreen'
 import { ImageGenerationConversationPanel } from './image-generation/ImageGenerationConversationPanel'
+import { MultiViewWorkbenchDialog } from './image-actions/MultiViewWorkbenchDialog'
 
 const baseProps = {
   quickDrawerOpen: false,
@@ -915,6 +916,86 @@ describe('project-level free canvas image generation entry', () => {
     expect(failedGroup.nodes.filter((node: { meta: { generationState?: string } }) => (
       node.meta.generationState === 'failed'
     ))).toHaveLength(3)
+  })
+
+  it('rejects a retry submission that changes the failed member view', async () => {
+    configureReadyImageModel()
+    vi.stubGlobal('HTMLElement', class HTMLElement {})
+    const source = createFreeCanvasImageNodeFromMedia({
+      id: 'node-source',
+      kind: 'imageAsset',
+      title: 'Source',
+      position: { x: 100, y: 120 },
+      width: 320,
+      height: 320,
+      assetId: 'asset-source.png',
+      imageUrl: '/storage-api/assets/asset-source.png',
+      imagePrompt: '',
+      sourceNodeId: null,
+      generatedFromAgent: false,
+      crop: null,
+      text: '',
+      color: '#111827',
+      meta: {}
+    })
+    const failedMember = {
+      ...createFreeCanvasImageGenerationPlaceholder({
+        runId: 'image-run-failed',
+        conversationId: 'image-operation-image-run-failed',
+        prompt: 'left view',
+        position: { x: 468, y: 120 },
+        width: 320,
+        height: 320
+      }),
+      id: 'node-left',
+      meta: {
+        generationRunId: 'image-run-failed',
+        conversationId: 'image-operation-image-run-failed',
+        generationState: 'failed' as const,
+        generationErrorCode: 'test_provider_failure',
+        source: 'image-generation-conversation',
+        sourceCanvasNodeId: source.id,
+        operationGroupId: 'group-1',
+        operationItemId: 'item-left',
+        operationViewSpec: 'left'
+      }
+    }
+    const canvas = {
+      ...createFreeCanvasProject(1, { nodes: [source, failedMember] }),
+      selectedNodeId: failedMember.id
+    }
+    const onPersistCanvas = vi.fn().mockResolvedValue(true)
+    let renderer!: ReturnType<typeof create>
+
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={vi.fn()}
+          onPersistCanvas={onPersistCanvas}
+        />
+      )
+    })
+    const retry = renderer.root.findAllByType('button').find(button => button.children.includes('重试此视角'))
+    await act(async () => {
+      retry?.props.onClick()
+      await Promise.resolve()
+    })
+    const workbench = renderer.root.findByType(MultiViewWorkbenchDialog)
+
+    await expect(workbench.props.onGenerate({
+      ...workbench.props.initialDraft,
+      viewSpec: 'top'
+    }, ['top']))
+      .rejects.toThrow('重试只能提交原失败视角。')
+    expect(onPersistCanvas).not.toHaveBeenCalled()
+    expect(mocks.prepareGeneration).not.toHaveBeenCalled()
+    expect(mocks.requestGeneration).not.toHaveBeenCalled()
   })
 
   it('keeps persisted multi-view placeholders running while batch preparation is pending', async () => {

@@ -1976,6 +1976,24 @@ const FreeCanvasBuilderInner = ({
     selectedViewIds: string[]
   ) => {
     if (!selectedImageConnection || !selectedImageModel) throw new Error('图片模型连接不可用。')
+    const current = freeCanvasRef.current
+    if (draft.operationItemId) {
+      const failedMember = typeof draft.operationGroupId === 'string'
+        ? current.nodes.find(node => (
+            node.kind === 'image'
+            && node.meta.operationGroupId === draft.operationGroupId
+            && node.meta.operationItemId === draft.operationItemId
+            && node.meta.generationState === 'failed'
+          ))
+        : undefined
+      const originalViewSpec = failedMember?.meta.operationViewSpec
+      if (
+        typeof originalViewSpec !== 'string'
+        || draft.viewSpec !== originalViewSpec
+        || selectedViewIds.length !== 1
+        || selectedViewIds[0] !== originalViewSpec
+      ) throw new Error('重试只能提交原失败视角。')
+    }
     const groupId = draft.operationGroupId || createLocalId('multi-view-group')
     const members = createMultiViewRequestMembers({
       sourceDraft: draft,
@@ -1999,7 +2017,6 @@ const FreeCanvasBuilderInner = ({
     })
     if (members.length === 0) throw new Error('请至少选择一个视角。')
 
-    const current = freeCanvasRef.current
     const sourceNode = current.nodes.find(node => node.id === draft.source.nodeId)
     if (!sourceNode || sourceNode.kind !== 'image') throw new Error('多角度源图片已不在当前画布中。')
     const frame = imageGenerationPlaceholderFrame(members[0].snapshot)

@@ -8,6 +8,7 @@ const python = resolve(backendRoot, '.venv/Scripts/python.exe')
 const pythonPath = [repoRoot, backendRoot].join(delimiter)
 const serviceLogRoot = resolve('.tmp/e2e-services')
 mkdirSync(serviceLogRoot, { recursive: true })
+const useExternalServices = process.env.PROMPTCARD_E2E_EXTERNAL_SERVICES === '1'
 
 const captureServiceOutput = (name: string, command: string) =>
   `${command} > "${resolve(serviceLogRoot, `${name}.log`)}" 2>&1`
@@ -28,7 +29,7 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] }
     }
   ],
-  webServer: [
+  webServer: useExternalServices ? undefined : [
     {
       command: captureServiceOutput('storage', `"${python}" -m promptcard_storage`),
       url: 'http://127.0.0.1:38102/health',

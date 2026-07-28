@@ -918,7 +918,7 @@ describe('project-level free canvas image generation entry', () => {
     ))).toHaveLength(3)
   })
 
-  it('rejects retry submissions that switch member lineage or source identity', async () => {
+  it('rejects retry tampering and replaces only the selected failed node when lineage is duplicated', async () => {
     configureReadyImageModel()
     vi.stubGlobal('HTMLElement', class HTMLElement {})
     const source = createFreeCanvasImageNodeFromMedia({
@@ -958,6 +958,16 @@ describe('project-level free canvas image generation entry', () => {
         operationGroupId: 'group-1',
         operationItemId: 'item-left',
         operationViewSpec: 'left'
+      }
+    }
+    const duplicateFailedMember = {
+      ...failedMember,
+      id: 'node-left-duplicate',
+      position: { x: 836, y: 120 },
+      meta: {
+        ...failedMember.meta,
+        generationRunId: 'image-run-failed-duplicate',
+        conversationId: 'image-operation-image-run-failed-duplicate'
       }
     }
     const secondSource = createFreeCanvasImageNodeFromMedia({
@@ -1000,8 +1010,8 @@ describe('project-level free canvas image generation entry', () => {
       }
     }
     const canvas = {
-      ...createFreeCanvasProject(1, { nodes: [source, failedMember, secondSource, secondFailedMember] }),
-      selectedNodeId: failedMember.id
+      ...createFreeCanvasProject(1, { nodes: [source, failedMember, duplicateFailedMember, secondSource, secondFailedMember] }),
+      selectedNodeId: duplicateFailedMember.id
     }
     const onPersistCanvas = vi.fn().mockResolvedValue(true)
     let renderer!: ReturnType<typeof create>
@@ -1020,7 +1030,9 @@ describe('project-level free canvas image generation entry', () => {
         />
       )
     })
-    const retry = renderer.root.findAllByType('button').find(button => button.children.includes('重试此视角'))
+    const retryButtons = renderer.root.findAllByType('button')
+      .filter(button => button.children.includes('重试此视角'))
+    const retry = retryButtons[retryButtons.length - 1]
     await act(async () => {
       retry?.props.onClick()
       await Promise.resolve()
@@ -1048,6 +1060,30 @@ describe('project-level free canvas image generation entry', () => {
     expect(onPersistCanvas).not.toHaveBeenCalled()
     expect(mocks.prepareGeneration).not.toHaveBeenCalled()
     expect(mocks.requestGeneration).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await workbench.props.onGenerate(workbench.props.initialDraft, ['left'])
+    })
+
+    const persistedCanvas = onPersistCanvas.mock.calls[0][0] as IFreeCanvasProject
+    expect(persistedCanvas.nodes.find(node => node.id === failedMember.id)).toMatchObject({
+      id: failedMember.id,
+      meta: {
+        generationRunId: 'image-run-failed',
+        generationState: 'failed'
+      }
+    })
+    expect(persistedCanvas.nodes.find(node => node.id === duplicateFailedMember.id)).toMatchObject({
+      id: duplicateFailedMember.id,
+      meta: {
+        generationState: 'running',
+        operationGroupId: 'group-1',
+        operationItemId: 'item-left',
+        operationViewSpec: 'left'
+      }
+    })
+    expect(persistedCanvas.nodes.find(node => node.id === duplicateFailedMember.id)?.meta.generationRunId)
+      .not.toBe('image-run-failed-duplicate')
   })
 
   it('keeps persisted multi-view placeholders running while batch preparation is pending', async () => {

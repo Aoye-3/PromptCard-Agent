@@ -194,6 +194,7 @@ type ProjectMaterialCanvasSource = Pick<
 >
 
 type MultiViewRetryTarget = {
+  nodeId: string
   operationGroupId: string
   operationItemId: string
   viewSpec: string
@@ -201,6 +202,10 @@ type MultiViewRetryTarget = {
     ImageOperationDraft['source'],
     'nodeId' | 'originalAssetId' | 'canvasAssetId' | 'providerAssetId'
   >
+}
+
+type ActiveImageOperationDraft = ImageOperationDraft & {
+  retryNodeId?: string
 }
 
 const TEXT_COLORS = ['#111827', '#ef4423', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#ffffff']
@@ -297,7 +302,7 @@ const FreeCanvasBuilderInner = ({
     y: number
     returnFocus: HTMLElement | null
   } | null>(null)
-  const [activeImageOperationDraft, setActiveImageOperationDraft] = useState<ImageOperationDraft | null>(null)
+  const [activeImageOperationDraft, setActiveImageOperationDraft] = useState<ActiveImageOperationDraft | null>(null)
   const [imageOperationPreparing, setImageOperationPreparing] = useState(false)
   const [activeImageConversationId, setActiveImageConversationId] = useState<string | null>(null)
   const imageConversationIntentRef = useRef<'auto' | 'new' | 'active'>('auto')
@@ -1531,6 +1536,7 @@ const FreeCanvasBuilderInner = ({
     node: IFreeCanvasImageNode,
     operation: ImageProductOperation,
     options?: {
+      retryNodeId?: string
       operationGroupId?: string
       operationItemId?: string
       viewSpec?: string
@@ -1581,7 +1587,8 @@ const FreeCanvasBuilderInner = ({
           : aspectRatios.find(value => value !== 'custom') || '1:1',
         ...(options?.operationGroupId ? { operationGroupId: options.operationGroupId } : {}),
         ...(options?.operationItemId ? { operationItemId: options.operationItemId } : {}),
-        ...(options?.viewSpec ? { viewSpec: options.viewSpec } : {})
+        ...(options?.viewSpec ? { viewSpec: options.viewSpec } : {}),
+        ...(options?.retryNodeId ? { retryNodeId: options.retryNodeId } : {})
       })
     } catch {
       setUploadError('无法准备当前画布图片的模型输入，请检查本地资产和存储服务。')
@@ -1710,6 +1717,7 @@ const FreeCanvasBuilderInner = ({
       : undefined
     if (!sourceNode?.assetId || !groupId) return
     void openImageOperationWorkbench(sourceNode, 'multi-view', {
+      retryNodeId: member.nodeId,
       operationGroupId: groupId,
       operationItemId: member.itemId,
       viewSpec: member.viewId
@@ -1988,13 +1996,15 @@ const FreeCanvasBuilderInner = ({
   ) => {
     if (!selectedImageConnection || !selectedImageModel) throw new Error('图片模型连接不可用。')
     const current = freeCanvasRef.current
+    let retryMember: IFreeCanvasImageNode | null = null
     if (retryTarget) {
       const sourceMatches = draft.source.nodeId === retryTarget.source.nodeId
         && draft.source.originalAssetId === retryTarget.source.originalAssetId
         && draft.source.canvasAssetId === retryTarget.source.canvasAssetId
         && draft.source.providerAssetId === retryTarget.source.providerAssetId
-      const failedMember = current.nodes.find(node => (
-        node.kind === 'image'
+      const failedMember = current.nodes.find((node): node is IFreeCanvasImageNode => (
+        node.id === retryTarget.nodeId
+        && node.kind === 'image'
         && node.meta.operationGroupId === retryTarget.operationGroupId
         && node.meta.operationItemId === retryTarget.operationItemId
         && node.meta.operationViewSpec === retryTarget.viewSpec
@@ -2016,6 +2026,7 @@ const FreeCanvasBuilderInner = ({
         || !failedMember
         || !sourceNode
       ) throw new Error('重试只能提交原失败视角。')
+      retryMember = failedMember
     } else if (draft.operationItemId) throw new Error('重试只能提交原失败视角。')
     const groupId = draft.operationGroupId || createLocalId('multi-view-group')
     const members = createMultiViewRequestMembers({
@@ -2046,12 +2057,16 @@ const FreeCanvasBuilderInner = ({
     const groupMemberOffset = current.nodes.filter(node => node.meta.operationGroupId === groupId).length
     const replacementNodeIds = new Set<string>()
     const placeholders = members.map((member, index) => {
-      const existingMember = current.nodes.find((node): node is IFreeCanvasImageNode => (
-        node.kind === 'image'
-        && node.meta.operationGroupId === groupId
-        && node.meta.operationItemId === member.itemId
-        && node.meta.generationState === 'failed'
-      ))
+      const existingMember = retryTarget
+        ? member.itemId === retryTarget.operationItemId && member.view.id === retryTarget.viewSpec
+          ? retryMember
+          : null
+        : current.nodes.find((node): node is IFreeCanvasImageNode => (
+            node.kind === 'image'
+            && node.meta.operationGroupId === groupId
+            && node.meta.operationItemId === member.itemId
+            && node.meta.generationState === 'failed'
+          ))
       const placementIndex = groupMemberOffset + index
       const placeholder = createOperationPlaceholder({
         snapshot: member.snapshot,
@@ -2656,7 +2671,9 @@ const FreeCanvasBuilderInner = ({
               activeImageOperationDraft.operationItemId
                 && activeImageOperationDraft.operationGroupId
                 && activeImageOperationDraft.viewSpec
+                && activeImageOperationDraft.retryNodeId
                 ? {
+                    nodeId: activeImageOperationDraft.retryNodeId,
                     operationGroupId: activeImageOperationDraft.operationGroupId,
                     operationItemId: activeImageOperationDraft.operationItemId,
                     viewSpec: activeImageOperationDraft.viewSpec,

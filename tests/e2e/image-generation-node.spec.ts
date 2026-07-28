@@ -9,6 +9,7 @@ test('project image conversation uses real Runtime and SQLite while canvas conti
   const projectId = `image-conversation-e2e-${Date.now()}`
   const projectTitle = `图片会话 E2E ${Date.now()}`
   await seedProject(request, projectId, projectTitle)
+  await resetProvider(request, true)
   await enableImageGenerationFeature(page)
 
   await page.goto('/', { waitUntil: 'networkidle' })
@@ -29,12 +30,7 @@ test('project image conversation uses real Runtime and SQLite while canvas conti
   await expect(prompt).toHaveText('银色机械装置，干净产品摄影')
   await prompt.fill('第一轮：银色机械装置，电影感产品摄影')
   const firstGenerationResponse = page.waitForResponse(response => response.url().includes('/image-generations'))
-  await page.getByRole('button', { name: '生成图片', exact: true }).click()
-  const runningNode = page.locator('[data-image-generation-state="running"]')
-  await expect(runningNode).toBeVisible()
-  const placeholderFlowNode = runningNode.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " react-flow__node ")]')
-  const placeholderNodeId = await placeholderFlowNode.getAttribute('data-id')
-  expect(placeholderNodeId).toMatch(/^free-image-generation-image-run-[0-9a-f]{32}$/)
+  const placeholderNodeId = await observeRunningNodeWhileProviderPaused(page, request)
   const firstGeneration = await firstGenerationResponse
   expect(firstGeneration.ok(), await firstGeneration.text()).toBe(true)
 
@@ -203,4 +199,28 @@ async function runtimeJson(request: APIRequestContext, path: string) {
   const response = await request.get(`${runtimeUrl}${path}`)
   expect(response.ok()).toBe(true)
   return response.json()
+}
+
+async function resetProvider(request: APIRequestContext, paused: boolean) {
+  const response = await request.post(`${runtimeUrl}/__test__/provider/reset`, { data: { paused } })
+  expect(response.ok(), await response.text()).toBe(true)
+}
+
+async function releaseProvider(request: APIRequestContext) {
+  const response = await request.post(`${runtimeUrl}/__test__/provider/release`)
+  expect(response.ok(), await response.text()).toBe(true)
+}
+
+async function observeRunningNodeWhileProviderPaused(page: Page, request: APIRequestContext) {
+  const runningNode = page.locator('[data-image-generation-state="running"]')
+  try {
+    await page.getByRole('button', { name: '生成图片', exact: true }).click()
+    await expect(runningNode).toBeVisible()
+    const placeholderFlowNode = runningNode.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " react-flow__node ")]')
+    const placeholderNodeId = await placeholderFlowNode.getAttribute('data-id')
+    expect(placeholderNodeId).toMatch(/^free-image-generation-image-run-[0-9a-f]{32}$/)
+    return placeholderNodeId
+  } finally {
+    await releaseProvider(request)
+  }
 }

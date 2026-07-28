@@ -48,6 +48,10 @@ class ProviderSessionRequest(BaseModel):
     token: str = Field(min_length=1, max_length=96, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+class ProviderGateResetRequest(BaseModel):
+    paused: bool = False
+
+
 class TestProviderControl:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -147,7 +151,16 @@ class RecordingProvider:
                     f"e2e-provider-{call}",
                 )
         else:
+            _call, _view_spec, should_fail, release = generic_provider_control.record(request)
             self._requests.append(_sanitized_request(request))
+            release.wait()
+            if should_fail:
+                raise ProviderError(
+                    "test_provider_failure",
+                    "Deterministic test provider failure",
+                    True,
+                    "e2e-provider-generic",
+                )
         time.sleep(1.2)
         return ImageGenerationResult(
             image=ProviderImage(url="https://e2e.invalid/generated.png"),
@@ -183,6 +196,7 @@ class TestStorageClient(PromptCardStorageClient):
 
 
 provider_requests: list[dict[str, Any]] = []
+generic_provider_control = TestProviderControl()
 test_provider_controls: dict[str, TestProviderControl] = {}
 test_provider_controls_lock = threading.Lock()
 service = ImageGenerationService(
@@ -286,6 +300,27 @@ def image_generation_status() -> dict[str, Any]:
 @app.get("/__test__/provider-requests")
 def recorded_provider_requests() -> dict[str, Any]:
     return {"requests": provider_requests}
+
+
+@app.get("/__test__/provider")
+def provider_state() -> dict[str, Any]:
+    return generic_provider_control.snapshot()
+
+
+@app.post("/__test__/provider/reset")
+def reset_provider(body: ProviderGateResetRequest) -> dict[str, Any]:
+    provider_requests.clear()
+    return generic_provider_control.reset(paused=body.paused, fail_calls=[], fail_views=[])
+
+
+@app.post("/__test__/provider/pause")
+def pause_provider() -> dict[str, Any]:
+    return generic_provider_control.pause()
+
+
+@app.post("/__test__/provider/release")
+def release_provider() -> dict[str, Any]:
+    return generic_provider_control.release()
 
 
 @app.get("/__test__/multi-view-provider")

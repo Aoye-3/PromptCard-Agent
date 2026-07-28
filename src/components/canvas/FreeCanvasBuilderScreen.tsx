@@ -193,6 +193,16 @@ type ProjectMaterialCanvasSource = Pick<
   'id' | 'name' | 'sourceAssetId' | 'previewAssetId' | 'width' | 'height'
 >
 
+type MultiViewRetryTarget = {
+  operationGroupId: string
+  operationItemId: string
+  viewSpec: string
+  source: Pick<
+    ImageOperationDraft['source'],
+    'nodeId' | 'originalAssetId' | 'canvasAssetId' | 'providerAssetId'
+  >
+}
+
 const TEXT_COLORS = ['#111827', '#ef4423', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899', '#ffffff']
 const FONT_SIZES: IFreeCanvasTextNode['fontSize'][] = ['small', 'medium', 'large', 'extra-large', 'huge']
 const emptyQuickTextPresetDraft: QuickMessageDraft = { name: '', body: '' }
@@ -1973,27 +1983,40 @@ const FreeCanvasBuilderInner = ({
 
   const submitMultiViewOperation = useCallback(async (
     draft: ImageOperationDraft,
-    selectedViewIds: string[]
+    selectedViewIds: string[],
+    retryTarget: MultiViewRetryTarget | null
   ) => {
     if (!selectedImageConnection || !selectedImageModel) throw new Error('图片模型连接不可用。')
     const current = freeCanvasRef.current
-    if (draft.operationItemId) {
-      const failedMember = typeof draft.operationGroupId === 'string'
-        ? current.nodes.find(node => (
-            node.kind === 'image'
-            && node.meta.operationGroupId === draft.operationGroupId
-            && node.meta.operationItemId === draft.operationItemId
-            && node.meta.generationState === 'failed'
-          ))
-        : undefined
-      const originalViewSpec = failedMember?.meta.operationViewSpec
+    if (retryTarget) {
+      const sourceMatches = draft.source.nodeId === retryTarget.source.nodeId
+        && draft.source.originalAssetId === retryTarget.source.originalAssetId
+        && draft.source.canvasAssetId === retryTarget.source.canvasAssetId
+        && draft.source.providerAssetId === retryTarget.source.providerAssetId
+      const failedMember = current.nodes.find(node => (
+        node.kind === 'image'
+        && node.meta.operationGroupId === retryTarget.operationGroupId
+        && node.meta.operationItemId === retryTarget.operationItemId
+        && node.meta.operationViewSpec === retryTarget.viewSpec
+        && node.meta.sourceCanvasNodeId === retryTarget.source.nodeId
+        && node.meta.generationState === 'failed'
+      ))
+      const sourceNode = current.nodes.find(node => (
+        node.id === retryTarget.source.nodeId
+        && node.kind === 'image'
+        && node.assetId === retryTarget.source.canvasAssetId
+      ))
       if (
-        typeof originalViewSpec !== 'string'
-        || draft.viewSpec !== originalViewSpec
+        draft.operationGroupId !== retryTarget.operationGroupId
+        || draft.operationItemId !== retryTarget.operationItemId
+        || draft.viewSpec !== retryTarget.viewSpec
         || selectedViewIds.length !== 1
-        || selectedViewIds[0] !== originalViewSpec
+        || selectedViewIds[0] !== retryTarget.viewSpec
+        || !sourceMatches
+        || !failedMember
+        || !sourceNode
       ) throw new Error('重试只能提交原失败视角。')
-    }
+    } else if (draft.operationItemId) throw new Error('重试只能提交原失败视角。')
     const groupId = draft.operationGroupId || createLocalId('multi-view-group')
     const members = createMultiViewRequestMembers({
       sourceDraft: draft,
@@ -2627,7 +2650,25 @@ const FreeCanvasBuilderInner = ({
             modelLabel={selectedImageModel.displayName}
             externalBlockingIssues={imageOperationExternalIssues}
             onCancel={() => setActiveImageOperationDraft(null)}
-            onGenerate={submitMultiViewOperation}
+            onGenerate={(draft, selectedViewIds) => submitMultiViewOperation(
+              draft,
+              selectedViewIds,
+              activeImageOperationDraft.operationItemId
+                && activeImageOperationDraft.operationGroupId
+                && activeImageOperationDraft.viewSpec
+                ? {
+                    operationGroupId: activeImageOperationDraft.operationGroupId,
+                    operationItemId: activeImageOperationDraft.operationItemId,
+                    viewSpec: activeImageOperationDraft.viewSpec,
+                    source: {
+                      nodeId: activeImageOperationDraft.source.nodeId,
+                      originalAssetId: activeImageOperationDraft.source.originalAssetId,
+                      canvasAssetId: activeImageOperationDraft.source.canvasAssetId,
+                      providerAssetId: activeImageOperationDraft.source.providerAssetId
+                    }
+                  }
+                : null
+            )}
           />
         )}
         {activeImageOperationDraft && activeImageOperationDraft.operation !== 'multi-view' && selectedImageModel && (

@@ -918,7 +918,7 @@ describe('project-level free canvas image generation entry', () => {
     ))).toHaveLength(3)
   })
 
-  it('rejects a retry submission that changes the failed member view', async () => {
+  it('rejects retry submissions that switch member lineage or source identity', async () => {
     configureReadyImageModel()
     vi.stubGlobal('HTMLElement', class HTMLElement {})
     const source = createFreeCanvasImageNodeFromMedia({
@@ -960,8 +960,47 @@ describe('project-level free canvas image generation entry', () => {
         operationViewSpec: 'left'
       }
     }
+    const secondSource = createFreeCanvasImageNodeFromMedia({
+      id: 'node-source-2',
+      kind: 'imageAsset',
+      title: 'Second source',
+      position: { x: 100, y: 500 },
+      width: 320,
+      height: 320,
+      assetId: 'asset-source-2.png',
+      imageUrl: '/storage-api/assets/asset-source-2.png',
+      imagePrompt: '',
+      sourceNodeId: null,
+      generatedFromAgent: false,
+      crop: null,
+      text: '',
+      color: '#111827',
+      meta: {}
+    })
+    const secondFailedMember = {
+      ...createFreeCanvasImageGenerationPlaceholder({
+        runId: 'image-run-failed-2',
+        conversationId: 'image-operation-image-run-failed-2',
+        prompt: 'top view',
+        position: { x: 468, y: 500 },
+        width: 320,
+        height: 320
+      }),
+      id: 'node-top-2',
+      meta: {
+        generationRunId: 'image-run-failed-2',
+        conversationId: 'image-operation-image-run-failed-2',
+        generationState: 'failed' as const,
+        generationErrorCode: 'test_provider_failure',
+        source: 'image-generation-conversation',
+        sourceCanvasNodeId: secondSource.id,
+        operationGroupId: 'group-2',
+        operationItemId: 'item-top-2',
+        operationViewSpec: 'top'
+      }
+    }
     const canvas = {
-      ...createFreeCanvasProject(1, { nodes: [source, failedMember] }),
+      ...createFreeCanvasProject(1, { nodes: [source, failedMember, secondSource, secondFailedMember] }),
       selectedNodeId: failedMember.id
     }
     const onPersistCanvas = vi.fn().mockResolvedValue(true)
@@ -990,8 +1029,21 @@ describe('project-level free canvas image generation entry', () => {
 
     await expect(workbench.props.onGenerate({
       ...workbench.props.initialDraft,
+      operationGroupId: 'group-2',
+      operationItemId: 'item-top-2',
       viewSpec: 'top'
     }, ['top']))
+      .rejects.toThrow('重试只能提交原失败视角。')
+    await expect(workbench.props.onGenerate({
+      ...workbench.props.initialDraft,
+      source: {
+        ...workbench.props.initialDraft.source,
+        nodeId: secondSource.id,
+        originalAssetId: 'asset-source-2.png',
+        canvasAssetId: 'asset-source-2.png',
+        providerAssetId: 'asset-source-2.png'
+      }
+    }, ['left']))
       .rejects.toThrow('重试只能提交原失败视角。')
     expect(onPersistCanvas).not.toHaveBeenCalled()
     expect(mocks.prepareGeneration).not.toHaveBeenCalled()

@@ -9,6 +9,7 @@ The current delivery target is:
 1. Prompt media library construction.
 2. Image generation from Canvas prompts.
 3. Prompt analysis and prompt completion through the text Agent.
+4. Contextual image operations and explicit front/left/top multi-view generation with recoverable, independently retryable members.
 
 ## Primary Capabilities
 
@@ -16,6 +17,8 @@ The current delivery target is:
 - Media Library capture, registration, reuse, and image style/prompt analysis.
 - Free Canvas text and image nodes.
 - Canvas Prompt image generation through the existing provider-neutral Image Generation module.
+- Contextual image actions that resolve local edits immediately and require an explicit Generate action for provider-backed operations.
+- Explicit multi-view request groups, including the front/left/top shortcut, durable placeholders, partial-failure recovery, and retry of only the failed member.
 - A pi-based text Agent that can:
   - analyze and improve a selected Canvas text node;
   - propose a new Canvas text node when none is selected;
@@ -25,6 +28,8 @@ The current delivery target is:
 - Storyboard and structured prompt workflows.
 
 All Agent mutations are proposals and require explicit user confirmation.
+
+The contextual image and multi-view work is tracked in [Plan 007](./Plan/007-contextual-image-editing-and-multi-view-plan.md). Its zero-cost Fake Provider automation is complete, but the plan remains `Active` until unified human acceptance is approved; paid live-provider gates have not been executed.
 
 ## Runtime Shape
 
@@ -50,5 +55,7 @@ npm.cmd run agent:dev
 npm.cmd run text-agent:dev
 npm.cmd run agent:check
 npm.cmd test -- --run
+npm.cmd run test:frontend
+npm.cmd run test:e2e
 npm.cmd run build
 ```

@@ -87,11 +87,14 @@ One Generate confirmation:
 
 1. creates one group ID;
 2. creates one item ID, view specification, run ID, recipe snapshot and placeholder per selected view;
-3. persists the whole placeholder group before any provider call;
-4. submits independent provider-neutral requests with bounded concurrency;
-5. never claims native grouped output or exact 3D reconstruction.
+3. persists the whole placeholder group before any Runtime preparation or provider call;
+4. atomically prepares every member run in Storage; a prepare failure makes zero provider calls;
+5. submits independent provider-neutral requests with concurrency one;
+6. never claims native grouped output or exact 3D reconstruction.
 
-`MultiViewGroupPanel` derives queued/running/partial/succeeded/failed state from member image nodes. Successful views remain usable when another view fails. `重试此视角` opens a workbench containing only that failed view and creates a new run in the same group; it does not mutate the historical failed member or resubmit successful views. `作为参考` directly appends the successful result to the existing right-side 图片生成 Composer and opens that tab; it does not open a workbench or submit a request.
+`MultiViewGroupPanel` derives queued/running/partial/succeeded/failed state from member image nodes. Successful views remain usable when another view fails. `重试此视角` is bound to the clicked failed `nodeId`, its group/item/view tuple, the original/canvas/provider source identities and the source node identity. The retry workbench cannot switch to another member or source. Generate creates a new run on that same canvas node, preserves its position and size, leaves the old failed run immutable, and never resubmits successful members. `作为参考` directly appends the successful result to the existing right-side 图片生成 Composer and opens that tab; it does not open a workbench or submit a request.
+
+Reload and project-switch reconciliation uses both run ID and canvas node ID. Queued authorized members resume one at a time from their immutable snapshots, running members are polled, and terminal members hydrate the existing node. This prevents duplicate provider submissions and duplicate canvas placement while preserving geometry changed during generation.
 
 Contextual placeholders use `meta.source = "contextual-image-operation"` and do not carry a conversation ID. The right-side image-generation path keeps its existing `image-generation-conversation` source and conversation identity.
 
@@ -113,14 +116,11 @@ Copy/export do not create another local asset. Provider derivatives are created 
 
 ## Current verification state
 
-Focused domain and component suites for the registry, local command history, visible input, recipe compilation, workbench submission, multi-view scheduling/group projection and menu behavior pass. Repeated production builds pass with pre-existing CSS/chunk warnings.
+The zero-cost automated gates pass with the repository Fake Provider: the image-generation Playwright configuration, full E2E suite, full frontend suite, production build, Runtime image-generation suite, Storage suite, `agent:check`, and diff/security checks are green. These checks cover the persisted three-member placeholder set, atomic preparation, all-success and partial outcomes, retrying only the failed member, geometry preservation, lineage, and reload/project-switch deduplication without contacting a real provider.
 
-Still required for final frontend acceptance:
+Plan 007 remains `Active` because unified human approval is still outstanding. F2, F3, F5, F7 and the remaining F4 observations require manual acceptance; B3-B6 and B8-B9 remain intentionally unexecuted. The current findings are retained rather than hidden:
 
-- one uninterrupted full Vitest run;
-- lint;
-- Playwright at four viewport corners and 25%/100%/200% canvas zoom;
-- contextual workbench Cancel/Generate/retry/reload flows;
-- clipboard unsupported/error paths;
-- explicit regression proving the active right tab and drafts remain unchanged;
-- expanded pixel fixtures for crop, flip, alpha and annotation composition.
+- `E-001` (Medium): a reload-adjacent project `PUT` can be cancelled and surface `StorageHttpError`; Storage retained the nodes in the recorded run.
+- `E-002` (Low): the Fake Runtime generic status probe can return 404/disconnected in the captured browser evidence.
+
+See [Plan 007](../Plan/007-contextual-image-editing-and-multi-view-plan.md) and the [manual frontend acceptance record](../quality/manual-frontend-acceptance.md) for the current gate ledger and sanitized evidence links.

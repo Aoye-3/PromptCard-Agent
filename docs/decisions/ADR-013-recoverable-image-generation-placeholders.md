@@ -53,3 +53,9 @@ Rejected because it hides where the requested result belonged and removes useful
 ## Relationship to earlier decisions
 
 This ADR extends [ADR-010](./ADR-010-project-image-generation-conversations.md). Durable pending placement remains the recovery authority for successful conversation runs; the new placeholder is the foreground representation that can be hydrated by that placement rather than a competing placement mechanism.
+
+## Relationship to ADR-015
+
+This ADR governs one foreground project-conversation request: one stable run ID is created before submission, its ordinary placeholder ID is derived from that run, and the same run/node relationship survives completion and reload. It does not define multi-member authorization, atomic group preparation, or contextual failed-member retry.
+
+[ADR-015](./ADR-015-explicit-multi-view-request-groups.md) adds those contextual multi-view semantics without changing this contract. In that workflow, all member placeholders are persisted and all queued runs are atomically prepared before provider execution. Retrying a clicked failed member keeps its existing canvas node and geometry but assigns a new run; the historical failed run remains immutable. That deliberate node/run rebinding is scoped to ADR-015 and does not replace the conversation placeholder rule recorded here.

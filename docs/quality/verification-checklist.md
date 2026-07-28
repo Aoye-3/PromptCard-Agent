@@ -3,8 +3,8 @@
 Run before merging broad implementation or documentation restructuring:
 
 ```powershell
-npm.cmd test -- --run
-npm.cmd run storage:test
+npm.cmd run test:frontend
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
 .\agent-runtime\backend\.venv\Scripts\python.exe -m unittest promptcard_storage.tests.test_app
 npx.cmd tsc --noEmit
 npm.cmd run lint
@@ -37,21 +37,21 @@ For the Recent Capture image chain, verify native screenshot and ClipboardItem/D
 For model-management or image-generation changes, additionally run from the repository root:
 
 ```powershell
-npm.cmd test -- --run
+npm.cmd run test:frontend
 npm.cmd run build
 npm.cmd run agent:check
-$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
-npx.cmd playwright test tests/e2e/model-management.spec.ts tests/e2e/image-generation-node.spec.ts --workers=1
-.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests -q -p no:cacheprovider
+npm.cmd run test:e2e
+npm.cmd run test:e2e -- -c playwright.image-generation.config.ts
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
 .\agent-runtime\backend\.venv\Scripts\python.exe -m pytest agent-runtime\backend\tests\test_image_generation_service.py agent-runtime\backend\tests\test_image_generation_storage_integration.py agent-runtime\backend\tests\test_image_result_fetcher.py agent-runtime\backend\tests\test_seedream_prompt_compiler.py agent-runtime\backend\tests\test_seedream_provider.py agent-runtime\backend\tests\test_model_connections.py agent-runtime\backend\tests\test_credential_store.py agent-runtime\backend\tests\test_csrf_middleware.py -q -p no:cacheprovider
 .\agent-runtime\backend\.venv\Scripts\python.exe -m ruff check agent-runtime\backend\app agent-runtime\backend\tests
 cargo test --manifest-path src-tauri/Cargo.toml
 git diff --check
 ```
 
-The two Playwright specs start their own frontend, real SQLite Storage service, and Runtime with a Provider DI fake on ports `38100–38102`; those ports must be free. This verifies HTTP/CSRF/Storage/UI integration without spending Ark quota or requiring a real credential.
+The dedicated Playwright config covers the image-generation node and multi-view flows, not model-management. The repository runner starts its own frontend, real SQLite Storage service, and Runtime with a Provider DI fake on ports `38100–38102`; those ports must be free. It fixes the browser path to the workspace `.playwright-browsers`, propagates the real Playwright exit code (or `124` on runner timeout), stops the owned service trees in `finally`, and verifies that the ports were released. This verifies HTTP/CSRF/Storage/UI integration without spending Ark quota or requiring a real credential. Do not bypass the runner with a direct Playwright CLI command.
 
-Keep `TEMP`, `TMP`, Python/uv caches, `PLAYWRIGHT_BROWSERS_PATH`, and `CARGO_TARGET_DIR` on the current F: workspace when these commands need to provision caches. A live Ark smoke test must never be attempted without a user-configured keyring credential and explicit rollout enablement. Before production rollout, record Windows results for text-to-image, 2–10 reference images, smart edit, point, bbox, and visual-markup raster derivatives. Also verify standard/fast, 1K/2K, preset/custom size, PNG/JPEG, watermark, and Arabic/Japanese/German prompts. Record full-suite baseline failures separately from feature-focused failures.
+Keep `TEMP`, `TMP`, Python/uv caches, `PLAYWRIGHT_BROWSERS_PATH`, and `CARGO_TARGET_DIR` on the current F: workspace when these commands need to provision caches. Set `PLAYWRIGHT_BROWSERS_PATH="$PWD\.playwright-browsers"` before any `npx.cmd playwright install`; normal test execution sets it through the runner. Always run the Storage gate with the explicit workspace `.venv` interpreter shown above; do not install `pillow_heif` globally to make a system Python pass. A live Ark smoke test must never be attempted without a user-configured keyring credential and explicit rollout enablement. Before production rollout, record Windows results for text-to-image, 2–10 reference images, smart edit, point, bbox, and visual-markup raster derivatives. Also verify standard/fast, 1K/2K, preset/custom size, PNG/JPEG, watermark, and Arabic/Japanese/German prompts. Record full-suite baseline failures separately from feature-focused failures.
 
 Current known non-feature gates are tracked in the [Seedream implementation status](../Plan/005-seedream-image-node-frontend-implementation-status.md): the Runtime full suite includes Windows/POSIX/live-credential environment failures, and repository ESLint has zero errors but exceeds its warning budget. Do not report either as an image-generation regression without reproducing it in the focused commands above.
 

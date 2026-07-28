@@ -13,6 +13,7 @@ npm.cmd run text-agent:dev
 npm.cmd run agent:check
 npm.cmd run build
 npm.cmd test -- --run
+npm.cmd run test:e2e
 ```
 
 Command purposes:
@@ -27,6 +28,7 @@ Command purposes:
 - `startup:test`: start from `start.bat` and verify the full local startup flow.
 - `build`: run TypeScript and production Vite build.
 - `npm.cmd test -- --run`: run Vitest once.
+- `test:e2e`: run the complete Playwright suite through the repository runner. The runner uses the workspace `.playwright-browsers`, starts Storage, the Fake Runtime, and Vite on ports `38102`, `38101`, and `38100`, then owns cleanup of those process trees.
 
 ## Development Server Control
 
@@ -187,8 +189,11 @@ If the raw Agent process starts but this endpoint fails, run `npm.cmd run agent:
 Browser verification may fail if Playwright browsers are not installed. Install them only when needed for browser testing:
 
 ```powershell
-npx.cmd playwright install
+$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
+npx.cmd playwright install chromium
 ```
+
+Keep that environment variable set for the install so browser binaries remain in the workspace instead of a user-profile cache. Normal E2E execution must use `npm.cmd run test:e2e`; the runner sets the same path automatically.
 
 ### CSS Minify Warning
 

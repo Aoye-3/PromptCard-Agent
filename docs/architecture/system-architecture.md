@@ -84,7 +84,7 @@ flowchart LR
 
 ## Image-Generation Isolation
 
-Image generation remains a separate Gateway module using `image.primary`. Image models never enter the PI text provider collection or the text-SDK registry. It does not depend on pi sessions or text-Agent availability. Existing Storage schema v5 conversations, runs, placements, original assets, derivatives, and Recent Capture behavior remain unchanged.
+Image generation remains a separate Gateway module using `image.primary`. Image models never enter the PI text provider collection or the text-SDK registry. It does not depend on pi sessions or text-Agent availability. The current Storage schema is v7: it preserves the project conversations and durable placements introduced in v4, the original/derived image relationships introduced in v5, and the later asset-lifecycle and project-resource additions. Runs remain immutable, and Recent Capture behavior remains unchanged.
 
 ## Local Port Discovery
 

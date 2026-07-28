@@ -254,6 +254,14 @@ Success updates only `assetId`, the local asset URL, and generation metadata on 
 
 On project load, running nodes are reconciled against Storage by `generationRunId`. `queued` or `running` records keep the busy state and are polled; `failed` records restore a failed placeholder; `succeeded` records hydrate from the first output asset. A missing run or missing successful output becomes a stable failed placeholder. Pending placement processing hydrates an existing node first and marks the placement `placed` only after project persistence. Creating a new result node remains a compatibility fallback for successful runs that predate placeholders.
 
+### Contextual multi-view placeholder groups
+
+Contextual multi-view uses the same ordinary image-node presentation but not the project conversation ownership above. Its placeholders use `source: contextual-image-operation`, have no conversation ID, and are related by provider-neutral group/item/view metadata. Submission is ordered as complete canvas persistence, atomic batch preparation, then concurrency-one provider execution. A failure in either of the first two phases produces zero provider calls.
+
+Each failed-member retry is tied to the clicked canvas `nodeId`, its group/item/view tuple, the original/canvas/provider source identities and the source node identity. A valid retry puts a new run on that same node and preserves its position and dimensions; the previous failed run remains immutable and successful group members are not submitted again. Reload and project switching reconcile by both run ID and node ID so the existing node is hydrated or resumed without duplicate provider work or placement.
+
+This differs from the project Image Generation Agent lifecycle in [ADR-013](../decisions/ADR-013-recoverable-image-generation-placeholders.md): ADR-013 gives a foreground conversation run one stable run-derived placeholder identity. Contextual multi-view follows [ADR-015](../decisions/ADR-015-explicit-multi-view-request-groups.md), where an explicitly selected failed member can retain its canvas node while receiving a new retry run.
+
 ## Verification
 
 ```powershell
@@ -262,9 +270,9 @@ npm.cmd test -- --run src/domain/project-resources/project-resource-drag.test.ts
 npm.cmd test -- --run src/components/AgentCollaborationPanel.test.tsx src/components/canvas/image-generation/ImageGenerationConversationPanel.test.tsx src/components/canvas/image-generation/ImageGenerationComposer.test.tsx
 npm.cmd run test:e2e -- free-canvas-image-crop.spec.ts
 npm.cmd run test:e2e -- free-canvas-text-node.spec.ts
-npx.cmd playwright test tests/e2e/free-canvas-dense-right-panel.spec.ts --project=chromium
-npx.cmd playwright test tests/e2e/project-resource-library.spec.ts --project=chromium
-npx.cmd playwright test tests/e2e/model-management.spec.ts tests/e2e/image-generation-node.spec.ts --workers=1
+npm.cmd run test:e2e -- tests/e2e/free-canvas-dense-right-panel.spec.ts --project=chromium
+npm.cmd run test:e2e -- tests/e2e/project-resource-library.spec.ts --project=chromium
+npm.cmd run test:e2e -- -c playwright.image-generation.config.ts
 npm.cmd run build
 ```
 

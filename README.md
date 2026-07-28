@@ -192,6 +192,8 @@ npm.cmd run agent:dev
 npm.cmd run text-agent:dev
 npm.cmd run agent:check
 npm.cmd test -- --run
+npm.cmd run test:frontend
+npm.cmd run test:e2e
 npm.cmd run build
 ```
 
@@ -201,6 +203,12 @@ Backend Agent Runtime tests:
 cd agent-runtime/backend
 $env:UV_CACHE_DIR='F:\.Agent-PromptCardManager\.uv-cache'
 uv run pytest tests -q -p no:cacheprovider
+```
+
+PromptCard Storage release gate (use the existing workspace virtual environment so image-codec dependencies are available):
+
+```powershell
+& .\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
 ```
 
 </details>

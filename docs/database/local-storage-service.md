@@ -49,10 +49,10 @@ Backups use the SQLite backup API and include the database, assets, and a manife
 
 ## Verification
 
-`npm.cmd run storage:test` discovers every `test_*.py` file under `promptcard_storage/tests`. Core store tests run with the system Python. FastAPI route contract tests run when FastAPI is installed and otherwise report explicit skips; they can be run with the repository Agent backend environment:
+The Storage release gate discovers every `test_*.py` file under `promptcard_storage/tests` with the repository Agent backend environment. Use that explicit workspace interpreter so FastAPI and image-codec dependencies such as `pillow_heif` are present; do not install them into system Python to make an ambient `npm.cmd run storage:test` pass:
 
 ```powershell
-npm.cmd run storage:test
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
 .\agent-runtime\backend\.venv\Scripts\python.exe -m unittest promptcard_storage.tests.test_app
 .\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests/test_image_runs.py -q
 .\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests/test_image_assets_v5.py -q

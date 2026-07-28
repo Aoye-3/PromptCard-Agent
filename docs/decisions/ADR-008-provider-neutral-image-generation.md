@@ -66,6 +66,6 @@ New generation is protected by both the UI flag `imageGenerationNodeV1` and the 
 
 - Adding a provider requires catalog metadata, a provider adapter, endpoint/output-host policy, and contract tests; it does not require a new canvas node schema.
 - Keyring availability is an operational prerequisite for saving credentials. There is no plaintext fallback.
-- Storage is forward-only. Application rollback must keep the current schema v5 history, conversation, placement, and derivation records readable.
+- Storage is forward-only. Schema v5 introduced the history, conversation, placement, and derivation guarantees relevant to this ADR; the current schema is v7 and also includes later asset-lifecycle and project-resource tables. Application rollback must keep all current records readable.
 - Permanent history consumes disk until a separately designed compliance-erasure workflow exists.
 - Seedream 5.0 Pro currently advertises only the implemented 1K/2K, single-output, non-streaming contract. Unsupported 4K, native mask, cancellation, sequential, and grouped output features must not appear in the UI.

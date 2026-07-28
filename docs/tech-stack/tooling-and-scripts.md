@@ -7,7 +7,29 @@ npm.cmd run dev
 npm.cmd run tauri:dev
 npm.cmd test -- --run
 npm.cmd run build
+npm.cmd run test:e2e
 ```
+
+`test:e2e` delegates to `scripts/run-e2e-tests.ps1`. That runner fixes browser binaries to the workspace `.playwright-browsers`, starts and owns Vite, the Fake Runtime, and Storage on ports `38100`, `38101`, and `38102`, propagates Playwright's real exit code, returns `124` on runner timeout, and stops the owned service trees in `finally` before verifying port release. The focused image-node and multi-view gate is:
+
+```powershell
+npm.cmd run test:e2e -- -c playwright.image-generation.config.ts
+```
+
+The focused config intentionally excludes model-management. Do not invoke `playwright test` directly for these gates. If browser binaries must be installed, keep them in the workspace:
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
+npx.cmd playwright install chromium
+```
+
+Run Storage verification with the workspace virtual environment rather than the `storage:test` npm script's ambient `python` resolution:
+
+```powershell
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
+```
+
+Do not install `pillow_heif` globally to change the result of this gate.
 
 ## Agent Runtime
 

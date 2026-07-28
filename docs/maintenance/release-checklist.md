@@ -1,6 +1,8 @@
 # Release Checklist
 
-- `npm.cmd test -- --run`
+- `npm.cmd run test:frontend`
+- `npm.cmd run test:e2e`
+- `& .\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"`
 - `npm.cmd run build`
 - `npm.cmd run agent:check` when Agent Runtime changes are included
 - `npm.cmd run tauri:dev` when desktop shell behavior changes
@@ -18,8 +20,9 @@
 - Confirm update apply rejects a dirty Git worktree before running `git merge --ff-only FETCH_HEAD`
 - Confirm a SQLite/assets backup under `backups/` succeeds before source files are changed
 - Confirm incomplete capabilities are labeled as roadmap or not yet implemented
-- Confirm PromptCard Storage health reports schema v5 before enabling Seedream 5.0 Pro generation
-- Confirm the image-generation Playwright pair starts real SQLite Storage and Runtime DI fake and passes without an existing service on ports `38100–38102`
+- Confirm PromptCard Storage health reports schema v7 before enabling Seedream 5.0 Pro generation
+- Confirm `npm.cmd run test:e2e` owns its real SQLite Storage, Fake Runtime, and Vite service processes, refuses preoccupied ports, and releases ports `38100–38102` after success, failure, timeout, and no-match exits
+- Confirm the image-generation Playwright configuration passes through the same owned-service runner without an existing service on ports `38100–38102`
 - Confirm JPEG/PNG/WebP direct input plus BMP/TIFF/GIF/HEIC/HEIF original-and-derivative import
 - Confirm Windows live Ark smoke tests for text-to-image, 2–10 reference images, smart edit, point, bbox, and raster visual markup
 - Confirm the live Ark matrix includes standard/fast, 1K/2K, preset/custom size, PNG/JPEG, both watermark values, and Arabic/Japanese/German prompts

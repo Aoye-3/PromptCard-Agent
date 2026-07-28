@@ -69,5 +69,5 @@ npm.cmd test -- --run src/domain/prompt-library/quick-messages.test.ts src/compo
 npm.cmd test -- --run
 npm.cmd run lint
 npm.cmd run build
-npm.cmd run storage:test
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
 ```

@@ -68,7 +68,11 @@ One Ark connection may appear on both pages, but its bindings remain separate. S
 npm.cmd run agent:check
 npx.cmd vitest run scripts/start-dev-with-agent.test.ts
 .\agent-runtime\backend\.venv\Scripts\python.exe -m pytest agent-runtime\backend\tests -q -p no:cacheprovider
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
 npm.cmd run build
+npm.cmd run test:e2e
 ```
 
 Live provider calls require a configured keyring credential and are a release smoke test, not a generic CI prerequisite.
+
+The browser gate is zero-cost: `test:e2e` starts the workspace Storage service, Fake Runtime, and Vite on `38102`, `38101`, and `38100`. Use `npm.cmd run test:e2e -- -c playwright.image-generation.config.ts` for the image-node and multi-view subset; it intentionally excludes model-management. Do not substitute a direct Playwright CLI command because the runner is responsible for propagating the real test exit code, returning `124` on its timeout, and releasing the service ports in `finally`.

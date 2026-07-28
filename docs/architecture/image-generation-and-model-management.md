@@ -48,11 +48,11 @@ Contextual operations reuse the same catalog, adapter, Runtime request and durab
 4. Explicit Generate compiles an `ImageOperationRecipeSnapshot` containing product operation, recipe ID/version, original/canvas/provider source identities, preservation intents, parameters and optional multi-view group/item/view IDs.
 5. The frontend creates and persists a `contextual-image-operation` placeholder before invoking Runtime. It has a stable run ID but no conversation ID.
 6. The browser submits the normal provider-neutral image request with `nodeId` ownership and the operation snapshot. The right-side `Agent / 图片生成 / Prompt库` active tab and drafts remain unchanged.
-7. Success fills the placeholder in place. Failure retains a terminal placeholder and safe error code. A retry creates a new run.
+7. Success fills the placeholder in place. Failure retains a terminal placeholder and safe error code. A single-operation retry creates a new run; multi-view retries follow the stricter member-binding contract below.
 
 Product reference roles (`identity`, `style`, `material`, `layout`, `content`) belong to PromptCard recipes. The compiler translates them into ordered images and prompt instructions; the provider request receives only documented source/reference input roles.
 
-Multi-view is N independent runs tied by one application group ID, not one native grouped-output request. The complete placeholder set is persisted before the first provider invocation and the scheduler uses bounded concurrency. Group state is derived from member runs/canvas metadata, so partial success is durable without a schema-v8 group table. Results are AI-inferred views, not exact 3D reconstruction.
+Multi-view is N independent runs tied by one application group ID, not one native grouped-output request. Submission has three ordered phases: persist the complete placeholder canvas, atomically prepare every queued member run, then invoke the provider with concurrency one. A canvas-persist or batch-prepare failure results in zero provider calls. Group state is derived from member runs/canvas metadata, so partial success is durable without a schema-v8 group table. Results are AI-inferred views, not exact 3D reconstruction.
 
 See [Contextual Image Actions](../frontend/contextual-image-actions.md) for frontend ownership, menus, workbenches, visible export and current verification state.
 
@@ -152,17 +152,19 @@ Composer validation has separate blocking and presentation channels. `blockingRe
 
 ## Atomic multi-view preparation and recovery
 
-Multi-view remains a group of independent single-image runs; it is not represented as a Provider-native batch and does not claim exact 3D reconstruction. The browser creates stable group/item/run/view identities and all placeholder nodes first, persists the canvas, and then calls:
+Multi-view remains a group of independent single-image runs; it is not represented as a Provider-native batch and does not claim exact 3D reconstruction. Its submission boundary is deliberately three-stage: the browser creates stable group/item/run/view identities and persists the complete placeholder canvas; it then atomically prepares all run rows; only after both stages succeed does it start provider work with concurrency one. The prepare stage is:
 
 ```text
 POST /agent-api/promptcard/runtime/image-generation-batches/prepare
 ```
 
-The request contains 1-11 complete `ImageGenerationRequest` members. Gateway requires one project, source node, connection, model, operation group, and unique run/item/view identities. Preparation does not read credentials, load Provider state, or invoke a Provider. It delegates to `POST /api/image-generation-runs/batch`, which inserts every queued run in one SQLite transaction. PromptCard Storage remains schema v7; no group table or schema v8 is introduced.
+The request contains 1-11 complete `ImageGenerationRequest` members. Gateway requires one project, source node, connection, model, operation group, and unique run/item/view identities. Preparation does not read credentials, load Provider state, or invoke a Provider. It delegates to `POST /api/image-generation-runs/batch`, which inserts every queued run in one SQLite transaction. If preparation fails, no member is submitted to a provider. PromptCard Storage remains schema v7; no group table or schema v8 is introduced.
 
-After preparation succeeds, the browser uses the existing single-member `POST /image-generations` boundary under the current concurrency limit. A prepared run is claimable only when its project/node or conversation identity, connection/provider/model identity, immutable request snapshot, and empty output identity match exactly and its state is `queued`. A mismatch returns `run_conflict`; an already running or terminal run returns `run_already_started`. Neither path overwrites the existing record.
+After preparation succeeds, the browser uses the existing single-member `POST /image-generations` boundary and schedules exactly one provider request at a time. A prepared run is claimable only when its project/node or conversation identity, connection/provider/model identity, immutable request snapshot, and empty output identity match exactly and its state is `queued`. A mismatch returns `run_conflict`; an already running or terminal run returns `run_already_started`. Neither path overwrites the existing record.
 
-On project load, persisted placeholder run IDs are reconciled with Storage. `queued` authorized multi-view runs rebuild the same provider-neutral request from the immutable snapshot and resume sequentially; `running` runs only poll; terminal runs hydrate or fail the existing node in place. Browser-local active and scheduled run-ID sets prevent duplicate recovery. A failed-view retry creates a new run while preserving the original group/view and the historical failed run.
+On reload or project switch, persisted placeholders are reconciled with Storage by both `generationRunId` and canvas `nodeId`. `queued` authorized multi-view runs rebuild the same provider-neutral request from the immutable snapshot and resume sequentially; `running` runs only poll; terminal runs hydrate or fail the existing node in place. Browser-local active/scheduled run-ID sets plus node-ID matching prevent duplicate provider work and duplicate placement.
+
+A failed-member retry is authorized by the clicked failed `nodeId` and remains bound to that member's group ID, item ID, view specification, original/canvas/provider source identities, and source node identity. The retry replaces the run metadata on that same canvas node with a new run while preserving node ID, position, width and height. The old failed run remains immutable in Storage, and successful group members are never resubmitted.
 
 ## Common operational errors
 

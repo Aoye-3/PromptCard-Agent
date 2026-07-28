@@ -2281,7 +2281,7 @@ Run targeted checks at each task checkpoint, followed by the full relevant gates
 ```powershell
 npm.cmd test -- --run
 npm.cmd run build
-npm.cmd run storage:test
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
 npm.cmd run agent:check
 npm.cmd run test:e2e
 git diff --check

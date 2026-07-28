@@ -43,7 +43,7 @@ Before merging implementation work, run:
 ```powershell
 npm.cmd run build
 npm.cmd run test:frontend
-.\agent-runtime\backend\.venv\Scripts\python.exe -m pytest promptcard_storage/tests -q -p no:cacheprovider
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
 npm.cmd run lint
 ```
 
@@ -96,14 +96,15 @@ The Playwright smoke suite runs through:
 npm.cmd run test:e2e
 ```
 
-The project image-generation integration uses dedicated F:-local ports, a real PromptCard Storage SQLite process, the real Runtime image router/service, and a dependency-injected fake provider/result fetcher. The normal pair also verifies model-management gating:
+The project image-generation integration uses dedicated workspace-local state, a real PromptCard Storage SQLite process, the real Runtime image router/service, and a dependency-injected fake provider/result fetcher. Run its image-node and multi-view subset through the same repository runner:
 
 ```powershell
-$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
-npx.cmd playwright test tests/e2e/model-management.spec.ts tests/e2e/image-generation-node.spec.ts --workers=1
+npm.cmd run test:e2e -- -c playwright.image-generation.config.ts
 ```
 
-`playwright.image-generation.config.ts` remains available when only the project image-generation conversation spec is needed.
+The dedicated config includes `image-generation-node.spec.ts` and `free-canvas-multi-view.spec.ts`; it does not include model-management.
+
+Both commands delegate to `scripts/run-e2e-tests.ps1`. The runner fixes `PLAYWRIGHT_BROWSERS_PATH` to the workspace `.playwright-browsers`, owns Storage/Fake Runtime/Vite on ports `38102`/`38101`/`38100`, propagates Playwright's real exit code, returns `124` on runner timeout, and stops the owned service trees in `finally` before verifying that all three ports were released. Do not bypass it with a direct Playwright test command.
 
 In restricted sandbox environments, Chromium launch may require elevated execution permissions.
 
@@ -189,7 +190,7 @@ The focused image-generation commands are the regression gate for this feature. 
 - Keep docs aligned with current code behavior.
 - Label deferred pi/Text Agent capabilities as roadmap instead of current behavior.
 - For storage changes, verify strict JSON migration, SQLite integrity, deterministic concurrent writes, transactional Trash and batch operations, structured errors, failed-request retention, and idempotent browser migration. Projects and Prompt Library presets have no JSON or browser write fallback.
-- `storage:test` must use unittest discovery so new SQLite and asset test modules cannot be silently omitted. FastAPI contract tests explicitly skip when their optional dependency is unavailable and must also pass in the repository Agent backend environment.
+- The Storage gate must use the workspace `.venv` Python with unittest discovery so new SQLite and asset test modules cannot be silently omitted. Do not repair missing `pillow_heif` by installing it into global Python. FastAPI contract tests explicitly skip when their optional dependency is unavailable and must also pass in the repository Agent backend environment.
 - Save-concurrency Playwright tests must echo the request's real project ID and type. Use a request-start barrier before releasing delayed responses; fixed sleeps do not prove stale-response ordering.
 - Free-canvas image coverage must verify supported asset validation, path traversal rejection, drag-and-drop node creation, minimal image rendering, manual horizontal and vertical crop lines, line deletion, cancel behavior, and non-destructive derived-node creation.
 - For Agent collaboration changes, verify that Prompt Library and Canvas writes both require explicit approval.

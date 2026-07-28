@@ -182,5 +182,26 @@ If text models appear in the image selector or image models appear in the text s
 Install browsers only when browser verification is needed:
 
 ```powershell
-npx.cmd playwright install
+$env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\.playwright-browsers"
+npx.cmd playwright install chromium
 ```
+
+The workspace path must be set before installation; do not allow Playwright to fall back to a user-profile browser cache. Run tests through `npm.cmd run test:e2e` (or `npm.cmd run test:e2e -- -c playwright.image-generation.config.ts` for image-node and multi-view coverage), not through the Playwright CLI directly.
+
+If an E2E run reports that ports `38100–38102` are occupied, identify the existing listeners before retrying:
+
+```powershell
+Get-NetTCPConnection -State Listen -LocalPort 38100,38101,38102
+```
+
+The runner owns the Storage, Fake Runtime, and Vite process trees it starts. It returns the real Playwright exit code, returns `124` when `PROMPTCARD_E2E_RUNNER_TIMEOUT_SECONDS` expires, and stops its services in `finally`; it also fails a nominally successful run if the ports are not released. Do not hide a failure by manually rewriting the exit code.
+
+## Storage Tests Fail With Missing `pillow_heif`
+
+Run the Storage gate with the repository's workspace virtual environment:
+
+```powershell
+.\agent-runtime\backend\.venv\Scripts\python.exe -m unittest discover -s promptcard_storage/tests -p "test_*.py"
+```
+
+Do not install `pillow_heif` into the global Python environment. If the workspace environment is incomplete, repair it through the maintained workspace Runtime setup instead of changing the interpreter used by the gate.

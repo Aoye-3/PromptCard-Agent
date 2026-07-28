@@ -16,6 +16,7 @@ This is the single entry point for the maintained project documentation. Histori
 - [Operations](./operations/README.md)
 - [Quality](./quality/README.md)
 - [Maintenance](./maintenance/README.md)
+- [Plans](./Plan/README.md)
 - [Official References](./references/volcengine/seedream/README.md)
 
 ## Current Project Shape
@@ -30,7 +31,9 @@ The floating toolbar's screenshot loop is a Windows-first native `xcap` capture 
 
 Capture Bar also imports WeChat/QQ-style clipboard images. Recent Captures can explicitly register one or many reviewed items into Prompt Library, or place image captures on Free Canvas, while all three consumers reuse one physical `assetId`. See [Recent Capture To Prompt Registration](./architecture/recent-capture-prompt-registration.md), [ADR-006](./decisions/ADR-006-explicit-capture-registration-and-shared-asset-identity.md), and [Storage Service API](./api/storage-service-api.md).
 
-Free Canvas includes a provider-neutral project Image Generation Agent. The first adapter is Doubao Seedream 5.0 Pro; credentials stay in the operating-system keyring, successful results become local assets and Recent Captures, and schema v5 keeps project conversations, immutable runs, durable canvas placements, original uploads, and provider/annotation derivatives after node or project deletion. Legacy generator nodes are read-only. See [Image Generation And Model Management](./architecture/image-generation-and-model-management.md), [ADR-008](./decisions/ADR-008-provider-neutral-image-generation.md), [ADR-009](./decisions/ADR-009-capability-driven-image-model-readiness.md), [ADR-010](./decisions/ADR-010-project-image-generation-conversations.md), [ADR-011](./decisions/ADR-011-original-and-derived-image-assets.md), and the [current implementation status](./Plan/005-seedream-image-node-frontend-implementation-status.md).
+Free Canvas includes a provider-neutral project Image Generation Agent. The first adapter is Doubao Seedream 5.0 Pro; credentials stay in the operating-system keyring, and successful results become local assets and Recent Captures. The current Storage schema is v7: schema v4 introduced project conversations and durable canvas placements, schema v5 added permanent original/derived image relationships, and v6-v7 retained those guarantees while adding asset lifecycle and project-scoped resources. Legacy generator nodes are read-only. See [Image Generation And Model Management](./architecture/image-generation-and-model-management.md), [ADR-008](./decisions/ADR-008-provider-neutral-image-generation.md), [ADR-009](./decisions/ADR-009-capability-driven-image-model-readiness.md), [ADR-010](./decisions/ADR-010-project-image-generation-conversations.md), [ADR-011](./decisions/ADR-011-original-and-derived-image-assets.md), and the [current implementation status](./Plan/005-seedream-image-node-frontend-implementation-status.md).
+
+Contextual image actions and explicit multi-view groups are tracked by [Plan 007](./Plan/007-contextual-image-editing-and-multi-view-plan.md) and the maintained [Contextual Image Actions](./frontend/contextual-image-actions.md) contract. Recoverable placeholders, project-scoped resources, and explicit multi-view request groups are governed by [ADR-013](./decisions/ADR-013-recoverable-image-generation-placeholders.md), [ADR-014](./decisions/ADR-014-project-scoped-resource-library.md), and [ADR-015](./decisions/ADR-015-explicit-multi-view-request-groups.md). Plan 007 remains `Active`: zero-cost Fake Provider evidence is ready, unified human approval is pending, and paid live-provider gates have not been executed.
 
 ## Product Vision
 
@@ -70,7 +73,7 @@ Current-state truth lives in the architecture, API, frontend, backend, database,
 - Keep model catalog, connections, and `chat.primary`/`image.primary` assignments unified through Agent Runtime Model Management. Deprecated chat model-config routes are migration compatibility only.
 - Keep `PI 原生` text providers, SDK-backed text adapters, and image-generation adapters as separate invocation paths. Sharing connection metadata never authorizes cross-modality model leakage.
 - Keep model credentials in the operating-system keyring and external provider calls behind the Python credential boundary. The browser and Node pi runtime may use non-secret descriptors but must never receive or persist a provider credential.
-- Keep image-generation conversations, runs, placements, and image derivations in PromptCard Storage schema v5. Do not embed runs in project JSON or delete run/output/original/derived references when a project or node is removed.
+- Keep image-generation conversations, runs, placements, and image derivations in the current PromptCard Storage schema v7. The conversation/placement and derivation contracts originated in schema v4 and v5 respectively; do not embed runs in project JSON or delete run/output/original/derived references when a project or node is removed.
 - Treat `workspaceContext.snapshot` as the per-request current workspace view. Do not use selected cards, current rows, or focused fields as the thread identity unless a future spec explicitly changes the product model.
 - Keep permission scopes narrow: `prompt-library-agent` is the only Prompt Library write proposal surface; `workspace-chatbot-agent` is the Canvas text proposal surface; `media-analysis-agent` is read-only analysis of one explicit media item.
 - Keep Free Canvas quick messages in the Prompt Library preset model (`category: "quick-message"`); see [ADR-001](./decisions/ADR-001-prompt-library-quick-messages.md).

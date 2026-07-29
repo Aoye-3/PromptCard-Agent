@@ -11,6 +11,7 @@ import {
 } from '@/domain/free-canvas/free-canvas-project'
 
 const mocks = vi.hoisted(() => ({
+  bootstrapRuntime: vi.fn(),
   getCatalog: vi.fn(),
   listConnections: vi.fn(),
   listAssignments: vi.fn(),
@@ -73,6 +74,11 @@ vi.mock('@/services/model-management-client', () => ({
     listConnections: mocks.listConnections,
     listAssignments: mocks.listAssignments,
     getImageGenerationStatus: mocks.getImageGenerationStatus
+  }
+}))
+vi.mock('@/services/agent-runtime-service', () => ({
+  agentRuntimeService: {
+    bootstrap: mocks.bootstrapRuntime
   }
 }))
 vi.mock('@/services/image-generation-client', async importOriginal => {
@@ -203,6 +209,7 @@ describe('project-level free canvas image generation entry', () => {
       innerWidth: 1200, innerHeight: 800
     })
     vi.stubGlobal('document', { addEventListener: vi.fn(), removeEventListener: vi.fn(), activeElement: null })
+    mocks.bootstrapRuntime.mockResolvedValue({ user: { id: 'local-user' } })
     mocks.getCatalog.mockResolvedValue({ providers: [], models: [] })
     mocks.listConnections.mockResolvedValue([])
     mocks.listAssignments.mockResolvedValue([])
@@ -278,6 +285,51 @@ describe('project-level free canvas image generation entry', () => {
     act(() => imageTab.props.onClick())
     expect(renderer.root.findByProps({ 'data-free-canvas-image-generation-panel': true })).toBeTruthy()
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('bootstraps Runtime before automatically restoring the configured default image model', async () => {
+    configureReadyImageModel()
+    const configured = {
+      catalog: await mocks.getCatalog(),
+      connections: await mocks.listConnections(),
+      assignments: await mocks.listAssignments(),
+      status: await mocks.getImageGenerationStatus()
+    }
+    mocks.getCatalog.mockClear()
+    mocks.listConnections.mockClear()
+    mocks.listAssignments.mockClear()
+    mocks.getImageGenerationStatus.mockClear()
+    let bootstrapped = false
+    mocks.bootstrapRuntime.mockImplementation(async () => {
+      bootstrapped = true
+      return { user: { id: 'local-user' } }
+    })
+    const requireBootstrap = <T,>(value: T) => () => bootstrapped
+      ? Promise.resolve(value)
+      : Promise.reject(new Error('authentication_failed'))
+    mocks.getCatalog.mockImplementation(requireBootstrap(configured.catalog))
+    mocks.listConnections.mockImplementation(requireBootstrap(configured.connections))
+    mocks.listAssignments.mockImplementation(requireBootstrap(configured.assignments))
+    mocks.getImageGenerationStatus.mockImplementation(requireBootstrap(configured.status))
+
+    let renderer!: ReturnType<typeof create>
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={createFreeCanvasProject(1)}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={vi.fn()}
+        />
+      )
+    })
+    openImageGenerationPanel(renderer)
+
+    expect(mocks.bootstrapRuntime).toHaveBeenCalledTimes(1)
+    expect(renderer.root.findByType(ImageGenerationConversationPanel).props.statusReady).toBe(true)
   })
 
   it('resumes the most recently updated image conversation in the main panel', async () => {

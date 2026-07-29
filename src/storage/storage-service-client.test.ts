@@ -113,6 +113,34 @@ describe('storageServiceClient', () => {
     await request
   })
 
+  test('classifies a lifecycle-cancelled project update as an external abort', async () => {
+    vi.useFakeTimers()
+    const lifecycle = new AbortController()
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const pending = expect(storageServiceClient.projects.update(
+      'project-1',
+      3,
+      { title: 'Latest' },
+      { signal: lifecycle.signal }
+    )).rejects.toMatchObject({
+      name: 'StorageHttpError',
+      code: 'request_aborted',
+      status: 0
+    })
+
+    lifecycle.abort()
+    await vi.advanceTimersByTimeAsync(10_000)
+    await pending
+    expect(fetchMock).toHaveBeenCalledWith('/storage-api/projects/project-1', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ revision: 3, updates: { title: 'Latest' } })
+    }))
+  })
+
   test('infers image upload content type from the filename', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       id: 'asset.webp',

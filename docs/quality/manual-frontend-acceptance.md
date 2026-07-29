@@ -44,11 +44,11 @@ Do not include credentials, authorization headers, raw provider responses, tempo
 
 ## Plan 007 Run Record (2026-07-28)
 
-This record is reviewed through final code fix `37a7212`, including runner ownership in `2d372a0` and deterministic Fake Provider gating in `f6887b1`, using workspace-local frontend, Runtime fixture, Storage fixture, and local Fake Provider only. The unchanged F1/F4 screenshots were captured earlier at `997eb9f`; sanitized evidence is stored under [`output/playwright/plan-007/`](../../output/playwright/plan-007/). The evidence harness passed 1/1 in 41.3 seconds at Chromium 1280x720 and 100% browser text zoom. Final image-generation configuration passed 3/3 in 52.6 seconds (71.6 seconds shell elapsed), pipeline EOF multi-view passed 2/2 in 45.1 seconds, and direct-shell bare full E2E passed 24/24 in 51.4 seconds (73.5 seconds shell elapsed); all returned exit code 0 and released their ports. Frontend completed 106 files and 644 tests. Every human decision below remains **Pending unified human acceptance**; this record does not claim user approval.
+This record includes the 2026-07-29 E-001/E-002 remediation on `fix/plan-007-acceptance-findings`, runner ownership in `2d372a0`, final code fix `37a7212`, and deterministic Fake Provider gating in `f6887b1`, using workspace-local frontend, Runtime fixture, Storage fixture, and local Fake Provider only. The unchanged F1/F4 screenshots were captured earlier at `997eb9f`; sanitized evidence is stored under [`output/playwright/plan-007/`](../../output/playwright/plan-007/). The post-remediation image-generation configuration passed 5/5, full E2E passed 26/26, frontend passed 106 files and 648 tests, Storage passed 87/87, and the production build plus `agent:check` passed. Every human decision below remains **Pending unified human acceptance**; this record does not claim user approval.
 
 | Gate | Automated evidence | Human status / remaining observation |
 | --- | --- | --- |
-| F1 | Functional slice PASS: three nodes and the source asset were present before and after save/reload; Fit View and restored visibility were exercised. | Pending unified human acceptance. E-001 remains open, so this is not a clean Console pass. |
+| F1 | Functional slice PASS: three nodes and the source asset were present before and after save/reload; Fit View and restored visibility were exercised. E-001 now has lifecycle-cancellation unit coverage and a reload E2E clean-console assertion. | Pending unified human acceptance and a fresh manual Console/Network capture. |
 | F2 | Not executed in this run. | Pending unified human acceptance: four-corner containment, 25/100/200% canvas zoom, selection behavior, and dismissal consistency. |
 | F3 | Not executed in this run. | Pending unified human acceptance: keyboard/focus checks and real Windows high-contrast plus 200% text-zoom readability; no pass is inferred. |
 | F4 | Multi-view pre-submit slice PASS: 0 generation POSTs, 0 Runs, 0 Fake Provider calls; right-side draft and active image-generation tab remained stable. | Pending unified human acceptance: all other enabled workbenches and the `As reference` append-only flow. |
@@ -60,10 +60,12 @@ Recorded findings:
 
 | ID | Observation | Owner | Severity | Release disposition |
 | --- | --- | --- | --- | --- |
-| E-001 | A PUT was cancelled near reload and surfaced one `StorageHttpError`; before/after Storage evidence still retained all three nodes and the source asset. | Codex / test harness | Medium | Triage before unified approval. If normal manual save/reload reproduces it, approval is blocked. |
-| E-002 | The Fake fixture returned 404 for four generic Runtime/status probes, and the screenshot showed disconnected status. This does not establish a production Runtime defect. | Codex / test fixture | Low | Mock/document the fixture route or confirm manually before relying on Agent-tab status visuals. |
+| E-001 | A PUT was cancelled near reload and surfaced one `StorageHttpError`; before/after Storage evidence still retained all three nodes and the source asset. | Engineering | Medium | Fixed in `fix/plan-007-acceptance-findings`: project writes receive a page-lifecycle signal, and only an unloading-time `request_aborted` is suppressed. Timeout, service, and HTTP errors remain reportable. Automated regression passes; fresh manual evidence is pending. |
+| E-002 | The Fake fixture returned 404 for four generic Runtime/status probes, and the screenshot showed disconnected status. This did not establish a production Runtime defect. | Test infrastructure | Low | Fixed in the image-generation Fake Runtime by implementing the complete status/bootstrap/catalog/model-config startup contract. Direct proxy-contract and page-level no-4xx regressions pass; fresh manual evidence is pending. |
 
 B3-B6 and B8-B9 were not executed. They remain subject to their existing paid-call authorization and live-provider acceptance requirements.
+
+Remediation verification on 2026-07-29 used only the local Fake Provider: image-generation E2E `5/5`, full E2E `26/26`, frontend `648/648`, Storage `87/87`, and the production build passed. The prior sanitized Console/Network artifact remains an immutable record of the run that discovered E-001 and E-002; it is not presented as post-fix evidence.
 
 ## F1: Populated Canvas Visibility
 

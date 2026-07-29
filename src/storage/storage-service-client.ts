@@ -677,20 +677,29 @@ export const storageServiceClient = {
     async getAll(): Promise<IPromptProject[]> {
       return (await request<{ projects: IPromptProject[] }>('/storage-api/projects')).projects
     },
-    async getById(id: string): Promise<IPromptProject | null> {
+    async getById(id: string, options: { signal?: AbortSignal } = {}): Promise<IPromptProject | null> {
       try {
-        return await request<IPromptProject>(`/storage-api/projects/${encodeURIComponent(id)}`)
+        return await request<IPromptProject>(`/storage-api/projects/${encodeURIComponent(id)}`, {
+          signal: options.signal
+        })
       } catch (error) {
         if (error instanceof StorageHttpError && error.status === 404) return null
         throw error
       }
     },
-    create(project: Partial<IPromptProject>): Promise<IPromptProject> {
-      return request('/storage-api/projects', { method: 'POST', body: JSON.stringify(project) })
+    create(project: Partial<IPromptProject>, options: { signal?: AbortSignal } = {}): Promise<IPromptProject> {
+      return request('/storage-api/projects', {
+        method: 'POST', body: JSON.stringify(project), signal: options.signal
+      })
     },
-    update(id: string, revision: number, updates: Partial<IPromptProject>): Promise<IPromptProject> {
+    update(
+      id: string,
+      revision: number,
+      updates: Partial<IPromptProject>,
+      options: { signal?: AbortSignal } = {}
+    ): Promise<IPromptProject> {
       return request(`/storage-api/projects/${encodeURIComponent(id)}`, {
-        method: 'PUT', body: JSON.stringify({ revision, updates })
+        method: 'PUT', body: JSON.stringify({ revision, updates }), signal: options.signal
       })
     },
     async trash(ids: string[], deletedBy: 'user' | 'agent' = 'user', deleteReason?: string): Promise<IPromptProject[]> {

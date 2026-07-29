@@ -1,7 +1,11 @@
 import { describe, expect, test, vi } from 'vitest'
 import type { IPromptProject } from '@/models/PromptHistory.model'
-import { StorageRevisionConflict } from '@/storage/storage-service-client'
-import { createProjectSaveCoordinator } from './project-save-coordinator'
+import { StorageHttpError, StorageRevisionConflict } from '@/storage/storage-service-client'
+import {
+  createProjectSavePageLifecycle,
+  createProjectSaveCoordinator,
+  isExpectedProjectSaveNavigationCancellation
+} from './project-save-coordinator'
 
 const project = (revision = 1, title = 'Local'): IPromptProject => ({
   id: 'project-1',
@@ -17,6 +21,43 @@ const project = (revision = 1, title = 'Local'): IPromptProject => ({
 })
 
 describe('project save coordinator', () => {
+  test('aborts only non-BFCache page exits and restores a fresh signal on pageshow', () => {
+    const lifecycle = createProjectSavePageLifecycle()
+    const initialSignal = lifecycle.signal
+
+    lifecycle.pageHide(true)
+    expect(lifecycle.unloading).toBe(false)
+    expect(initialSignal.aborted).toBe(false)
+
+    lifecycle.pageHide(false)
+    expect(lifecycle.unloading).toBe(true)
+    expect(initialSignal.aborted).toBe(true)
+
+    lifecycle.pageShow()
+    expect(lifecycle.unloading).toBe(false)
+    expect(lifecycle.signal).not.toBe(initialSignal)
+    expect(lifecycle.signal.aborted).toBe(false)
+  })
+
+  test('only suppresses an externally aborted save while the page is unloading', () => {
+    const cancelled = new StorageHttpError(0, 'request_aborted', 'Storage request was cancelled.')
+
+    expect(isExpectedProjectSaveNavigationCancellation(cancelled, true)).toBe(true)
+    expect(isExpectedProjectSaveNavigationCancellation(cancelled, false)).toBe(false)
+    expect(isExpectedProjectSaveNavigationCancellation(
+      new StorageHttpError(0, 'service_unavailable', 'Storage service is unavailable.'),
+      true
+    )).toBe(false)
+    expect(isExpectedProjectSaveNavigationCancellation(
+      new StorageHttpError(0, 'timeout', 'Storage request timed out.'),
+      true
+    )).toBe(false)
+    expect(isExpectedProjectSaveNavigationCancellation(
+      new StorageHttpError(500, 'storage_request_failed', 'Storage request failed.'),
+      true
+    )).toBe(false)
+  })
+
   test('serializes writes and coalesces queued changes to the latest snapshot', async () => {
     let releaseFirst: () => void = () => undefined
     const firstCanFinish = new Promise<void>(resolve => { releaseFirst = resolve })
@@ -29,14 +70,29 @@ describe('project save coordinator', () => {
     const first = coordinator.enqueue({ project: project(1, 'First'), editSeq: 1 })
     const second = coordinator.enqueue({ project: project(1, 'Second'), editSeq: 2 })
     const third = coordinator.enqueue({ project: project(1, 'Latest'), editSeq: 3 })
+    const settled = coordinator.waitForIdle('project-1')
     releaseFirst()
 
     await expect(first).resolves.toMatchObject({ status: 'saved', editSeq: 1 })
     await expect(second).resolves.toMatchObject({ status: 'superseded', editSeq: 2 })
     await expect(third).resolves.toMatchObject({ status: 'saved', editSeq: 3 })
+    await expect(settled).resolves.toMatchObject({ status: 'saved', editSeq: 3 })
     expect(update).toHaveBeenCalledTimes(2)
     expect(update.mock.calls[1][1]).toBe(2)
     expect(update.mock.calls[1][2]).toMatchObject({ title: 'Latest' })
+  })
+
+  test('reports the retained failure when waiting on a queue that cannot settle successfully', async () => {
+    const coordinator = createProjectSaveCoordinator({
+      create: vi.fn(),
+      update: vi.fn().mockRejectedValue(new Error('offline'))
+    })
+
+    const save = coordinator.enqueue({ project: project(), editSeq: 4 })
+    const settled = coordinator.waitForIdle('project-1')
+
+    await expect(save).resolves.toMatchObject({ status: 'failed', editSeq: 4 })
+    await expect(settled).resolves.toMatchObject({ status: 'failed', editSeq: 4 })
   })
 
   test('retains the newest complete snapshot when an in-flight content save fails before a metadata save', async () => {

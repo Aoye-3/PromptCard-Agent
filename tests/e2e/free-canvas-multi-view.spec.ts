@@ -28,6 +28,12 @@ test.describe.serial('zero-cost multi-view generation', () => {
     const projectId = `plan-007-multi-view-success-${suffix}`
     const projectTitle = `Plan 007 多视图成功 ${suffix}`
     const otherProjectTitle = `Plan 007 隔离项目 ${suffix}`
+    const storageConsoleErrors: string[] = []
+    page.on('console', message => {
+      if (message.type() === 'error' && message.text().includes('StorageHttpError')) {
+        storageConsoleErrors.push(message.text())
+      }
+    })
     const asset = await seedAsset(request, `plan-007-source-${suffix}.png`)
     await seedProject(request, projectId, projectTitle, asset.id)
     await seedProject(request, `plan-007-other-${suffix}`, otherProjectTitle)
@@ -112,6 +118,79 @@ test.describe.serial('zero-cost multi-view generation', () => {
     expect(restoredNodes.map(node => node.meta.generationRunId)).toEqual(originalRunIds)
     expect(restoredNodes.find(node => node.id === movingNode.id)?.position).toEqual(movedPosition)
     expect((await providerState(request, providerSessionToken)).requests).toHaveLength(3)
+    expect(storageConsoleErrors).toEqual([])
+  })
+
+  test('silences only the in-flight project PUT cancelled by a real reload', async ({ page, request }) => {
+    const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const projectId = `plan-007-reload-cancel-${suffix}`
+    const projectTitle = `Plan 007 重载取消 ${suffix}`
+    const storageConsoleErrors: string[] = []
+    const failedProjectPuts: string[] = []
+    const dialogs: string[] = []
+    const pageHideEvents: boolean[] = []
+    let markPutStarted: () => void = () => undefined
+    let releasePut: () => void = () => undefined
+    const putStarted = new Promise<void>(resolve => { markPutStarted = resolve })
+    const putCanContinue = new Promise<void>(resolve => { releasePut = resolve })
+
+    page.on('console', message => {
+      if (message.type() === 'error' && message.text().includes('StorageHttpError')) {
+        storageConsoleErrors.push(message.text())
+      }
+    })
+    page.on('requestfailed', request => {
+      if (request.method() === 'PUT' && request.url().includes(`/storage-api/projects/${projectId}`)) {
+        failedProjectPuts.push(request.failure()?.errorText || 'request failed')
+      }
+    })
+    page.on('dialog', async dialog => {
+      dialogs.push(dialog.message())
+      await dialog.dismiss()
+    })
+
+    await seedProject(request, projectId, projectTitle)
+    await page.goto('/', { waitUntil: 'networkidle' })
+    await openProject(page, projectTitle)
+    await expect.poll(async () => (
+      await storageJson(request, `/api/projects/${projectId}`)
+    ).revision).toBeGreaterThan(1)
+    const revisionBeforeCancelledSave = (await storageJson(request, `/api/projects/${projectId}`)).revision
+    await page.exposeFunction('__recordPlan007PageHide', (persisted: boolean) => {
+      pageHideEvents.push(persisted)
+    })
+    await page.evaluate(() => {
+      window.addEventListener('pagehide', event => {
+        void (window as unknown as {
+          __recordPlan007PageHide: (persisted: boolean) => Promise<void>
+        }).__recordPlan007PageHide(event.persisted)
+      }, { once: true })
+    })
+    await page.route(`**/storage-api/projects/${projectId}`, async route => {
+      if (route.request().method() !== 'PUT') {
+        await route.fallback()
+        return
+      }
+      markPutStarted()
+      await Promise.race([
+        putCanContinue,
+        new Promise<void>(resolve => setTimeout(resolve, 5_000))
+      ])
+      await route.abort('aborted').catch(() => undefined)
+    })
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click()
+    await putStarted
+    const reload = page.reload({ waitUntil: 'domcontentloaded' })
+    await expect.poll(() => pageHideEvents).toEqual([false])
+    releasePut()
+    await reload
+
+    const projectAfterReload = await storageJson(request, `/api/projects/${projectId}`)
+    expect(projectAfterReload.revision).toBe(revisionBeforeCancelledSave)
+    expect(failedProjectPuts).toHaveLength(1)
+    expect(storageConsoleErrors).toEqual([])
+    expect(dialogs).toEqual([])
   })
 
   test('derives partial state and retries only the failed view with a new durable run', async ({ page, request }) => {

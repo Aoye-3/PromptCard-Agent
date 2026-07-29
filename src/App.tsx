@@ -32,7 +32,12 @@ import { createBuilderTemplateProjectTitle, getBuilderTemplateById } from './dom
 import type { BuilderTemplateId } from './domain/builder-templates/builder-templates'
 import { sortProjects } from './domain/projects/project-normalization'
 import { mergeStoredProjectMetadata } from './domain/projects/project-storage-merge'
-import { createProjectSaveCoordinator, type ProjectSaveResult } from './domain/projects/project-save-coordinator'
+import {
+  createProjectSavePageLifecycle,
+  createProjectSaveCoordinator,
+  isExpectedProjectSaveNavigationCancellation,
+  type ProjectSaveResult
+} from './domain/projects/project-save-coordinator'
 import { normalizeThreeStageTemplateSettings, type ThreeStageTemplateSettings } from './domain/three-stage/three-stage-definitions'
 import { createFreeCanvasImageNodeFromMedia } from './domain/free-canvas/free-canvas-project'
 import { applyGeneratedResultCanvasPlacement, createCaptureCanvasMediaNode, createCaptureCanvasUpdates } from './features/media/capture-canvas-placement'
@@ -140,18 +145,43 @@ function App() {
   const lastCardWorkspaceSnapshotRef = useRef('')
   const activeProjectRef = useRef<IPromptProject | null>(null)
   const placeCaptureOnCanvasRef = useRef<(capture: RecentCaptureItem) => Promise<void>>(async () => undefined)
+  const projectSavePageLifecycleRef = useRef<ReturnType<typeof createProjectSavePageLifecycle> | null>(null)
+  if (!projectSavePageLifecycleRef.current) {
+    projectSavePageLifecycleRef.current = createProjectSavePageLifecycle()
+  }
+  const projectSavePageLifecycle = projectSavePageLifecycleRef.current
   const projectSaveCoordinatorRef = useRef<ReturnType<typeof createProjectSaveCoordinator> | null>(null)
   if (!projectSaveCoordinatorRef.current) {
     projectSaveCoordinatorRef.current = createProjectSaveCoordinator({
-      create: project => storage.projects.persistCreated(project),
+      create: project => storage.projects.persistCreated(project, {
+        signal: projectSavePageLifecycle.signal
+      }),
       update: async (id, revision, updates) => {
-        const updatedProject = await storage.projects.update(id, updates, { revision })
+        const updatedProject = await storage.projects.update(id, updates, {
+          revision,
+          signal: projectSavePageLifecycle.signal
+        })
         if (!updatedProject) throw new Error(`Project ${id} was not found while saving.`)
         return updatedProject
       }
     })
   }
   const projectSaveCoordinator = projectSaveCoordinatorRef.current
+
+  useEffect(() => {
+    const handlePageHide = (event: PageTransitionEvent) => {
+      projectSavePageLifecycle.pageHide(event.persisted)
+    }
+    const handlePageShow = () => {
+      projectSavePageLifecycle.pageShow()
+    }
+    window.addEventListener('pagehide', handlePageHide)
+    window.addEventListener('pageshow', handlePageShow)
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide)
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [projectSavePageLifecycle])
 
   const currentCards = pages[currentPage]?.cards || []
   const currentPrompt = assemblePrompt(pages)
@@ -234,10 +264,15 @@ function App() {
     })
   }, [])
 
+  const isExpectedNavigationSaveCancellation = useCallback((error: unknown) => (
+    isExpectedProjectSaveNavigationCancellation(error, projectSavePageLifecycle.unloading)
+  ), [projectSavePageLifecycle])
+
   const handleProjectSaveError = useCallback((projectId: string, error: unknown, message: string) => {
+    if (isExpectedNavigationSaveCancellation(error)) return
     console.error(message, error)
     setProjectSaveStatus(projectId, 'error')
-  }, [setProjectSaveStatus])
+  }, [isExpectedNavigationSaveCancellation, setProjectSaveStatus])
 
   const persistProjectChanges = useCallback(async (
     project: IPromptProject,
@@ -897,11 +932,14 @@ function App() {
     if (!project || project.id !== activeProjectId || project.type !== 'free-canvas') return false
     const savedAt = Date.now()
     setProjectSaveStatus(activeProjectId, 'saving')
-    const result = await persistProjectChanges(project, {
+    let result = await persistProjectChanges(project, {
       freeCanvas,
       updatedAt: savedAt,
       lastOpenedAt: savedAt
     }, getProjectEditSeq(activeProjectId), savedAt, 'Place generated image on canvas failed:')
+    if (result.status === 'superseded') {
+      result = await projectSaveCoordinator.waitForIdle(activeProjectId)
+    }
     if (result.status !== 'saved') return false
     setProjectSaveStatus(activeProjectId, 'saved', savedAt)
     return true
@@ -1073,7 +1111,7 @@ function App() {
           lastOpenedAt: savedAt
         }, editSeq, savedAt, 'Save failed:')
         if (result.status === 'failed') {
-          alert(t('saveFailed'))
+          if (!isExpectedNavigationSaveCancellation(result.error)) alert(t('saveFailed'))
           return
         }
         const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
@@ -1091,7 +1129,7 @@ function App() {
           lastOpenedAt: savedAt
         }, editSeq, savedAt, 'Save failed:')
         if (result.status === 'failed') {
-          alert(t('saveFailed'))
+          if (!isExpectedNavigationSaveCancellation(result.error)) alert(t('saveFailed'))
           return
         }
         const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
@@ -1109,7 +1147,7 @@ function App() {
           lastOpenedAt: savedAt
         }, editSeq, savedAt, 'Save failed:')
         if (result.status === 'failed') {
-          alert(t('saveFailed'))
+          if (!isExpectedNavigationSaveCancellation(result.error)) alert(t('saveFailed'))
           return
         }
         const saveIsCurrent = canConfirmProjectSaved(activeProjectId, editSeq)
@@ -1127,7 +1165,7 @@ function App() {
         lastOpenedAt: savedAt
       }, editSeq, savedAt, 'Save failed:')
       if (result.status === 'failed') {
-        alert(t('saveFailed'))
+        if (!isExpectedNavigationSaveCancellation(result.error)) alert(t('saveFailed'))
         return
       }
       await storage.workspace.save({ pages, currentPage, savedAt })

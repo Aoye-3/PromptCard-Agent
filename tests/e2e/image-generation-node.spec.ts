@@ -5,9 +5,40 @@ const runtimeUrl = 'http://127.0.0.1:38101'
 
 test.setTimeout(120_000)
 
+test('fake Runtime fulfills the Agent startup contract', async ({ request }) => {
+  const status = await request.get('/agent-api/promptcard/runtime/status')
+  expect(status.status(), await status.text()).toBe(200)
+  await expect(status.json()).resolves.toMatchObject({
+    runtime: { ok: true },
+    auth: { ok: true }
+  })
+
+  const bootstrap = await request.post('/agent-api/promptcard/runtime/bootstrap', { data: {} })
+  expect(bootstrap.status(), await bootstrap.text()).toBe(200)
+  await expect(bootstrap.json()).resolves.toMatchObject({ user: { id: expect.any(String) } })
+
+  const catalog = await request.get('/agent-api/promptcard/runtime/catalog')
+  expect(catalog.status(), await catalog.text()).toBe(200)
+  await expect(catalog.json()).resolves.toMatchObject({
+    models: expect.any(Array),
+    tools: expect.any(Array),
+    skills: expect.any(Array)
+  })
+
+  const modelConfig = await request.get('/agent-api/promptcard/runtime/model-config')
+  expect(modelConfig.status(), await modelConfig.text()).toBe(200)
+  await expect(modelConfig.json()).resolves.toMatchObject({ enabled: false })
+})
+
 test('project image conversation uses real Runtime and SQLite while canvas continuation stays manual', async ({ page, request }) => {
   const projectId = `image-conversation-e2e-${Date.now()}`
   const projectTitle = `图片会话 E2E ${Date.now()}`
+  const runtimeHttpFailures: string[] = []
+  page.on('response', response => {
+    if (response.url().includes('/agent-api/promptcard/runtime/') && response.status() >= 400) {
+      runtimeHttpFailures.push(`${response.request().method()} ${new URL(response.url()).pathname} ${response.status()}`)
+    }
+  })
   await seedProject(request, projectId, projectTitle)
   await resetProvider(request, true)
   await enableImageGenerationFeature(page)
@@ -23,6 +54,7 @@ test('project image conversation uses real Runtime and SQLite while canvas conti
   await panelSwitcher.getByRole('button', { name: '图片生成' }).click()
   await expect(page.locator('[data-free-canvas-image-generation-panel]')).toBeVisible()
   await expect(page.getByText('模型已就绪')).toBeVisible()
+  expect(runtimeHttpFailures).toEqual([])
 
   await page.getByRole('button', { name: '添加图片输入' }).click()
   await page.getByRole('button', { name: /注入已选节点/ }).click()

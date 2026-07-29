@@ -107,9 +107,9 @@ export const storage = {
       await migrateBrowserCacheOnce()
       return sortProjects((await storageServiceClient.projects.getAll()).map(normalizeProject))
     },
-    async getById(id: string): Promise<IPromptProject | null> {
+    async getById(id: string, options: { signal?: AbortSignal } = {}): Promise<IPromptProject | null> {
       await migrateBrowserCacheOnce()
-      const project = await storageServiceClient.projects.getById(id)
+      const project = await storageServiceClient.projects.getById(id, options)
       return project ? normalizeProject(project) : null
     },
     createDraft(project: {
@@ -193,8 +193,11 @@ export const storage = {
         meta: project.meta || {}
       })
     },
-    async persistCreated(project: IPromptProject): Promise<IPromptProject> {
-      return normalizeProject(await storageServiceClient.projects.create(project))
+    async persistCreated(
+      project: IPromptProject,
+      options: { signal?: AbortSignal } = {}
+    ): Promise<IPromptProject> {
+      return normalizeProject(await storageServiceClient.projects.create(project, options))
     },
     async create(project: {
       title: string
@@ -221,7 +224,7 @@ export const storage = {
     async update(
       id: string,
       updates: Partial<Omit<IPromptProject, 'id' | 'createdAt'>>,
-      options: { revision?: number } = {}
+      options: { revision?: number; signal?: AbortSignal } = {}
     ): Promise<IPromptProject | null> {
       const { revision: updateRevision, ...safeUpdates } = updates as Partial<IPromptProject>
       const revision = typeof options.revision === 'number'
@@ -231,12 +234,22 @@ export const storage = {
           : undefined
 
       if (typeof revision !== 'number') {
-        const current = await this.getById(id)
+        const current = await this.getById(id, { signal: options.signal })
         if (!current) return null
-        return normalizeProject(await storageServiceClient.projects.update(id, current.revision, safeUpdates))
+        return normalizeProject(await storageServiceClient.projects.update(
+          id,
+          current.revision,
+          safeUpdates,
+          { signal: options.signal }
+        ))
       }
 
-      return normalizeProject(await storageServiceClient.projects.update(id, revision, safeUpdates))
+      return normalizeProject(await storageServiceClient.projects.update(
+        id,
+        revision,
+        safeUpdates,
+        { signal: options.signal }
+      ))
     },
     async delete(id: string): Promise<IPromptProject[]> {
       return (await storageServiceClient.projects.trash([id], 'user')).map(normalizeProject)

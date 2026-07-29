@@ -1,5 +1,5 @@
 import type { IPromptProject } from '@/models/PromptHistory.model'
-import { StorageRevisionConflict } from '@/storage/storage-service-client'
+import { StorageHttpError, StorageRevisionConflict } from '@/storage/storage-service-client'
 
 export interface ProjectSaveRequest {
   project: IPromptProject
@@ -29,14 +29,55 @@ interface ProjectQueue {
   pending: PendingRequest | null
   retained: ProjectSaveRequest | null
   inFlight: ProjectSaveRequest | null
+  lastResult: ProjectSaveResult
+  idleWaiters: Array<(result: ProjectSaveResult) => void>
 }
 
 export interface ProjectSaveCoordinator {
   markPendingCreate: (project: IPromptProject) => void
   enqueue: (request: ProjectSaveRequest) => Promise<ProjectSaveResult>
   flush: (projectId: string) => Promise<ProjectSaveResult>
+  waitForIdle: (projectId: string) => Promise<ProjectSaveResult>
   hasPending: (projectId: string) => boolean
 }
+
+export interface ProjectSavePageLifecycle {
+  readonly signal: AbortSignal
+  readonly unloading: boolean
+  pageHide: (persisted: boolean) => void
+  pageShow: () => void
+}
+
+export const createProjectSavePageLifecycle = (): ProjectSavePageLifecycle => {
+  let controller = new AbortController()
+  let unloading = false
+
+  return {
+    get signal() {
+      return controller.signal
+    },
+    get unloading() {
+      return unloading
+    },
+    pageHide(persisted) {
+      if (persisted) return
+      unloading = true
+      controller.abort()
+    },
+    pageShow() {
+      unloading = false
+      if (controller.signal.aborted) controller = new AbortController()
+    }
+  }
+}
+
+export const isExpectedProjectSaveNavigationCancellation = (
+  error: unknown,
+  pageIsUnloading: boolean
+): boolean => pageIsUnloading &&
+  error instanceof StorageHttpError &&
+  error.status === 0 &&
+  error.code === 'request_aborted'
 
 export const createProjectSaveCoordinator = (
   persistence: ProjectSavePersistence,
@@ -53,7 +94,9 @@ export const createProjectSaveCoordinator = (
       revision: project.revision,
       pending: null,
       retained: null,
-      inFlight: null
+      inFlight: null,
+      lastResult: { status: 'superseded', editSeq: -1 },
+      idleWaiters: []
     }
     queues.set(project.id, queue)
     return queue
@@ -96,20 +139,30 @@ export const createProjectSaveCoordinator = (
         queue.revision = savedProject.revision
         queue.retained = null
         queue.inFlight = null
-        request.resolve({ status: 'saved', editSeq: request.editSeq, project: savedProject })
+        const result: ProjectSaveResult = {
+          status: 'saved', editSeq: request.editSeq, project: savedProject
+        }
+        queue.lastResult = result
+        request.resolve(result)
       } catch (error) {
         const latest = queue.pending || request
         queue.pending = null
         queue.retained = { project: latest.project, editSeq: latest.editSeq }
         queue.inFlight = null
-        request.resolve({ status: 'failed', editSeq: request.editSeq, error })
-        if (latest !== request) latest.resolve({ status: 'failed', editSeq: latest.editSeq, error })
+        const result: ProjectSaveResult = { status: 'failed', editSeq: latest.editSeq, error }
+        queue.lastResult = result
+        request.resolve({ ...result, editSeq: request.editSeq })
+        if (latest !== request) latest.resolve(result)
         break
       }
     }
 
     queue.running = false
-    if (queue.pending) void run(projectId)
+    if (queue.pending) {
+      void run(projectId)
+    } else {
+      queue.idleWaiters.splice(0).forEach(resolve => resolve(queue.lastResult))
+    }
   }
 
   const enqueue = (request: ProjectSaveRequest): Promise<ProjectSaveResult> => {
@@ -141,6 +194,14 @@ export const createProjectSaveCoordinator = (
     },
     enqueue,
     flush,
+    waitForIdle(projectId) {
+      const queue = queues.get(projectId)
+      if (!queue) return Promise.resolve({ status: 'superseded', editSeq: -1 })
+      if (!queue.running && !queue.pending && !queue.inFlight) {
+        return Promise.resolve(queue.lastResult)
+      }
+      return new Promise(resolve => queue.idleWaiters.push(resolve))
+    },
     hasPending(projectId) {
       const queue = queues.get(projectId)
       return Boolean(queue?.inFlight || queue?.pending || queue?.retained)

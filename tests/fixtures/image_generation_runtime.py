@@ -217,6 +217,56 @@ def health() -> dict[str, str]:
     return {"status": "healthy", "service": "image-generation-e2e-runtime"}
 
 
+@app.get("/api/promptcard/runtime/status")
+def runtime_status() -> dict[str, Any]:
+    return {
+        "runtime": {"ok": True, "service": "image-generation-e2e-runtime", "orchestrator": "fake"},
+        "auth": {"ok": True, "mode": "test-fixture"},
+        "models": {"ok": False, "count": 0},
+        "tools": {"ok": False, "count": 0},
+        "storage": {"ok": True},
+        "textAgent": {"ok": False},
+    }
+
+
+@app.post("/api/promptcard/runtime/bootstrap")
+def runtime_bootstrap() -> dict[str, Any]:
+    return {
+        "user": {
+            "id": "image-generation-e2e-user",
+            "email": "e2e@promptcard.invalid",
+            "name": "Image Generation E2E",
+        },
+        "expires_in": None,
+    }
+
+
+@app.get("/api/promptcard/runtime/catalog")
+def runtime_catalog() -> dict[str, Any]:
+    return {
+        "models": [],
+        "skills": [],
+        "tools": [],
+        "builtins": [],
+        "subagentEnabled": False,
+        "agents": [],
+    }
+
+
+@app.get("/api/promptcard/runtime/model-config")
+def runtime_model_config() -> dict[str, Any]:
+    return {
+        "enabled": False,
+        "apiBase": "",
+        "apiKeyConfigured": False,
+        "apiKeyPreview": None,
+        "modelName": "",
+        "temperature": 0.2,
+        "maxTokens": 8192,
+        "availableModels": [],
+    }
+
+
 @app.get("/api/promptcard/runtime/model-catalog")
 def model_catalog() -> dict[str, Any]:
     return {

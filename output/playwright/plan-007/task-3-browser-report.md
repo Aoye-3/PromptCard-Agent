@@ -1,7 +1,7 @@
 # Plan 007 browser acceptance report
 
 - Browser capture commit: `997eb9f0e8b857d46e78bc7a6c036c2b3315edbe`
-- Final reviewed code commit: `37a721246e225e548068b78b5b95867b85bf469b`
+- Final reviewed code commit: `26a0b435bd3079f8219fb0fff3d30264f0d268f2`
 
 ## Gate evidence summary
 

@@ -42,9 +42,9 @@ For every failure, record:
 
 Do not include credentials, authorization headers, raw provider responses, temporary provider URLs, or local secrets in the evidence.
 
-## Plan 007 Run Record (2026-07-28)
+## Plan 007 Run Record (2026-07-29)
 
-This record includes the 2026-07-29 E-001/E-002 remediation on `fix/plan-007-acceptance-findings`, runner ownership in `2d372a0`, final code fix `37a7212`, and deterministic Fake Provider gating in `f6887b1`, using workspace-local frontend, Runtime fixture, Storage fixture, and local Fake Provider only. The unchanged F1/F4 screenshots were captured earlier at `997eb9f`; sanitized evidence is stored under [`output/playwright/plan-007/`](../../output/playwright/plan-007/). The post-remediation image-generation configuration passed 5/5, full E2E passed 26/26, frontend passed 106 files and 648 tests, Storage passed 87/87, and the production build plus `agent:check` passed. Every human decision below remains **Pending unified human acceptance**; this record does not claim user approval.
+This record includes the 2026-07-29 E-001/E-002 remediation at `26a0b43`, runner ownership in `2d372a0`, final multi-view code fix `37a7212`, and deterministic Fake Provider gating in `f6887b1`, using workspace-local frontend, Runtime fixture, Storage fixture, and local Fake Provider only. The unchanged F1/F4 screenshots were captured earlier at `997eb9f`; sanitized evidence is stored under [`output/playwright/plan-007/`](../../output/playwright/plan-007/). The post-remediation image-generation configuration passed 5/5, full E2E passed 26/26, frontend passed 106 files and 648 tests, Storage passed 87/87, and the production build plus `agent:check` passed. Every human decision below remains **Pending unified human acceptance**; this record does not claim user approval.
 
 | Gate | Automated evidence | Human status / remaining observation |
 | --- | --- | --- |
@@ -60,7 +60,7 @@ Recorded findings:
 
 | ID | Observation | Owner | Severity | Release disposition |
 | --- | --- | --- | --- | --- |
-| E-001 | A PUT was cancelled near reload and surfaced one `StorageHttpError`; before/after Storage evidence still retained all three nodes and the source asset. | Engineering | Medium | Fixed in `fix/plan-007-acceptance-findings`: project writes receive a page-lifecycle signal, and only an unloading-time `request_aborted` is suppressed. Timeout, service, and HTTP errors remain reportable. Automated regression passes; fresh manual evidence is pending. |
+| E-001 | A PUT was cancelled near reload and surfaced one `StorageHttpError`; before/after Storage evidence still retained all three nodes and the source asset. | Engineering | Medium | Fixed at `26a0b43`: project writes receive a page-lifecycle signal, and only an unloading-time `request_aborted` is suppressed. Timeout, service, and HTTP errors remain reportable. Automated regression passes; fresh manual evidence is pending. |
 | E-002 | The Fake fixture returned 404 for four generic Runtime/status probes, and the screenshot showed disconnected status. This did not establish a production Runtime defect. | Test infrastructure | Low | Fixed in the image-generation Fake Runtime by implementing the complete status/bootstrap/catalog/model-config startup contract. Direct proxy-contract and page-level no-4xx regressions pass; fresh manual evidence is pending. |
 
 B3-B6 and B8-B9 were not executed. They remain subject to their existing paid-call authorization and live-provider acceptance requirements.

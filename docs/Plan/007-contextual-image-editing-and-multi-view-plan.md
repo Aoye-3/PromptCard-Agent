@@ -4,7 +4,7 @@
 
 - Status: `Active`
 - Created: `2026-07-24`
-- Last reviewed: `2026-07-28`
+- Last reviewed: `2026-07-29`
 - Scope owner: Free Canvas, Image Generation, Agent Runtime, PromptCard Storage
 - Current reference implementation: Seedream 5.0 Pro
 - Explicit UI freeze: this plan must not change or repurpose the existing right-side `Agent / 图片生成 / Prompt库` structure; `作为参考` is the sole state-level bridge and may append to the existing 图片生成 Composer
@@ -13,7 +13,7 @@
 
 ## Implementation Ledger
 
-Last implementation update: `2026-07-28`.
+Last implementation update: `2026-07-29`.
 
 Status meanings:
 
@@ -48,23 +48,23 @@ Backend-complete-then-human-acceptance order requested by the user:
 3. perform one unified human acceptance after the backend closure instead of stopping between implementation gates;
 4. do not perform paid live Seedream evaluations without explicit cost authorization; record their absence rather than inferring a pass.
 
-The complete frontend Vitest suite passed through `npm.cmd run test:frontend`: four bounded sequential shards completed 106 test files and 644 tests, including retry-integrity and exact-node binding defenses. At final reviewed code commit `37a7212` (including runner ownership in `2d372a0` and deterministic Fake Provider gating in `f6887b1`), the production build and `agent:check` passed; a direct shell invocation of bare `npm.cmd run test:e2e` completed 24/24 in 51.4 seconds (73.5 seconds shell elapsed) with exit code 0 and released its local service ports. The intentional no-match invocation returned exit code 1. Viewport/zoom, focus, accessibility and the remaining human observations remain separate gates.
+The complete frontend Vitest suite passed through `npm.cmd run test:frontend`: four bounded sequential shards completed 106 test files and 648 tests, including navigation-cancellation classification, retry-integrity, and exact-node binding defenses. At final reviewed code commit `26a0b43` (including runner ownership in `2d372a0`, deterministic Fake Provider gating in `f6887b1`, and the E-001/E-002 remediation), the production build and `agent:check` passed; a direct shell invocation of bare `npm.cmd run test:e2e` completed 26/26 in 51.3 seconds with exit code 0 and released its local service ports. The intentional no-match invocation returned exit code 1. Viewport/zoom, focus, accessibility and the remaining human observations remain separate gates.
 
 The canonical human browser procedure is maintained in [Manual Frontend Acceptance](../quality/manual-frontend-acceptance.md). Complete its F1-F7 gates and retain the required evidence before changing any `Implemented; frontend acceptance pending` ledger entry to accepted. Paid live-provider evaluation remains a separate explicitly authorized gate.
 
-### Zero-cost unified evidence (2026-07-28)
+### Zero-cost unified evidence (2026-07-29)
 
-The F1/F4 browser capture originated at `997eb9f`; the evidence package and retry-specific assertions were reviewed and refreshed through final code fix `37a7212`. The sanitized request, Run, Storage, recovery, Console/Network and screenshot package is under [`output/playwright/plan-007/`](../../output/playwright/plan-007/); it contains no credentials, authorization headers, temporary Provider URLs, raw Provider responses, or local secrets.
+The F1/F4 browser capture originated at `997eb9f`; the evidence package and retry-specific assertions were reviewed and refreshed through final remediation `26a0b43`. The sanitized request, Run, Storage, recovery, Console/Network and screenshot package is under [`output/playwright/plan-007/`](../../output/playwright/plan-007/); it contains no credentials, authorization headers, temporary Provider URLs, raw Provider responses, or local secrets. The Console/Network JSON remains the historical discovery-run artifact; a fresh post-fix manual capture is still required.
 
 | Evidence | Result |
 | --- | --- |
-| Existing browser baseline | Direct shell bare `npm.cmd run test:e2e` passed 24/24 in 51.4s (73.5s shell elapsed) with exit code 0; repository-local browser cache, port release, and no-match exit code 1 verified. |
-| Multi-view image configuration | 3/3 passed in 52.6s (71.6s shell elapsed) with exit code 0; pipeline EOF multi-view also passed 2/2 in 45.1s with exit code 0. Ports were released. The retry UI locks the original failed view, submission rejects synchronous view/selection tampering, and a valid retry binds the exact failed node while reusing item/group/view with one new Run and retaining the failed Run; the same three-member group succeeded. |
-| Frontend / Runtime / Storage | 106 frontend files and 644 tests, 96 Runtime image-generation tests, and 87 Storage tests passed. |
+| Existing browser baseline | Direct shell bare `npm.cmd run test:e2e` passed 26/26 in 51.3s with exit code 0; repository-local browser cache, port release, and no-match exit code 1 verified. |
+| Multi-view image configuration | 5/5 passed in 38.4s with exit code 0; pipeline EOF multi-view also passed 2/2 in 45.1s with exit code 0. Ports were released. Coverage includes the Fake Runtime startup contract and reload-time save cancellation as well as retry integrity, exact-node binding, group recovery, and lineage. |
+| Frontend / Runtime / Storage | 106 frontend files and 648 tests, 96 Runtime image-generation tests, and 87 Storage tests passed. |
 | Build and static gates | Production build, `agent:check`, `git diff --check`, and credential/URL/schema/test-route scans passed. |
 | Browser evidence harness | 1/1 passed in 41.3s at Chromium 1280x720 and 100% browser text zoom. |
 
-B0, B1, B2, and B7 are **automated evidence ready, not human accepted**. Unified human approval remains pending. F1 has open finding E-001, F4 is limited to the multi-view pre-submit boundary, and F2/F3/F5/F7 still require human observation. No live Provider request was made; B3-B6 and B8-B9 remain unexecuted and require separate paid-call authorization.
+B0, B1, B2, and B7 are **automated evidence ready, not human accepted**. E-001 and E-002 are fixed in automated coverage; F1 still requires a fresh manual Console/Network capture. Unified human approval remains pending, F4 is limited to the multi-view pre-submit boundary, and F2/F3/F5/F7 still require human observation. No live Provider request was made; B3-B6 and B8-B9 remain unexecuted and require separate paid-call authorization.
 
 ### Backend closure result (2026-07-26)
 

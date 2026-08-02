@@ -224,6 +224,9 @@ PromptCard Storage release gate (use the existing workspace virtual environment 
 - Prompt 库媒体和画布媒体采用独立编码、索引、权限与生命周期；即使复用同一底层资产，也不共用业务编码。
 - Codex 生成结果只通过 Gateway/Storage 导入，不直接修改项目 JSON、SQLite 或资产目录。
 - PromptCard 不保存 Codex 图片生成所需的外部 API Key；实际生成能力取决于用户自己的 Codex 环境。
+- 左侧全局导航规划新增 **Skill Hub**，用于安全导入、审阅、版本化和管理 Agent Skill。
+- Skill 使用独立 `SKL` 编码体系；同一固定版本可分别发布给 Codex、启用给本地 Agent，两端权限和启用状态互不联动。
+- 导入只读取与校验 Skill 包，不执行其中的脚本、安装器或依赖；本地 Agent 首版只读取受限的指令与参考资料。
 
 详细设计与分阶段验收见 [Plan 008：本地 MCP Prompt-媒体 Codex 桥接](./docs/Plan/008-local-mcp-prompt-media-codex-bridge.md)。
 

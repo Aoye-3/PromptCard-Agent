@@ -213,6 +213,20 @@ PromptCard Storage release gate (use the existing workspace virtual environment 
 
 </details>
 
+## 规划中功能
+
+### 本地 MCP 与 Codex 创作桥接
+
+计划分别为项目、Prompt 库 Prompt、Prompt 库媒体、画布文本节点、画布媒体和画布选区提供稳定、可复制的引用编码。用户既可以复制精确编码，也可以先给出项目编码，让 Codex 在项目画布与 Prompt 库两个独立索引中查找候选内容，再生成提示词或图片并通过本地受控接口交付回指定画布。
+
+- Codex 作为外部交互入口，不在 PMAgent-Canvas 内嵌 Codex 聊天界面。
+- 使用仓库自带的本地 STDIO MCP，分别暴露 Prompt 库搜索/解析与项目画布搜索/解析能力。
+- Prompt 库媒体和画布媒体采用独立编码、索引、权限与生命周期；即使复用同一底层资产，也不共用业务编码。
+- Codex 生成结果只通过 Gateway/Storage 导入，不直接修改项目 JSON、SQLite 或资产目录。
+- PromptCard 不保存 Codex 图片生成所需的外部 API Key；实际生成能力取决于用户自己的 Codex 环境。
+
+详细设计与分阶段验收见 [Plan 008：本地 MCP Prompt-媒体 Codex 桥接](./docs/Plan/008-local-mcp-prompt-media-codex-bridge.md)。
+
 ## 当前状态
 
 PMAgent-Canvas 仍处于活跃开发阶段。当前重点是稳定自由画布、图片生成与编辑、Prompt/媒体资产沉淀、Agent 会话隔离和本地桌面启动链路。对外使用前请以仓库中的实际实现和技术文档为准。

@@ -6,6 +6,7 @@ Dim repoRoot
 Dim launchScript
 Dim splashPath
 Dim splash
+Dim launcher
 Dim command
 Dim exitCode
 
@@ -22,8 +23,12 @@ If fso.FileExists(splashPath) Then
   WScript.Sleep 200
 End If
 
-command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File " & Quote(launchScript)
-exitCode = shell.Run(command, 0, True)
+command = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Quote(launchScript)
+Set launcher = shell.Exec(command)
+Do While launcher.Status = 0
+  WScript.Sleep 100
+Loop
+exitCode = launcher.ExitCode
 
 On Error Resume Next
 If Not splash Is Nothing Then

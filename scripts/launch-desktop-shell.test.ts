@@ -4,6 +4,7 @@ import path from 'node:path'
 
 const scriptPath = path.resolve(__dirname, 'launch-desktop-shell.ps1')
 const rustMainPath = path.resolve(__dirname, '..', 'src-tauri', 'src', 'main.rs')
+const rustLibPath = path.resolve(__dirname, '..', 'src-tauri', 'src', 'lib.rs')
 const capabilityPath = path.resolve(__dirname, '..', 'src-tauri', 'capabilities', 'default.json')
 
 describe('launch-desktop-shell.ps1', () => {
@@ -150,6 +151,34 @@ describe('launch-desktop-shell.ps1', () => {
     const rustMain = await readFile(rustMainPath, 'utf8')
 
     expect(rustMain).toContain('#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]')
+  })
+
+  test('keeps the desktop event loop responsive while local services shut down', async () => {
+    const rustLib = await readFile(rustLibPath, 'utf8')
+    const closeHandler = rustLib.slice(rustLib.indexOf('.on_window_event'), rustLib.indexOf('.run(tauri::generate_context!())'))
+
+    expect(closeHandler).toContain('api.prevent_close()')
+    expect(closeHandler).toContain('window.hide()')
+    expect(closeHandler).toContain('thread::spawn')
+    expect(closeHandler).toContain('SHUTDOWN_STARTED')
+    expect(closeHandler.indexOf('thread::spawn')).toBeLessThan(closeHandler.indexOf('shutdown_promptcard_services()'))
+  })
+
+  test('bounds shutdown work and cleans every runtime service without slow PowerShell port enumeration', async () => {
+    const rustLib = await readFile(rustLibPath, 'utf8')
+    const shutdown = rustLib.slice(
+      rustLib.indexOf('fn shutdown_promptcard_services'),
+      rustLib.indexOf('fn profile_root')
+    )
+
+    expect(rustLib).toContain('LOCAL_SERVICE_SHUTDOWN_TIMEOUT')
+    expect(rustLib).toContain('try_wait()')
+    expect(rustLib).toContain('child.kill()')
+    expect(shutdown).toContain('runtime.ports.textAgent')
+    expect(shutdown).toContain('runtime.textAgentUrl')
+    expect(shutdown).toContain('runtime.textAgentHealthUrl')
+    expect(shutdown).toContain('netstat.exe')
+    expect(shutdown).not.toContain('Get-NetTCPConnection')
   })
 
   test('allows the desktop dev shell to follow dynamic local Vite ports', async () => {

@@ -5,14 +5,16 @@ import path from 'node:path'
 const repoRoot = path.resolve(__dirname, '..')
 
 describe('desktop launch splash', () => {
-  test('start-desktop.vbs opens a splash before running the launcher and closes it afterwards', async () => {
+  test('start-desktop.vbs keeps the script host responsive while the launcher runs', async () => {
     const source = await readFile(path.join(repoRoot, 'start-desktop.vbs'), 'utf8')
 
     expect(source).toContain('desktop-launch-splash.hta')
     expect(source).toContain('shell.Exec("mshta.exe " & Quote(splashPath))')
-    expect(source.indexOf('shell.Exec("mshta.exe " & Quote(splashPath))')).toBeLessThan(
-      source.indexOf('shell.Run(command, 0, True)')
-    )
+    expect(source).toContain('Set launcher = shell.Exec(command)')
+    expect(source).toContain('Do While launcher.Status = 0')
+    expect(source).toContain('WScript.Sleep 100')
+    expect(source).toContain('exitCode = launcher.ExitCode')
+    expect(source).not.toContain('shell.Run(command, 0, True)')
     expect(source).toContain('splash.Terminate')
   })
 

@@ -3,10 +3,13 @@ use image::{imageops, DynamicImage, ImageFormat, RgbaImage};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Write};
-use std::path::{Path, PathBuf};
 use std::panic;
-use std::process::Command;
-use std::sync::{atomic::{AtomicU64, Ordering}, Mutex};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::{
+    atomic::{AtomicBool, AtomicU64, Ordering},
+    Mutex,
+};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -20,6 +23,8 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 const PROFILE_ROOT_ENV: &str = "PROMPTCARD_DESKTOP_PROFILE_ROOT";
 const DEFAULT_PROFILE_ROOT: &str = "logs/desktop-profile";
+const LOCAL_SERVICE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+static SHUTDOWN_STARTED: AtomicBool = AtomicBool::new(false);
 
 fn write_desktop_log(message: impl AsRef<str>) {
     let Ok(root) = source_root() else {
@@ -676,10 +681,10 @@ $manifestCandidates = @($env:PROMPTCARD_DEV_RUNTIME_MANIFEST, (Join-Path $source
 foreach ($manifestPath in $manifestCandidates) {{
   try {{
     $runtime = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    foreach ($port in @($runtime.ports.frontend, $runtime.ports.agent, $runtime.ports.storage)) {{
+    foreach ($port in @($runtime.ports.frontend, $runtime.ports.agent, $runtime.ports.textAgent, $runtime.ports.storage)) {{
       if ($port) {{ [void]$ports.Add([int]$port) }}
     }}
-    foreach ($url in @($runtime.frontendUrl, $runtime.agentUrl, $runtime.agentHealthUrl, $runtime.storageUrl, $runtime.storageHealthUrl)) {{
+    foreach ($url in @($runtime.frontendUrl, $runtime.agentUrl, $runtime.agentHealthUrl, $runtime.textAgentUrl, $runtime.textAgentHealthUrl, $runtime.storageUrl, $runtime.storageHealthUrl)) {{
       if (!$url) {{ continue }}
       try {{ [void]$ports.Add(([System.Uri][string]$url).Port) }} catch {{ }}
     }}
@@ -688,8 +693,18 @@ foreach ($manifestPath in $manifestCandidates) {{
   }}
 }}
 $targetPorts = @($ports | Where-Object {{ $_ -gt 0 }} | Sort-Object -Unique)
-$connections = Get-NetTCPConnection -LocalPort $targetPorts -State Listen -ErrorAction SilentlyContinue
-$processIds = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+$targetPortSet = @{{}}
+foreach ($port in $targetPorts) {{ $targetPortSet[[int]$port] = $true }}
+$netstat = Join-Path $env:SystemRoot 'System32\netstat.exe'
+$processIds = & $netstat -ano -p tcp | ForEach-Object {{
+  if ($_ -match '^\s*TCP\s+\S+:(\d+)\s+\S+\s+\S+\s+(\d+)\s*$') {{
+    $port = [int]$matches[1]
+    if ($targetPortSet.ContainsKey($port)) {{ [int]$matches[2] }}
+  }}
+}} | Sort-Object -Unique
+$allProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
+$processById = @{{}}
+foreach ($item in $allProcesses) {{ $processById[[int]$item.ProcessId] = $item }}
 function Test-PromptCardProcess($process, $parentProcess) {{
   if (!$process) {{ return $false }}
   $commandLine = [string]$process.CommandLine
@@ -698,13 +713,13 @@ function Test-PromptCardProcess($process, $parentProcess) {{
 }}
 foreach ($processId in $processIds) {{
   if (!$processId) {{ continue }}
-  $process = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
+  $process = $processById[[int]$processId]
   if (!$process) {{ continue }}
-  $parentProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$($process.ParentProcessId)" -ErrorAction SilentlyContinue
+  $parentProcess = $processById[[int]$process.ParentProcessId]
   if (Test-PromptCardProcess $process $parentProcess) {{
     Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
     Write-Output "Stopped $processId $($process.Name)"
-    $grandParentProcess = if ($parentProcess) {{ Get-CimInstance Win32_Process -Filter "ProcessId=$($parentProcess.ParentProcessId)" -ErrorAction SilentlyContinue }} else {{ $null }}
+    $grandParentProcess = if ($parentProcess) {{ $processById[[int]$parentProcess.ParentProcessId] }} else {{ $null }}
     if (Test-PromptCardProcess $parentProcess $grandParentProcess) {{
       Stop-Process -Id $parentProcess.ProcessId -Force -ErrorAction SilentlyContinue
       Write-Output "Stopped parent $($parentProcess.ProcessId) $($parentProcess.Name)"
@@ -717,13 +732,17 @@ foreach ($processId in $processIds) {{
     );
 
     let mut command = Command::new("powershell");
-    command.args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script.as_str()]);
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script.as_str(),
+    ]);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
-    let output = command
-        .output()
-        .map_err(|error| format!("Failed to run local service shutdown: {error}"))?;
+    let output = run_command_with_timeout(&mut command, LOCAL_SERVICE_SHUTDOWN_TIMEOUT)?;
 
     let exit_code = output.status.code().unwrap_or(-1);
     let result = ShutdownResult {
@@ -740,6 +759,41 @@ foreach ($processId in $processIds) {{
             "Local service shutdown failed with exit code {exit_code}.\n{}{}",
             result.stdout, result.stderr
         ))
+    }
+}
+
+fn run_command_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Failed to run local service shutdown: {error}"))?;
+    let started = Instant::now();
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child.wait_with_output().map_err(|error| {
+                    format!("Failed to collect local service shutdown output: {error}")
+                });
+            }
+            Ok(None) if started.elapsed() < timeout => thread::sleep(Duration::from_millis(50)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait_with_output();
+                return Err(format!(
+                    "Local service shutdown exceeded its {} second timeout.",
+                    timeout.as_secs()
+                ));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait_with_output();
+                return Err(format!("Failed to poll local service shutdown: {error}"));
+            }
+        }
     }
 }
 
@@ -1172,13 +1226,31 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             write_desktop_log(format!("window event: {} {:?}", window.label(), event));
-            if window.label() == "main" && matches!(event, WindowEvent::CloseRequested { .. }) {
-                write_desktop_log("main close requested; shutting down local services");
-                if let Err(error) = shutdown_promptcard_services() {
-                    write_desktop_log(format!("shutdown failed: {error}"));
-                    eprintln!("Failed to stop PromptCard local services: {error}");
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if SHUTDOWN_STARTED.swap(true, Ordering::SeqCst) {
+                        return;
+                    }
+
+                    write_desktop_log(
+                        "main close requested; hiding window and shutting down local services",
+                    );
+                    if let Err(error) = window.hide() {
+                        write_desktop_log(format!(
+                            "failed to hide main window during shutdown: {error}"
+                        ));
+                    }
+                    let app_handle = window.app_handle().clone();
+                    thread::spawn(move || {
+                        if let Err(error) = shutdown_promptcard_services() {
+                            write_desktop_log(format!("shutdown failed: {error}"));
+                            eprintln!("Failed to stop PromptCard local services: {error}");
+                        }
+                        write_desktop_log("local service shutdown finished; exiting desktop shell");
+                        app_handle.exit(0);
+                    });
                 }
-                window.app_handle().exit(0);
             }
             if window.label() == CAPTURE_SELECTION_LABEL && matches!(event, WindowEvent::CloseRequested { .. }) {
                 if let Some(state) = window.app_handle().try_state::<CaptureSessionStore>() {

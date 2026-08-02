@@ -51,13 +51,16 @@ describe('Tauri webview configuration', () => {
     expect(selectionCapability.permissions).not.toContain('git-pull-source')
   })
 
-  test('exits the whole desktop app when the main window closes', async () => {
+  test('hides the main window immediately and exits after background service cleanup', async () => {
     const rustLib = await readFile(rustLibPath, 'utf8')
 
     expect(rustLib).toContain('window.label() == "main"')
     expect(rustLib).toContain('WindowEvent::CloseRequested')
+    expect(rustLib).toContain('api.prevent_close()')
+    expect(rustLib).toContain('window.hide()')
+    expect(rustLib).toContain('thread::spawn')
     expect(rustLib).toContain('shutdown_promptcard_services()')
-    expect(rustLib).toContain('window.app_handle().exit(0)')
+    expect(rustLib).toContain('app_handle.exit(0)')
   })
 
   test('shuts down dynamic runtime ports without showing a PowerShell console', async () => {

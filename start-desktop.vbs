@@ -4,9 +4,6 @@ Dim shell
 Dim fso
 Dim repoRoot
 Dim launchScript
-Dim splashPath
-Dim splash
-Dim launcher
 Dim command
 Dim exitCode
 
@@ -15,26 +12,10 @@ Set fso = CreateObject("Scripting.FileSystemObject")
 
 repoRoot = fso.GetParentFolderName(WScript.ScriptFullName)
 launchScript = fso.BuildPath(repoRoot, "scripts\launch-desktop-shell.ps1")
-splashPath = fso.BuildPath(repoRoot, "scripts\desktop-launch-splash.hta")
 
 shell.CurrentDirectory = repoRoot
-If fso.FileExists(splashPath) Then
-  Set splash = shell.Exec("mshta.exe " & Quote(splashPath))
-  WScript.Sleep 200
-End If
-
 command = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File " & Quote(launchScript)
-Set launcher = shell.Exec(command)
-Do While launcher.Status = 0
-  WScript.Sleep 100
-Loop
-exitCode = launcher.ExitCode
-
-On Error Resume Next
-If Not splash Is Nothing Then
-  splash.Terminate
-End If
-On Error GoTo 0
+exitCode = shell.Run(command, 0, True)
 
 If exitCode <> 0 Then
   MsgBox "PromptCard Manager failed to start." & vbCrLf & _

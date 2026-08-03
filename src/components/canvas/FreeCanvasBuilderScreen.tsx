@@ -139,6 +139,7 @@ import {
 import { compileImageGeneratorPrompt } from '@/domain/image-generation/prompt-compiler'
 import { getRuntimeErrorPresentation, type ModelAssignment, type ModelCatalogEntry, type ModelConnection } from '@/domain/models/model-management'
 import { modelManagementClient } from '@/services/model-management-client'
+import { agentRuntimeService } from '@/services/agent-runtime-service'
 import {
   createImageGenerationRunId,
   ImageGenerationClientError,
@@ -353,12 +354,12 @@ const FreeCanvasBuilderInner = ({
 
   useEffect(() => {
     let active = true
-    void Promise.all([
+    void agentRuntimeService.bootstrap().then(() => Promise.all([
       modelManagementClient.getCatalog(),
       modelManagementClient.listConnections(),
       modelManagementClient.listAssignments(),
       modelManagementClient.getImageGenerationStatus()
-    ]).then(([catalog, connections, assignments, status]) => {
+    ])).then(([catalog, connections, assignments, status]) => {
       if (!active) return
       const imageModels = catalog.models.filter(model => model.modality === 'image')
       const assignment = assignments.find(item => item.slot === 'image.primary') || null

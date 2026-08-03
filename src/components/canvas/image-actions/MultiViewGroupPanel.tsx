@@ -33,7 +33,7 @@ export const MultiViewGroupPanel = ({
   const group = deriveMultiViewGroupState(members)
   return (
     <section
-      className="absolute bottom-5 left-5 z-30 w-[340px] overflow-hidden rounded-[20px] border border-gray-200 bg-white/95 shadow-[0_20px_60px_rgba(15,23,42,0.18)] backdrop-blur"
+      className="absolute bottom-5 left-20 z-30 w-[340px] overflow-hidden rounded-[20px] border border-gray-200 bg-white/95 shadow-[0_20px_60px_rgba(15,23,42,0.18)] backdrop-blur"
       aria-label="多角度结果组"
       data-multi-view-group={groupId}
     >

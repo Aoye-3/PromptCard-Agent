@@ -2624,7 +2624,7 @@ const FreeCanvasBuilderInner = ({
             {clipboardNotice}
           </div>
         )}
-        {selectedMultiViewGroup && (
+        {selectedMultiViewGroup && !resourceLibraryExpanded && (
           <MultiViewGroupPanel
             groupId={selectedMultiViewGroup.groupId}
             members={selectedMultiViewGroup.members}

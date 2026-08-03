@@ -115,7 +115,9 @@ vi.mock('@/storage/storage-service-client', async importOriginal => {
 
 import { CanvasBottomToolbar, FreeCanvasBuilderScreen } from './FreeCanvasBuilderScreen'
 import { ImageGenerationConversationPanel } from './image-generation/ImageGenerationConversationPanel'
+import { MultiViewGroupPanel } from './image-actions/MultiViewGroupPanel'
 import { MultiViewWorkbenchDialog } from './image-actions/MultiViewWorkbenchDialog'
+import { ProjectResourceLibrary } from './ProjectResourceLibrary'
 
 const baseProps = {
   quickDrawerOpen: false,
@@ -968,6 +970,51 @@ describe('project-level free canvas image generation entry', () => {
     expect(failedGroup.nodes.filter((node: { meta: { generationState?: string } }) => (
       node.meta.generationState === 'failed'
     ))).toHaveLength(3)
+  })
+
+  it('hides the selected multi-view result panel while the project resource library is expanded', async () => {
+    const placeholder = createFreeCanvasImageGenerationPlaceholder({
+      runId: 'image-run-left',
+      conversationId: 'image-operation-image-run-left',
+      prompt: 'left view',
+      position: { x: 468, y: 120 },
+      width: 320,
+      height: 320
+    })
+    const member = {
+      ...placeholder,
+      id: 'node-left',
+      meta: {
+        ...placeholder.meta,
+        generationState: 'running' as const,
+        operationGroupId: 'group-1',
+        operationItemId: 'item-left',
+        operationViewSpec: 'left'
+      }
+    }
+    const canvas = {
+      ...createFreeCanvasProject(1, { nodes: [member] }),
+      selectedNodeId: member.id
+    }
+    let renderer!: ReturnType<typeof create>
+
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={vi.fn()}
+        />
+      )
+    })
+
+    expect(renderer.root.findAllByType(MultiViewGroupPanel)).toHaveLength(1)
+    act(() => renderer.root.findByType(ProjectResourceLibrary).props.onExpandedChange(true))
+    expect(renderer.root.findAllByType(MultiViewGroupPanel)).toHaveLength(0)
   })
 
   it('rejects retry tampering and replaces only the selected failed node when lineage is duplicated', async () => {

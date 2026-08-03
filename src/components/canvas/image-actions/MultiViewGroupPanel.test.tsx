@@ -12,6 +12,26 @@ const members: MultiViewGroupPanelMember[] = [
 ]
 
 describe('MultiViewGroupPanel', () => {
+  it('stays clear of the collapsed project resource rail', () => {
+    let renderer!: ReactTestRenderer
+    act(() => {
+      renderer = create(
+        <MultiViewGroupPanel
+          groupId="group-1"
+          members={members}
+          sourceAvailable
+          onSelect={vi.fn()}
+          onRetry={vi.fn()}
+          onUseAsReference={vi.fn()}
+        />
+      )
+    })
+
+    const panel = renderer.root.findByProps({ 'data-multi-view-group': 'group-1' })
+    expect(panel.props.className).toContain('left-20')
+    expect(panel.props.className).not.toContain('left-5')
+  })
+
   it('shows partial state and per-member actions', () => {
     let renderer!: ReactTestRenderer
     act(() => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent 
 import PromptLibrary from './components/PromptLibrary'
 import ThreeStageBuilderScreen from './components/ThreeStageBuilder'
 import { AgentDashboard } from './components/AgentDashboard'
+import { SkillHubScreen } from './components/skills/SkillHubScreen'
 import { AppShell } from './components/app/AppShell'
 import { ProjectHome } from './components/app/ProjectHome'
 import { FileStorageScreen } from './features/files/FileStorageScreen'
@@ -1364,6 +1365,8 @@ function App() {
       initialSection={imageModelReturnContext ? 'image-models' : 'text-models'}
       onAssignmentSaved={handleImageAssignmentSaved}
     />
+  ) : activeTab === 'skillhub' ? (
+    <SkillHubScreen />
   ) : activeTab === 'updates' ? (
     <UpdateScreen />
   ) : activeTab === 'me' ? (

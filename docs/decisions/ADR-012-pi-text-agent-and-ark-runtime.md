@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted; conversation-persistence and Skill limitations superseded in part by [ADR-016](./ADR-016-durable-text-agent-conversations-and-bounded-skills.md)
 
 ## Date
 
@@ -45,8 +45,8 @@ Positive:
 
 Tradeoffs:
 
-- pi session history is currently process-local and non-durable;
-- no generic skills, sandbox, subagents, or autonomous writes;
+- at the time of this decision, pi session history was process-local and non-durable; [ADR-016](./ADR-016-durable-text-agent-conversations-and-bounded-skills.md) later moved project history to PromptCard Storage;
+- no sandbox, subagents, autonomous writes, or Skill-based permission expansion; ADR-016 adds bounded instruction/reference snapshots only;
 - live provider verification depends on a locally configured keyring credential;
 - an Ark inference API Key can test inference connectivity and use the supported PromptCard catalog, but private account endpoint enumeration would require a future AK/SK management-credential contract.
 

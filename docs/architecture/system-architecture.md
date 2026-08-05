@@ -43,7 +43,7 @@ flowchart TD
 - Frontend: interaction state, Canvas selection, pending proposal UI, explicit Apply/Reject actions, and existing Canvas/image-generation components.
 - PromptCard Storage: projects, Prompt Library, media assets, captures, image conversations, immutable runs, placements, and derivatives.
 - Python Gateway: browser session and CSRF boundary, model catalog/connections/assignments, keyring access, secure PI-native forwarding, SDK-backed text adapters, media loading, and the independent image-generation lifecycle.
-- pi text runtime: bounded conversation state, PI provider collection, prompt orchestration, Prompt Library search, and proposal-only tools.
+- pi text runtime: request-scoped normalized history, PI provider collection, prompt orchestration, Prompt Library search, and proposal-only tools. It does not own durable conversation state.
 
 ## Minimal Closed Loop
 
@@ -68,23 +68,25 @@ flowchart LR
 
 1. A Canvas, Prompt Library, or Media Library surface sends a bounded request through `agent-runtime-service.ts`.
 2. Vite proxies `/agent-api` to the Python Gateway.
-3. The Gateway authenticates the browser request and forwards it to pi using an internal token.
-4. pi can search only the supplied Prompt Library snapshot and can emit only tools allowed by the request policy.
-5. pi resolves the non-secret `chat.primary` descriptor into its provider collection.
-6. PI-native models stream through the credential-injecting Gateway proxy; SDK-backed models use the separate Gateway text-adapter registry.
-7. The Gateway validates the proposal again.
-8. The frontend displays Apply/Reject. No response mutates durable data automatically.
+3. For a project conversation, Gateway validates the project, entrypoint, mode, permission scope, `conversationId`, and idempotent `requestId`, then loads bounded SQLite history. Media requests instead carry bounded component-memory history and are never persisted.
+4. Gateway binds the feature Skill and any one-shot external Skill, rejects unavailable tool dependencies, and forwards normalized history, current workspace context, Skill snapshots, and the permitted tool catalog to the stateless pi Runtime using an internal token.
+5. pi can search only the supplied Prompt Library snapshot and can emit only tools allowed by the request policy.
+6. pi resolves the non-secret `chat.primary` descriptor into its provider collection.
+7. PI-native models stream through the credential-injecting Gateway proxy; SDK-backed models use the separate Gateway text-adapter registry.
+8. Gateway validates the result again and durably records project messages, tool summaries, proposal state, and the exact Skill revision/digest used.
+9. The frontend displays Apply/Reject. No response mutates Canvas or Prompt Library data automatically.
 
 ## Canvas Proposal Rules
 
-- Selected text node: update that exact node only.
-- No selected text node: create a new text node only.
+- Explicit Canvas node context: at most one attached text node is the writable target; all other attached text nodes are read-only references. `@` mentions express relationships and do not grant write access.
+- Completion mode accepts only an append proposal. Rewrite mode accepts either a whole-user-part rewrite or a validated selection rewrite. The protected template segment is context-only.
+- Proposals record the target node revision, template digest, and user-content digest. The apply path fails closed when any baseline changes. Explicit Canvas context without a target is discussion-only.
 - Prompt Library: additive preset creation only.
-- Media analysis: read-only response, one selected image, no proposals.
+- Media analysis: ordinary chat or a non-mutating Prompt preview for one selected image. Prompt Library registration always requires a separate explicit user action.
 
 ## Image-Generation Isolation
 
-Image generation remains a separate Gateway module using `image.primary`. Image models never enter the PI text provider collection or the text-SDK registry. It does not depend on pi sessions or text-Agent availability. The current Storage schema is v7: it preserves the project conversations and durable placements introduced in v4, the original/derived image relationships introduced in v5, and the later asset-lifecycle and project-resource additions. Runs remain immutable, and Recent Capture behavior remains unchanged.
+Image generation remains a separate Gateway module using `image.primary`. Image models never enter the PI text provider collection or the text-SDK registry. It does not depend on text-Agent availability. The current Storage schema is v8: it preserves the image-generation conversations and durable placements introduced in v4, the original/derived image relationships introduced in v5, the later asset-lifecycle and project-resource additions, and the v8 text-Agent conversation and Skill tables. Image runs remain immutable, and Recent Capture behavior remains unchanged.
 
 ## Local Port Discovery
 
@@ -100,6 +102,6 @@ Browser code continues to use `/agent-api` and `/storage-api`; only launch/proxy
 ## Deferred
 
 - video media analysis;
-- durable pi session history;
+- full Skill package import, Codex publication, and MCP exposure;
 - production multi-user authentication;
 - broader script/storyboard proposal tools.

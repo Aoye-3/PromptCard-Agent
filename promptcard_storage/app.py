@@ -77,6 +77,26 @@ class RecentCaptureRegistrationPayload(BaseModel):
     prompt: dict[str, Any] | None = None
 
 
+class AgentConversationProjectPayload(BaseModel):
+    projectId: str
+
+
+class AgentConversationRenamePayload(AgentConversationProjectPayload):
+    title: str
+
+
+class AgentConversationTurnPayload(AgentConversationProjectPayload):
+    requestId: str
+    userMessage: dict[str, Any]
+    assistantMessage: dict[str, Any]
+    proposals: list[dict[str, Any]] = Field(default_factory=list)
+    skillSnapshots: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AgentProposalStatusPayload(AgentConversationProjectPayload):
+    status: str
+
+
 def create_app(storage: SqliteStore) -> FastAPI:
     application = FastAPI(title="PromptCard Storage", version="1.0.0")
 
@@ -248,6 +268,93 @@ def create_app(storage: SqliteStore) -> FastAPI:
     @application.get("/api/image-generation-conversations/{conversation_id}")
     def get_image_generation_conversation(conversation_id: str, projectId: str) -> dict[str, Any]:
         return _handle(lambda: storage.get_image_generation_conversation(conversation_id, projectId))
+
+    @application.post("/api/agent-conversations")
+    def create_agent_conversation(item: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.create_agent_conversation(item))
+
+    @application.get("/api/agent-conversations")
+    def list_agent_conversations(
+        projectId: str,
+        status: str = "active",
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.list_agent_conversations(projectId, status, cursor, limit))
+
+    @application.get("/api/agent-conversations/{conversation_id}")
+    def get_agent_conversation(
+        conversation_id: str,
+        projectId: str,
+        includeTrash: bool = False,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.get_agent_conversation(conversation_id, projectId, includeTrash))
+
+    @application.patch("/api/agent-conversations/{conversation_id}")
+    def rename_agent_conversation(
+        conversation_id: str,
+        payload: AgentConversationRenamePayload,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.rename_agent_conversation(conversation_id, payload.projectId, payload.title))
+
+    @application.post("/api/agent-conversations/{conversation_id}/turns")
+    def append_agent_conversation_turn(
+        conversation_id: str,
+        payload: AgentConversationTurnPayload,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.append_agent_conversation_turn(
+            conversation_id, payload.projectId, payload.model_dump(exclude={"projectId"})
+        ))
+
+    @application.patch("/api/agent-conversations/{conversation_id}/proposals/{proposal_id}")
+    def update_agent_proposal_status(
+        conversation_id: str,
+        proposal_id: str,
+        payload: AgentProposalStatusPayload,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.update_agent_proposal_status(
+            conversation_id, payload.projectId, proposal_id, payload.status
+        ))
+
+    @application.post("/api/agent-conversations/{conversation_id}/trash")
+    def trash_agent_conversation(
+        conversation_id: str,
+        payload: AgentConversationProjectPayload,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.trash_agent_conversation(conversation_id, payload.projectId))
+
+    @application.post("/api/agent-conversations/{conversation_id}/restore")
+    def restore_agent_conversation(
+        conversation_id: str,
+        payload: AgentConversationProjectPayload,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.restore_agent_conversation(conversation_id, payload.projectId))
+
+    @application.delete("/api/agent-conversations/{conversation_id}")
+    def delete_agent_conversation(
+        conversation_id: str,
+        payload: AgentConversationProjectPayload,
+    ) -> dict[str, bool]:
+        def delete() -> dict[str, bool]:
+            storage.delete_agent_conversation_forever(conversation_id, payload.projectId)
+            return {"ok": True}
+        return _handle(delete)
+
+    @application.get("/api/skills")
+    def list_skills() -> dict[str, Any]:
+        return storage.list_skills()
+
+    @application.post("/api/skills")
+    def create_skill(item: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.create_skill(item))
+
+    @application.get("/api/skills/{skill_id}")
+    def get_skill(skill_id: str) -> dict[str, Any]:
+        return _handle(lambda: storage.get_skill(skill_id))
+
+    @application.post("/api/skills/{skill_id}/revisions")
+    def add_skill_revision(skill_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        return _handle(lambda: storage.add_skill_revision(skill_id, item))
 
     @application.get("/api/image-generation-placements")
     def list_image_generation_placements(projectId: str, state: str | None = None) -> dict[str, Any]:

@@ -19,10 +19,23 @@ For text-Agent boundary changes, also run:
 
 ```powershell
 npm.cmd test -- --run text-agent-runtime/src/provider-runtime.test.ts text-agent-runtime/src/proposal-policy.test.ts src/services/agent-runtime-service.test.ts src/stores/agent.store.test.ts
+npm.cmd test -- --run src/components/agent/AgentConversationMenu.test.tsx src/components/skills/SkillHubScreen.test.tsx src/features/media/MediaScreen.test.tsx
+npm.cmd test -- --run src/components/agent/canvas-agent-composer-model.test.ts src/components/AgentCollaborationPanel.test.tsx src/components/canvas/FreeCanvasBuilderScreen.image-generation.test.tsx
 .\agent-runtime\backend\.venv\Scripts\python.exe -m pytest agent-runtime\backend\tests\test_promptcard_runtime_boundary.py agent-runtime\backend\tests\test_text_generation_providers.py -q -p no:cacheprovider
 ```
 
-Verify selected-text update, no-selection create, Prompt Library create-only approval, one-image media analysis, incompatible pi thread rejection, PI-native and SDK-backed provider registration, internal-route authentication, and continued Canvas/image-generation use while the pi service is unavailable. Confirm the text selector groups `PI 原生` and SDK families, while the image selector contains only image models. A live provider call is optional and must use an explicitly configured keyring credential.
+Verify all of the following boundaries:
+
+- A project conversation survives frontend, Gateway, and text Runtime restart, and reloaded replies can refer to prior durable context.
+- The same `requestId` does not duplicate messages or proposals, and a conversation cannot be read or continued from a different project, entrypoint, or mode.
+- Conversation rename, Trash, restore, and permanent-delete behavior uses the independent Agent lifecycle; permanent deletion cascades messages, proposals, and completed turns.
+- Prompt Library assistance and Media analysis do not appear in the project conversation list. Closing and reopening Media analysis produces an empty chat.
+- Ordinary Media chat does not create a preview. Explicit preview generation, selection-scoped rewrite confirmation, editable preview, and explicit Prompt registration preserve the source media relationship.
+- Canvas omnireference editing keeps one writable target and every other attached node read-only; `@` mentions cannot change those roles. Completion accepts only append, while rewrite accepts only a current user-text selection or the complete user part. Proposals preserve template segments and fail after node revision, template digest, user-content digest, or selected source text changes.
+- The correct first-party Skill revision is bound by Canvas and Media entrypoints. An external Skill affects only the next message, clears after send, and is rejected when its declared tools exceed the current permission scope.
+- PI-native and SDK-backed provider registration, internal-route authentication, and continued Canvas/image-generation use while the pi service is unavailable remain intact. The text selector groups `PI 原生` and SDK families, while the image selector contains only image models.
+
+A live provider call is optional and must use an explicitly configured keyring credential.
 
 For browser-facing changes, also smoke test the local app at:
 
@@ -53,7 +66,7 @@ The dedicated Playwright config covers the image-generation node and multi-view 
 
 Keep `TEMP`, `TMP`, Python/uv caches, `PLAYWRIGHT_BROWSERS_PATH`, and `CARGO_TARGET_DIR` on the current F: workspace when these commands need to provision caches. Set `PLAYWRIGHT_BROWSERS_PATH="$PWD\.playwright-browsers"` before any `npx.cmd playwright install`; normal test execution sets it through the runner. Always run the Storage gate with the explicit workspace `.venv` interpreter shown above; do not install `pillow_heif` globally to make a system Python pass. A live Ark smoke test must never be attempted without a user-configured keyring credential and explicit rollout enablement. Before production rollout, record Windows results for text-to-image, 2–10 reference images, smart edit, point, bbox, and visual-markup raster derivatives. Also verify standard/fast, 1K/2K, preset/custom size, PNG/JPEG, watermark, and Arabic/Japanese/German prompts. Record full-suite baseline failures separately from feature-focused failures.
 
-Current known non-feature gates are tracked in the [Seedream implementation status](../Plan/005-seedream-image-node-frontend-implementation-status.md): the Runtime full suite includes Windows/POSIX/live-credential environment failures, and repository ESLint has zero errors but exceeds its warning budget. Do not report either as an image-generation regression without reproducing it in the focused commands above.
+Current known non-feature gates are tracked in the [Seedream implementation status](../Plan/005-seedream-image-node-frontend-implementation-status.md): the Runtime full suite includes Windows/POSIX/live-credential environment failures. As of 2026-08-05, repository ESLint also reports the pre-existing `no-empty-pattern` error at `tests/e2e/free-canvas-multi-view.spec.ts:17` plus the existing warning budget. Do not report these as regressions from the text-Agent or image-generation changes without reproducing them in the focused commands above.
 
 Manual browser smoke testing is still useful when validating layout or copy. Start the local stack and use the `frontendUrl` in `logs/dev-runtime.json`.
 

@@ -8,6 +8,7 @@ import {
   createFreeCanvasImageGenerationPlaceholder,
   createFreeCanvasImageNodeFromMedia,
   createFreeCanvasProject,
+  createFreeCanvasTextNode,
   createQuickTextNode,
   freeCanvasTextSegmentsToPlainText,
   failFreeCanvasImageGeneration,
@@ -21,7 +22,9 @@ import {
   updateFreeCanvasImageNodeFrame,
   updateFreeCanvasNodePosition as updateFreeCanvasProjectNodePosition,
   updateFreeCanvasTextNodeStyle,
-  updateFreeCanvasTextNodeUserText
+  updateFreeCanvasTextNodeUserText,
+  renameFreeCanvasTextNode,
+  replaceFreeCanvasUserTextRange
 } from './free-canvas-project'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 
@@ -580,6 +583,27 @@ describe('free canvas project domain', () => {
     ])
   })
 
+  test('assigns stable TXT names and normalizes legacy Text titles', () => {
+    const created = createFreeCanvasTextNode('Prompt', { x: 20, y: 40 }, 100)
+    expect(created.title).toMatch(/^TXT-[A-Z0-9]{6}$/)
+
+    const normalized = createFreeCanvasProject(101, {
+      nodes: [{ ...created, id: 'free-text-stable-node', title: 'Text' }]
+    })
+    expect(normalized.nodes[0].title).toMatch(/^TXT-[A-Z0-9]{6}$/)
+    expect(normalized.nodes[0].title).toBe(createFreeCanvasProject(102, normalized).nodes[0].title)
+  })
+
+  test('renames text nodes while rejecting duplicate and @ names', () => {
+    const first = { ...createFreeCanvasTextNode('One', { x: 0, y: 0 }, 100), title: 'First' }
+    const second = { ...createFreeCanvasTextNode('Two', { x: 0, y: 0 }, 101), title: 'Second' }
+    const project = createFreeCanvasProject(102, { nodes: [first, second] })
+
+    expect(renameFreeCanvasTextNode(project, first.id, 'Hero prompt').nodes[0].title).toBe('Hero prompt')
+    expect(() => renameFreeCanvasTextNode(project, first.id, 'second')).toThrow('text_node_title_duplicate')
+    expect(() => renameFreeCanvasTextNode(project, first.id, '@hero')).toThrow('text_node_title_invalid')
+  })
+
   test('joins text node segments as visible plain text', () => {
     const node = createQuickTextNode('Template\nmessage', { x: 20, y: 40 }, 100)
     const project = appendFreeCanvasUserText(createFreeCanvasProject(100, { nodes: [node] }), node.id, '\nUser addition', 101)
@@ -600,6 +624,19 @@ describe('free canvas project domain', () => {
     expect(updated.nodes[0].segments).toEqual([
       expect.objectContaining({ source: 'preset', text: 'Locked template' }),
       expect.objectContaining({ source: 'user', text: 'Agent rewrite' })
+    ])
+  })
+
+  test('agent selection rewrite changes only the selected user range', () => {
+    const node = createQuickTextNode('Locked template', { x: 20, y: 40 }, 100)
+    const project = appendFreeCanvasUserText(createFreeCanvasProject(100, { nodes: [node] }), node.id, 'cold blue light', 101)
+
+    const updated = replaceFreeCanvasUserTextRange(project, node.id, { start: 0, end: 4 }, 'warm', 102)
+
+    if (updated.nodes[0].kind !== 'text') throw new Error('Expected text node')
+    expect(updated.nodes[0].segments).toEqual([
+      expect.objectContaining({ source: 'preset', text: 'Locked template' }),
+      expect.objectContaining({ source: 'user', text: 'warm blue light' })
     ])
   })
 

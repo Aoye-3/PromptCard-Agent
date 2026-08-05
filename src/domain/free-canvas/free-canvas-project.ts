@@ -56,10 +56,11 @@ export const createFreeCanvasTextNode = (
   source: 'preset' | 'user' = 'user'
 ): IFreeCanvasTextNode => {
   const trimmed = String(text || '')
+  const id = `free-text-${timestamp}-${Math.random().toString(36).slice(2, 8)}`
   return {
-    id: `free-text-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+    id,
     kind: 'text',
-    title: 'Text',
+    title: defaultFreeCanvasTextNodeTitle(id),
     position,
     width: 420,
     height: 180,
@@ -259,6 +260,61 @@ export const updateFreeCanvasTextNodeUserText = (
     createTextSegment(text, 'user', timestamp)
   ]
 })
+
+export const replaceFreeCanvasUserTextRange = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  range: { start: number; end: number },
+  insertedText: string,
+  timestamp = Date.now()
+): IFreeCanvasProject => {
+  const node = project.nodes.find((candidate): candidate is IFreeCanvasTextNode => (
+    candidate.id === nodeId && candidate.kind === 'text'
+  ))
+  if (!node) return project
+  const userText = freeCanvasUserText(node)
+  const start = clampNumber(range.start, 0, userText.length)
+  const end = clampNumber(Math.max(range.end, start), start, userText.length)
+  return updateFreeCanvasTextNodeUserText(
+    project,
+    nodeId,
+    `${userText.slice(0, start)}${insertedText}${userText.slice(end)}`,
+    'replace',
+    timestamp
+  )
+}
+
+export const renameFreeCanvasTextNode = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  title: string
+): IFreeCanvasProject => {
+  const normalizedTitle = String(title || '').trim()
+  if (!normalizedTitle || normalizedTitle.length > 32 || normalizedTitle.includes('@')) {
+    throw new Error('text_node_title_invalid')
+  }
+  const duplicate = project.nodes.some(node => (
+    node.kind === 'text'
+    && node.id !== nodeId
+    && node.title.trim().toLocaleLowerCase() === normalizedTitle.toLocaleLowerCase()
+  ))
+  if (duplicate) throw new Error('text_node_title_duplicate')
+  return {
+    ...project,
+    nodes: project.nodes.map(node => (
+      node.kind === 'text' && node.id === nodeId ? { ...node, title: normalizedTitle } : node
+    ))
+  }
+}
+
+export const defaultFreeCanvasTextNodeTitle = (nodeId: string): string => {
+  let hash = 2166136261
+  for (const character of String(nodeId || 'text')) {
+    hash ^= character.charCodeAt(0)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `TXT-${(hash >>> 0).toString(36).toUpperCase().padStart(6, '0').slice(-6)}`
+}
 
 export const replaceFreeCanvasTextRange = (
   project: IFreeCanvasProject,
@@ -654,7 +710,9 @@ const normalizeNode = (node: Partial<IFreeCanvasNode>, timestamp: number): IFree
   return {
     id: textNode.id || `free-text-${timestamp}`,
     kind: 'text',
-    title: textNode.title || 'Text',
+    title: !textNode.title || textNode.title === 'Text'
+      ? defaultFreeCanvasTextNodeTitle(textNode.id || `free-text-${timestamp}`)
+      : textNode.title,
     position: normalizePosition(textNode.position),
     width: Number(textNode.width || 420),
     height: Number(textNode.height || 180),

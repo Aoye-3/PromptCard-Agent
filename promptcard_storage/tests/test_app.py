@@ -192,6 +192,41 @@ class StorageAppContractTest(unittest.TestCase):
         self.assertEqual(payload["presets"][0]["meta"]["media"][0]["assetId"], asset["id"])
         self.assertEqual(payload["captures"][0]["registeredPromptId"], payload["presets"][0]["id"])
 
+    def test_agent_conversation_and_skill_hub_contracts(self) -> None:
+        self.client.post("/api/projects", json={
+            "id": "project-agent", "title": "Agent", "type": "free-canvas",
+            "pages": [], "currentPage": 0, "meta": {},
+        })
+        created = self.client.post("/api/agent-conversations", json={
+            "id": "conversation-1", "projectId": "project-agent",
+            "entrypoint": "workspace-chatbot-agent", "mode": "free-canvas",
+        })
+        turn = self.client.post("/api/agent-conversations/conversation-1/turns", json={
+            "projectId": "project-agent", "requestId": "request-1",
+            "userMessage": {"role": "user", "text": "Hello"},
+            "assistantMessage": {"role": "assistant", "text": "Hi"},
+        })
+        listed = self.client.get("/api/agent-conversations", params={"projectId": "project-agent"})
+        detail = self.client.get("/api/agent-conversations/conversation-1", params={"projectId": "project-agent"})
+        skills = self.client.get("/api/skills")
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(turn.status_code, 200)
+        self.assertEqual(listed.json()["conversations"][0]["id"], "conversation-1")
+        self.assertEqual(len(detail.json()["messages"]), 2)
+        self.assertEqual(len(skills.json()["skills"]), 2)
+
+        self.assertEqual(self.client.post(
+            "/api/agent-conversations/conversation-1/trash", json={"projectId": "project-agent"}
+        ).status_code, 200)
+        self.assertEqual(self.client.post(
+            "/api/agent-conversations/conversation-1/restore", json={"projectId": "project-agent"}
+        ).status_code, 200)
+        self.client.post("/api/agent-conversations/conversation-1/trash", json={"projectId": "project-agent"})
+        self.assertEqual(self.client.request(
+            "DELETE", "/api/agent-conversations/conversation-1", json={"projectId": "project-agent"}
+        ).json(), {"ok": True})
+
     def test_storage_artifact_contract_lists_trashes_restores_and_downloads(self) -> None:
         asset = self.client.post(
             "/api/assets",

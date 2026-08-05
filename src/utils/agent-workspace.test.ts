@@ -330,4 +330,27 @@ describe('agent workspace context', () => {
       ]
     })
   })
+
+  it('preserves authoritative Canvas text whitespace for selection digests', () => {
+    const node = {
+      id: 'text-authoritative', kind: 'text' as const, title: 'TXT-AUTH01',
+      position: { x: 0, y: 0 }, width: 360, height: 180, fontSize: 'large' as const,
+      segments: [
+        { id: 'preset', source: 'preset' as const, text: 'Template  spacing\n', color: '#ef4423', createdAt: 1, updatedAt: 1 },
+        { id: 'user', source: 'user' as const, text: '  User  spacing\nline  ', color: '#111827', createdAt: 2, updatedAt: 2 }
+      ],
+      meta: {}
+    }
+    const freeCanvas = { nodes: [node], edges: [], viewport: null, selectedNodeId: node.id, meta: {} }
+    const project = {
+      id: 'project-free', title: 'Canvas', type: 'free-canvas' as const, revision: 1,
+      pages: [], currentPage: 0, freeCanvas, createdAt: 1, updatedAt: 1, lastOpenedAt: 1, meta: {}
+    }
+
+    const context = buildFreeCanvasWorkspaceContext({ activeProject: project, freeCanvas })
+    const textNode = (context.snapshot.nodes as Array<Record<string, unknown>>)[0]
+
+    expect(textNode.presetText).toBe('Template  spacing\n')
+    expect(textNode.userText).toBe('  User  spacing\nline  ')
+  })
 })

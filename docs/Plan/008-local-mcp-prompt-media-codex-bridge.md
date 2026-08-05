@@ -127,7 +127,9 @@ The maintained runtime also has important boundaries that this plan preserves:
 - the pi text Agent has no direct filesystem, Storage, or Canvas write access;
 - current provider image generation is independent from text-Agent sessions.
 
-The current left navigation has no Skill Hub. `AgentDashboard` can display `skills` returned by the runtime catalog, but the maintained catalog currently returns `skills: []`; there is no canonical product store, import flow, revision model, trust review, or host publication contract. The existing repository `.agents/skills` directory is a development-time Codex discovery location, not yet a user-managed PromptCard Skill library.
+The current left navigation now includes a minimal SkillHub inspection surface. PromptCard Storage schema v8 owns stable local Skill identities, immutable revisions, digests, source and trust state, capability bindings, and declared Runtime tool dependencies. The catalog exposes this registry; Gateway supplies exact bounded snapshots to the local text Agent. `canvas-prompt-editor` and `media-prompt-reverse` are trusted first-party Skills bound by feature capability, while a user-selected external Skill affects only the next project message.
+
+This is a local-Agent vertical slice, not completion of the broader Phase 3 design. Folder/archive package import and validation, `SKL-*` public reference codes, lifecycle management, host enablement and pins, Codex native projection, MCP Skill resources, and script handling remain unimplemented. The existing repository `.agents/skills` directory remains a development-time Codex discovery location rather than the canonical product store.
 
 Codex-generated images must not be represented as successful Seedream or other provider generation runs. Their provenance is `codex-harness`, and delivery uses a separate additive asset path.
 
@@ -573,6 +575,16 @@ Additional rules:
 ### Phase 3: Skill Hub and Canonical Skill Registry
 
 **Goal:** Let users import and manage one versioned Skill source for Codex and the local Agent.
+
+**Implemented local-Agent slice (2026-08-05):**
+
+- [x] Added SkillHub to the global left sidebar with search, source filtering, and revision/trust/tool detail inspection.
+- [x] Added schema v8 local Skill and immutable revision storage with digest, source, trust state, capability, instructions, references, and declared tool dependencies.
+- [x] Added deterministic first-party capability binding and explicit one-shot external Skill selection for the local text Agent.
+- [x] Added Gateway snapshot audit and rejection when a Skill requires tools outside the current `permissionScope`.
+- [x] Kept scripts disabled and prevented Skill content from expanding tools, proposal types, or approval permissions.
+
+The following Phase 3 scope remains planned and is intentionally left unchecked below.
 
 - Add **Skill Hub** to the global left sidebar as a peer of Prompt Library and Agent Panel.
 - Add canonical `SKL` identity, immutable revisions, package digest, provenance, trust state, and host-specific publication state.

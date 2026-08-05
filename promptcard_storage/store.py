@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shutil
 import sqlite3
@@ -33,7 +34,7 @@ from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 DATABASE_NAME = "promptcard.sqlite3"
 JSON_SOURCES = (
     "projects.json",
@@ -137,8 +138,379 @@ class SqliteStore:
                 "imageGenerationPlacements": True,
                 "imageAssetDerivations": True,
                 "projectResources": True,
+                "agentConversations": True,
+                "skillHub": True,
             },
         }
+
+    def create_agent_conversation(self, item: dict[str, Any]) -> dict[str, Any]:
+        project_id = str(item.get("projectId") or "").strip()
+        if not project_id:
+            raise ValueError("Agent conversation projectId is required")
+        timestamp = now_ms()
+        conversation = {
+            "id": str(item.get("id") or uuid.uuid4()),
+            "projectId": project_id,
+            "entrypoint": str(item.get("entrypoint") or "workspace-chatbot-agent"),
+            "mode": str(item.get("mode") or "workspace"),
+            "title": str(item.get("title") or "New conversation").strip() or "New conversation",
+            "status": "active",
+            "createdAt": int(item.get("createdAt") or timestamp),
+            "updatedAt": int(item.get("updatedAt") or timestamp),
+            "deletedAt": None,
+        }
+        with self._transaction() as connection:
+            self._require_active_project(connection, project_id)
+            try:
+                connection.execute(
+                    """INSERT INTO agent_conversations(
+                           id, project_id, entrypoint, mode, title, status, created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
+                    (
+                        conversation["id"], project_id, conversation["entrypoint"],
+                        conversation["mode"], conversation["title"],
+                        conversation["createdAt"], conversation["updatedAt"],
+                    ),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateItem(conversation["id"]) from exc
+        return conversation
+
+    def list_agent_conversations(
+        self,
+        project_id: str,
+        status: str = "active",
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        if status not in {"active", "trash"}:
+            raise ValueError("Invalid agent conversation status")
+        normalized_limit = max(1, min(int(limit), 100))
+        clauses = ["project_id=?", "status=?"]
+        parameters: list[Any] = [project_id, status]
+        if cursor:
+            try:
+                cursor_updated_at, cursor_id = cursor.split(":", 1)
+                clauses.append("(updated_at < ? OR (updated_at = ? AND id < ?))")
+                parameters.extend([int(cursor_updated_at), int(cursor_updated_at), cursor_id])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Invalid agent conversation cursor") from exc
+        parameters.append(normalized_limit + 1)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"""SELECT id, project_id, entrypoint, mode, title, status,
+                           created_at, updated_at, deleted_at
+                    FROM agent_conversations
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY updated_at DESC, id DESC LIMIT ?""",
+                tuple(parameters),
+            ).fetchall()
+        items = [self._agent_conversation_summary(row) for row in rows[:normalized_limit]]
+        next_cursor = None
+        if len(rows) > normalized_limit and items:
+            next_cursor = f"{items[-1]['updatedAt']}:{items[-1]['id']}"
+        return {"conversations": items, "nextCursor": next_cursor}
+
+    def get_agent_conversation(
+        self,
+        conversation_id: str,
+        project_id: str,
+        include_trash: bool = False,
+    ) -> dict[str, Any]:
+        status_clause = "status IN ('active','trash')" if include_trash else "status='active'"
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""SELECT id, project_id, entrypoint, mode, title, status,
+                           created_at, updated_at, deleted_at
+                    FROM agent_conversations
+                    WHERE id=? AND project_id=? AND {status_clause}""",
+                (conversation_id, project_id),
+            ).fetchone()
+            if row is None:
+                raise MissingItem(conversation_id)
+            messages = [json.loads(item[0]) for item in connection.execute(
+                "SELECT payload_json FROM agent_conversation_messages WHERE conversation_id=? ORDER BY ordinal, created_at, id",
+                (conversation_id,),
+            )]
+            proposals = [json.loads(item[0]) for item in connection.execute(
+                "SELECT payload_json FROM agent_conversation_proposals WHERE conversation_id=? ORDER BY created_at, id",
+                (conversation_id,),
+            )]
+            turns = [json.loads(item[0]) for item in connection.execute(
+                "SELECT result_json FROM agent_conversation_turns WHERE conversation_id=? ORDER BY created_at, request_id",
+                (conversation_id,),
+            )]
+        return {**self._agent_conversation_summary(row), "messages": messages, "proposals": proposals, "turns": turns}
+
+    def rename_agent_conversation(self, conversation_id: str, project_id: str, title: str) -> dict[str, Any]:
+        normalized_title = title.strip()
+        if not normalized_title:
+            raise ValueError("Agent conversation title is required")
+        with self._transaction() as connection:
+            updated_at = now_ms()
+            result = connection.execute(
+                "UPDATE agent_conversations SET title=?, updated_at=? WHERE id=? AND project_id=? AND status='active'",
+                (normalized_title, updated_at, conversation_id, project_id),
+            )
+            if result.rowcount == 0:
+                raise MissingItem(conversation_id)
+        return self.get_agent_conversation(conversation_id, project_id)
+
+    def trash_agent_conversation(self, conversation_id: str, project_id: str) -> dict[str, Any]:
+        timestamp = now_ms()
+        with self._transaction() as connection:
+            result = connection.execute(
+                """UPDATE agent_conversations
+                   SET status='trash', deleted_at=?, updated_at=?
+                   WHERE id=? AND project_id=? AND status='active'""",
+                (timestamp, timestamp, conversation_id, project_id),
+            )
+            if result.rowcount == 0:
+                raise MissingItem(conversation_id)
+        return self.get_agent_conversation(conversation_id, project_id, include_trash=True)
+
+    def restore_agent_conversation(self, conversation_id: str, project_id: str) -> dict[str, Any]:
+        timestamp = now_ms()
+        with self._transaction() as connection:
+            result = connection.execute(
+                """UPDATE agent_conversations
+                   SET status='active', deleted_at=NULL, updated_at=?
+                   WHERE id=? AND project_id=? AND status='trash'""",
+                (timestamp, conversation_id, project_id),
+            )
+            if result.rowcount == 0:
+                raise MissingItem(conversation_id)
+        return self.get_agent_conversation(conversation_id, project_id)
+
+    def delete_agent_conversation_forever(self, conversation_id: str, project_id: str) -> None:
+        with self._transaction() as connection:
+            result = connection.execute(
+                "DELETE FROM agent_conversations WHERE id=? AND project_id=? AND status='trash'",
+                (conversation_id, project_id),
+            )
+            if result.rowcount == 0:
+                raise MissingItem(conversation_id)
+
+    def append_agent_conversation_turn(
+        self,
+        conversation_id: str,
+        project_id: str,
+        turn: dict[str, Any],
+    ) -> dict[str, Any]:
+        request_id = str(turn.get("requestId") or "").strip()
+        if not request_id:
+            raise ValueError("Agent conversation requestId is required")
+        with self._transaction() as connection:
+            existing = connection.execute(
+                "SELECT result_json FROM agent_conversation_turns WHERE conversation_id=? AND request_id=?",
+                (conversation_id, request_id),
+            ).fetchone()
+            if existing is not None:
+                return json.loads(existing[0])
+            conversation = connection.execute(
+                "SELECT 1 FROM agent_conversations WHERE id=? AND project_id=? AND status='active'",
+                (conversation_id, project_id),
+            ).fetchone()
+            if conversation is None:
+                raise MissingItem(conversation_id)
+            timestamp = now_ms()
+            current_ordinal = connection.execute(
+                "SELECT COALESCE(MAX(ordinal), 0) FROM agent_conversation_messages WHERE conversation_id=?",
+                (conversation_id,),
+            ).fetchone()[0]
+            saved_messages: list[dict[str, Any]] = []
+            for offset, key in enumerate(("userMessage", "assistantMessage"), start=1):
+                message = turn.get(key)
+                if not isinstance(message, dict):
+                    continue
+                saved = {
+                    **message,
+                    "id": str(message.get("id") or uuid.uuid4()),
+                    "createdAt": int(message.get("createdAt") or timestamp),
+                }
+                connection.execute(
+                    """INSERT INTO agent_conversation_messages(
+                           id, conversation_id, request_id, ordinal, role, created_at, payload_json
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        saved["id"], conversation_id, request_id, current_ordinal + offset,
+                        str(saved.get("role") or "assistant"), saved["createdAt"], _json(saved),
+                    ),
+                )
+                saved_messages.append(saved)
+            saved_proposals: list[dict[str, Any]] = []
+            for proposal in turn.get("proposals") or []:
+                saved = {
+                    **proposal,
+                    "id": str(proposal.get("id") or uuid.uuid4()),
+                    "status": str(proposal.get("status") or "pending"),
+                    "createdAt": int(proposal.get("createdAt") or timestamp),
+                }
+                connection.execute(
+                    """INSERT INTO agent_conversation_proposals(
+                           id, conversation_id, request_id, message_id, status, created_at, payload_json
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        saved["id"], conversation_id, request_id,
+                        saved_messages[-1]["id"] if saved_messages else None,
+                        saved["status"], saved["createdAt"], _json(saved),
+                    ),
+                )
+                saved_proposals.append(saved)
+            result = {
+                "requestId": request_id,
+                "messages": saved_messages,
+                "proposals": saved_proposals,
+                "skillSnapshots": list(turn.get("skillSnapshots") or []),
+                "createdAt": timestamp,
+            }
+            connection.execute(
+                "INSERT INTO agent_conversation_turns(conversation_id, request_id, created_at, result_json) VALUES (?, ?, ?, ?)",
+                (conversation_id, request_id, timestamp, _json(result)),
+            )
+            connection.execute(
+                "UPDATE agent_conversations SET updated_at=? WHERE id=?",
+                (timestamp, conversation_id),
+            )
+        return result
+
+    def update_agent_proposal_status(
+        self,
+        conversation_id: str,
+        project_id: str,
+        proposal_id: str,
+        status: str,
+    ) -> dict[str, Any]:
+        if status not in {"approved", "rejected"}:
+            raise ValueError("Invalid agent proposal status")
+        with self._transaction() as connection:
+            row = connection.execute(
+                """SELECT proposal.payload_json
+                   FROM agent_conversation_proposals AS proposal
+                   JOIN agent_conversations AS conversation ON conversation.id=proposal.conversation_id
+                   WHERE proposal.id=? AND proposal.conversation_id=? AND conversation.project_id=? AND conversation.status='active'""",
+                (proposal_id, conversation_id, project_id),
+            ).fetchone()
+            if row is None:
+                raise MissingItem(proposal_id)
+            proposal = {**json.loads(row[0]), "status": status}
+            connection.execute(
+                "UPDATE agent_conversation_proposals SET status=?, payload_json=? WHERE id=?",
+                (status, _json(proposal), proposal_id),
+            )
+        return proposal
+
+    def list_skills(self) -> dict[str, Any]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """SELECT skill.id, skill.slug, skill.name, skill.description, skill.source,
+                          skill.trust_state, skill.capability_id, skill.tool_dependencies_json,
+                          revision.revision, revision.digest
+                   FROM skills AS skill
+                   JOIN skill_revisions AS revision
+                     ON revision.skill_id=skill.id AND revision.revision=skill.current_revision
+                   ORDER BY skill.name, skill.id"""
+            ).fetchall()
+        return {"skills": [self._skill_summary(row) for row in rows]}
+
+    def get_skill(self, skill_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT id, slug, name, description, source, trust_state, capability_id,
+                          tool_dependencies_json, current_revision
+                   FROM skills WHERE id=?""",
+                (skill_id,),
+            ).fetchone()
+            if row is None:
+                raise MissingItem(skill_id)
+            revisions = [
+                {
+                    "revision": revision[0], "digest": revision[1],
+                    "instructions": revision[2], "references": json.loads(revision[3]),
+                    "createdAt": revision[4],
+                }
+                for revision in connection.execute(
+                    """SELECT revision, digest, instructions, references_json, created_at
+                       FROM skill_revisions WHERE skill_id=? ORDER BY revision DESC""",
+                    (skill_id,),
+                )
+            ]
+        return {
+            "id": row[0], "slug": row[1], "name": row[2], "description": row[3],
+            "source": row[4], "trustState": row[5], "capabilityId": row[6],
+            "toolDependencies": json.loads(row[7]), "currentRevision": row[8],
+            "revisions": revisions,
+        }
+
+    def create_skill(self, item: dict[str, Any]) -> dict[str, Any]:
+        source = str(item.get("source") or "external")
+        if source != "external":
+            raise ValueError("Only external Skills can be created through the registry API")
+        instructions = str(item.get("instructions") or "").strip()
+        if not instructions:
+            raise ValueError("Skill instructions are required")
+        references = list(item.get("references") or [])
+        skill_id = str(item.get("id") or f"SKL-{uuid.uuid4()}")
+        slug = str(item.get("slug") or "").strip()
+        name = str(item.get("name") or "").strip()
+        if not slug or not name:
+            raise ValueError("Skill slug and name are required")
+        timestamp = now_ms()
+        digest = _skill_digest(instructions, references)
+        with self._transaction() as connection:
+            try:
+                connection.execute(
+                    """INSERT INTO skills(
+                           id, slug, name, description, source, trust_state, capability_id,
+                           tool_dependencies_json, current_revision, created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, 'external', ?, NULL, ?, 1, ?, ?)""",
+                    (
+                        skill_id, slug, name, str(item.get("description") or ""),
+                        str(item.get("trustState") or "untrusted"),
+                        _json(list(item.get("toolDependencies") or [])), timestamp, timestamp,
+                    ),
+                )
+                connection.execute(
+                    """INSERT INTO skill_revisions(
+                           skill_id, revision, digest, instructions, references_json, created_at
+                       ) VALUES (?, 1, ?, ?, ?, ?)""",
+                    (skill_id, digest, instructions, _json(references), timestamp),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateItem(skill_id) from exc
+        return self.get_skill(skill_id)
+
+    def add_skill_revision(self, skill_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        instructions = str(item.get("instructions") or "").strip()
+        if not instructions:
+            raise ValueError("Skill instructions are required")
+        references = list(item.get("references") or [])
+        digest = _skill_digest(instructions, references)
+        timestamp = now_ms()
+        with self._transaction() as connection:
+            row = connection.execute(
+                "SELECT source, current_revision FROM skills WHERE id=?",
+                (skill_id,),
+            ).fetchone()
+            if row is None:
+                raise MissingItem(skill_id)
+            if row[0] != "external":
+                raise ValueError("Builtin Skill revisions are managed by the application")
+            next_revision = int(row[1]) + 1
+            try:
+                connection.execute(
+                    """INSERT INTO skill_revisions(
+                           skill_id, revision, digest, instructions, references_json, created_at
+                       ) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (skill_id, next_revision, digest, instructions, _json(references), timestamp),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise DuplicateItem(digest) from exc
+            connection.execute(
+                "UPDATE skills SET current_revision=?, updated_at=? WHERE id=?",
+                (next_revision, timestamp, skill_id),
+            )
+        return self.get_skill(skill_id)
 
     def list_projects(self) -> list[dict[str, Any]]:
         with self._connect() as connection:
@@ -629,13 +1001,14 @@ class SqliteStore:
                 if not label or not content:
                     raise ValueError("Prompt label and content are required")
                 preset_type = str(prompt_input.get("type") or _default_prompt_type([captures[index] for index in capture_indexes]))
+                preset_category = str(prompt_input.get("category") or preset_type).strip() or preset_type
                 preset_id = f"preset-capture-{uuid.uuid4().hex}"
                 grouped_captures = [captures[index] for index in capture_indexes]
                 grouped_assets = [assets[index] for index in capture_indexes]
                 created = normalize_preset({
                     "id": preset_id,
                     "type": preset_type,
-                    "category": preset_type,
+                    "category": preset_category,
                     "label": label,
                     "content": content,
                     "usageCount": 0,
@@ -1876,8 +2249,24 @@ class SqliteStore:
                 except Exception:
                     connection.rollback()
                     raise
+            if current_version == 7:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._create_agent_conversations_v8_schema(connection)
+                    self._seed_builtin_skills(connection)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                        (8, "add-agent-conversations-and-skills", now_ms()),
+                    )
+                    connection.commit()
+                    current_version = 8
+                except Exception:
+                    connection.rollback()
+                    raise
             if current_version != SCHEMA_VERSION:
                 raise MigrationError(f"Unsupported SQLite schema version: {current_version}")
+            self._seed_builtin_skills(connection)
+            connection.commit()
 
     def _create_schema(self, connection: sqlite3.Connection) -> None:
         connection.executescript("""
@@ -1910,6 +2299,165 @@ class SqliteStore:
         self._create_image_generation_v4_schema(connection)
         self._create_image_asset_derivations_v5_schema(connection)
         self._create_project_resources_v7_schema(connection)
+        self._create_agent_conversations_v8_schema(connection)
+
+    def _create_agent_conversations_v8_schema(self, connection: sqlite3.Connection) -> None:
+        connection.executescript("""
+            CREATE TABLE IF NOT EXISTS agent_conversations(
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+                entrypoint TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                title TEXT NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('active','trash')),
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                deleted_at INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS agent_conversations_project_status_order
+                ON agent_conversations(project_id, status, updated_at DESC, id DESC);
+            CREATE TABLE IF NOT EXISTS agent_conversation_turns(
+                conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+                request_id TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                result_json TEXT NOT NULL,
+                PRIMARY KEY(conversation_id, request_id)
+            );
+            CREATE TABLE IF NOT EXISTS agent_conversation_messages(
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+                request_id TEXT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                role TEXT NOT NULL CHECK(role IN ('user','assistant','system','tool')),
+                created_at INTEGER NOT NULL,
+                payload_json TEXT NOT NULL,
+                UNIQUE(conversation_id, ordinal)
+            );
+            CREATE INDEX IF NOT EXISTS agent_conversation_messages_order
+                ON agent_conversation_messages(conversation_id, ordinal, created_at, id);
+            CREATE TABLE IF NOT EXISTS agent_conversation_proposals(
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES agent_conversations(id) ON DELETE CASCADE,
+                request_id TEXT NOT NULL,
+                message_id TEXT REFERENCES agent_conversation_messages(id) ON DELETE SET NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')),
+                created_at INTEGER NOT NULL,
+                payload_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS agent_conversation_proposals_order
+                ON agent_conversation_proposals(conversation_id, created_at, id);
+            CREATE TABLE IF NOT EXISTS skills(
+                id TEXT PRIMARY KEY,
+                slug TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                source TEXT NOT NULL CHECK(source IN ('builtin','external')),
+                trust_state TEXT NOT NULL CHECK(trust_state IN ('first-party','trusted','untrusted')),
+                capability_id TEXT,
+                tool_dependencies_json TEXT NOT NULL,
+                current_revision INTEGER NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS skill_revisions(
+                skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+                revision INTEGER NOT NULL,
+                digest TEXT NOT NULL,
+                instructions TEXT NOT NULL,
+                references_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                PRIMARY KEY(skill_id, revision),
+                UNIQUE(skill_id, digest)
+            );
+        """)
+
+    def _seed_builtin_skills(self, connection: sqlite3.Connection) -> None:
+        builtins = (
+            {
+                "id": "SKL-canvas-prompt-editor",
+                "slug": "canvas-prompt-editor",
+                "name": "Canvas Prompt Editor",
+                "description": "Analyzes the full Canvas prompt while changing only the user-authored segment.",
+                "capability": "canvas.prompt.edit",
+                "tools": ["emit_canvas_text_update"],
+                "current_revision": 2,
+                "revisions": (
+                    (
+                        1,
+                        "Analyze every prompt segment. Segments with source=preset are protected template context. "
+                        "Never rewrite or reproduce protected segments as a mutation. Use emit_canvas_text_update "
+                        "only for the complete replacement userText. Explain conflicts instead of changing templates.",
+                    ),
+                    (
+                        2,
+                        "Analyze the complete prompt block and the source of every segment. Treat template segments "
+                        "and every reference node as read-only context. Edit only the bound target node by using "
+                        "emit_canvas_text_update with the edit mode supplied by the runtime: append adds a new user "
+                        "segment without changing existing content; rewrite_all replaces only the target userText; "
+                        "rewrite_selection replaces only the validated selection. Never change a template, a reference "
+                        "node, the target node id, or the requested edit mode. Explain any conflict instead of bypassing "
+                        "these constraints. This Skill cannot expand permissions, tools, proposal types, or approval rights.",
+                    ),
+                ),
+            },
+            {
+                "id": "SKL-media-prompt-reverse",
+                "slug": "media-prompt-reverse",
+                "name": "Media Prompt Reverse",
+                "description": "Discusses one selected media item and creates an explicit Prompt preview on request.",
+                "capability": "media.prompt.reverse",
+                "tools": ["emit_media_prompt_preview"],
+                "current_revision": 1,
+                "revisions": (
+                    (
+                        1,
+                        "Discuss only the explicitly selected media item. Do not create a preview during ordinary chat. "
+                        "Use emit_media_prompt_preview only when the user explicitly requests generate or update preview. "
+                        "A selection rewrite must return a replacement candidate and never apply it automatically.",
+                    ),
+                ),
+            },
+        )
+        timestamp = now_ms()
+        for skill in builtins:
+            connection.execute(
+                """INSERT OR IGNORE INTO skills(
+                       id, slug, name, description, source, trust_state, capability_id,
+                       tool_dependencies_json, current_revision, created_at, updated_at
+                   ) VALUES (?, ?, ?, ?, 'builtin', 'first-party', ?, ?, ?, ?, ?)""",
+                (
+                    skill["id"], skill["slug"], skill["name"], skill["description"],
+                    skill["capability"], _json(skill["tools"]), skill["current_revision"],
+                    timestamp, timestamp,
+                ),
+            )
+            for revision, instructions in skill["revisions"]:
+                digest = "sha256:" + hashlib.sha256(instructions.encode("utf-8")).hexdigest()
+                connection.execute(
+                    """INSERT OR IGNORE INTO skill_revisions(
+                           skill_id, revision, digest, instructions, references_json, created_at
+                       ) VALUES (?, ?, ?, ?, '[]', ?)""",
+                    (skill["id"], revision, digest, instructions, timestamp),
+                )
+            connection.execute(
+                """UPDATE skills SET current_revision=?, updated_at=?
+                   WHERE id=? AND source='builtin' AND current_revision<>?""",
+                (skill["current_revision"], timestamp, skill["id"], skill["current_revision"]),
+            )
+
+    def _agent_conversation_summary(self, row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
+        return {
+            "id": row[0], "projectId": row[1], "entrypoint": row[2], "mode": row[3],
+            "title": row[4], "status": row[5], "createdAt": row[6],
+            "updatedAt": row[7], "deletedAt": row[8],
+        }
+
+    def _skill_summary(self, row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
+        return {
+            "id": row[0], "slug": row[1], "name": row[2], "description": row[3],
+            "source": row[4], "trustState": row[5], "capabilityId": row[6],
+            "toolDependencies": json.loads(row[7]), "revision": row[8], "digest": row[9],
+        }
 
     def _migrate_asset_lifecycle_v6(self, connection: sqlite3.Connection) -> None:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(assets)")}
@@ -2390,6 +2938,16 @@ def _ensure_unique_ids(items: list[dict[str, Any]], label: str) -> None:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _skill_digest(instructions: str, references: list[dict[str, Any]]) -> str:
+    canonical = json.dumps(
+        {"instructions": instructions, "references": references},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _legacy_image_conversation_id(project_id: str, node_id: str) -> str:

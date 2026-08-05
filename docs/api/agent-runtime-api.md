@@ -31,13 +31,18 @@ Creates the process-local PromptCard browser session and sets the HttpOnly runti
 
 ### `GET /agent-api/promptcard/runtime/catalog`
 
-Returns the focused text-Agent catalog. The current tool surface contains Prompt Library search plus proposal emitters; generic skills and subagents are disabled.
+Returns the focused text-Agent catalog. The current tool surface contains Prompt Library search, Canvas/Prompt proposal emitters, and the media Prompt preview emitter. `skills` is populated from the Storage Skill registry with revision, digest, source, trust state, capability, and tool dependencies. Subagents remain disabled.
 
 ```json
 {
   "models": [],
-  "skills": [],
-  "tools": [],
+  "skills": [
+    { "id": "SKL-canvas-prompt-editor", "revision": 2, "source": "builtin", "trustState": "first-party" }
+  ],
+  "tools": [
+    { "name": "search_prompt_library" },
+    { "name": "emit_media_prompt_preview" }
+  ],
   "builtins": [],
   "subagentEnabled": false,
   "agents": [{ "id": "promptcard-text-agent", "name": "PromptCard Text Agent" }]
@@ -324,12 +329,28 @@ Request:
 
 ```json
 {
-  "threadId": "optional-existing-thread",
+  "conversationId": "persistent-project-conversation",
+  "requestId": "client-generated-idempotency-key",
   "content": "User message",
   "mode": "free-canvas",
   "permissionScope": "workspace-chatbot-agent",
-  "sessionKey": "workspace:canvas:project",
   "projectId": "project",
+  "selectedSkillIds": ["SKL-external-example"],
+  "canvasNodeContext": {
+    "mode": "rewrite",
+    "targetNodeId": "text-node-1",
+    "referenceNodeIds": ["text-node-2"],
+    "mentions": [
+      { "nodeId": "text-node-1", "label": "TXT-A1B2C3" },
+      { "nodeId": "text-node-2", "label": "构图参考" }
+    ],
+    "selection": {
+      "start": 0,
+      "end": 4,
+      "selectedText": "cold",
+      "baseContentDigest": "sha256:..."
+    }
+  },
   "workspaceContext": {
     "contextId": "canvas:project",
     "mode": "free-canvas",
@@ -340,6 +361,11 @@ Request:
       "selectedNode": {
         "id": "text-node-1",
         "kind": "text",
+        "revision": 1770000000000,
+        "segments": [
+          { "id": "preset-1", "source": "preset", "text": "protected template" },
+          { "id": "user-1", "source": "user", "text": "existing prompt" }
+        ],
         "userText": "existing prompt"
       }
     }
@@ -352,23 +378,76 @@ Response:
 
 ```json
 {
-  "threadId": "runtime-thread-id",
+  "threadId": "persistent-project-conversation",
+  "conversationId": "persistent-project-conversation",
+  "requestId": "client-generated-idempotency-key",
   "text": "assistant text",
-  "proposals": [],
+  "proposals": [
+    {
+      "kind": "free_canvas_text_update",
+      "nodeId": "text-node-1",
+      "editMode": "rewrite_selection",
+      "userText": "warm",
+      "selection": { "start": 0, "end": 4, "selectedText": "cold" },
+      "baseNodeRevision": 1770000000000,
+      "templateDigest": "sha256:...",
+      "baseContentDigest": "sha256:...",
+      "status": "pending"
+    }
+  ],
   "diagnostics": { "proposalCount": 0 }
 }
 ```
 
 Current proposal behavior:
 
-- `workspace-chatbot-agent` with one selected text node may return only `free_canvas_text_update` for that exact node.
-- `workspace-chatbot-agent` without a selected text node may return only `free_canvas_text_create`.
+- `canvasNodeContext` may attach at most ten unique text nodes. It has at most one writable target; every `referenceNodeId` is read-only. Mention IDs must be part of that attached set.
+- With `mode: complete`, the Gateway accepts only `editMode: append`; `userText` is new content appended as a separate user segment and cannot replace existing content.
+- With `mode: rewrite`, a valid selection accepts only `rewrite_selection`; without a selection it accepts only `rewrite_all` for the target's complete `userText`.
+- With `mode: prompt-library`, `targetNodeId` must be `null`. The Gateway exposes only `search_prompt_library` for this Canvas mode and rejects every Canvas creation or update proposal.
+- Without an explicit target, ordinary discussion remains available but all Canvas mutation proposals are rejected.
 - `prompt-library-agent` may return only additive `prompt_library_write_proposal` records.
 - All proposals remain pending until the frontend user selects Apply or Reject.
+- A Canvas update can change only the explicit target's user-authored content; preset/template content and reference nodes are never writable through the tool schema.
+- The Gateway resolves node bodies from the current project snapshot and attaches the current node revision, template digest, and user-content digest. The frontend rechecks all three plus selected source text before applying a proposal.
 
-New PromptCard UI calls must include `sessionKey`. pi keeps bounded process-local message history and rejects an existing `threadId` when its `sessionKey`, `projectId`, or `mode` conflicts with the new request.
+Persistent project calls use `conversationId + requestId`. The Gateway loads up to 40 normalized messages from PromptCard Storage, validates the conversation's project, entrypoint, and mode, invokes the stateless Node runtime, and stores the new turn. Retrying the same `requestId` for the same conversation returns the stored turn instead of appending duplicates.
+
+`selectedSkillIds` accepts at most eight external Skill IDs. These selections affect only this request. The Gateway also binds the built-in Canvas Skill by capability, resolves immutable revisions, records `skillId + revision + digest`, and rejects any selected Skill whose declared tool dependencies exceed the request's allowed tool set.
 
 The Python Gateway validates the browser request and returned proposals. The pi runtime owns prompt orchestration, the PI provider collection, and proposal tools. At Agent construction time it resolves the non-secret `chat.primary` descriptor. PI-native models use PI's API implementation through the credential-injecting Gateway proxy; SDK-backed models use the Gateway text-SDK registry. Provider credentials never enter the Node process.
+
+#### Explicit Prompt Library lookup
+
+Prompt Library access is opt-in per request. A normal project Agent request, including `complete` and `rewrite`, sends `promptLibrary: []`; the Runtime does not inject the library into model context and does not expose `search_prompt_library`. To perform a read-only lookup from the Canvas Agent, the browser sends:
+
+```json
+{
+  "permissionScope": "workspace-chatbot-agent",
+  "canvasNodeContext": {
+    "mode": "prompt-library",
+    "targetNodeId": null,
+    "referenceNodeIds": [],
+    "mentions": []
+  },
+  "promptLibrary": [
+    {
+      "id": "preset-1",
+      "type": "style",
+      "category": "cinematic",
+      "label": "Cool industrial light",
+      "content": "Hard directional light with cool highlights.",
+      "meta": {
+        "media": [{ "assetId": "asset-1", "captureId": "capture-1" }]
+      }
+    }
+  ]
+}
+```
+
+The browser includes at most 200 Prompt records, and request validation rejects larger arrays. The stateless pi Runtime narrows an accepted snapshot to the first 100 records. Search covers Prompt labels and content and returns the matching records with their supplied metadata, including linked `meta.media`; it is not authorization to load other assets or records. In this mode `allowedProposalKinds` is empty, so a successful response has no Canvas write target or Canvas proposal.
+
+The embedded Canvas client renders Runtime validation failures as a visible summary rather than hiding the original failure behind a generic disconnected state. Prompt Library length failures are summarized as `Prompt Library 条目超过上限（实际数量/上限）`; other validation text is whitespace-normalized and limited to 240 characters.
 
 ### `POST /agent-api/promptcard/runtime/media-analysis`
 
@@ -376,15 +455,27 @@ Request:
 
 ```json
 {
-  "threadId": "optional-existing-thread",
   "assetId": "selected-media-asset",
   "contentType": "image/png",
-  "analysisType": "style",
-  "content": ""
+  "analysisType": "freeform",
+  "content": "Discuss the lighting before producing a prompt.",
+  "history": [
+    { "role": "user", "text": "Focus on the hard-surface design." },
+    { "role": "assistant", "text": "The image uses cool industrial lighting." }
+  ],
+  "mediaAction": "chat",
+  "mediaPreview": null,
+  "selection": null
 }
 ```
 
-`analysisType` is `style`, `freeform`, or `prompt`. The Gateway loads exactly the requested asset from PromptCard Storage, accepts image content only, limits the asset to 30 MiB, and sends one image attachment through pi to the assigned multimodal text provider. The response has the same `threadId`, `text`, `proposals`, and `diagnostics` shape as `/messages`, but media analysis returns no mutation proposals.
+`analysisType` remains `style`, `freeform`, or `prompt` for compatibility. `mediaAction` is `chat`, `preview`, or `selection-rewrite`. The Gateway bounds history to 40 messages, reloads exactly the requested asset from PromptCard Storage on every request, accepts image content only, limits the asset to 30 MiB, and sends one image attachment through pi to the assigned multimodal text provider.
+
+- `chat` returns discussion text and no structured Prompt proposal.
+- `preview` permits one `media_prompt_preview` proposal containing editable `label`, `type`, `category`, `content`, and rationale.
+- `selection-rewrite` receives the current preview plus `{ start, end, text }` and returns a replacement candidate. The frontend applies it only after confirmation.
+
+Media history is deliberately ephemeral and has no `conversationId`. Closing the dialog discards it. Writing a preview to Prompt Library uses the Storage Recent Capture registration endpoint; this Runtime route never writes a preset directly.
 
 Video analysis is not part of the current API behavior.
 

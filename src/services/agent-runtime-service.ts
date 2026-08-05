@@ -5,6 +5,7 @@ import type {
   AgentSkillInfo,
   AgentToolInfo,
   AgentWorkspaceProposal,
+  CanvasAgentNodeContext,
   PromptLibraryWriteProposal
 } from '@/models/Agent.model'
 
@@ -133,6 +134,8 @@ export const agentRuntimeService = {
 
   sendMessage: (body: {
     threadId?: string
+    conversationId?: string
+    requestId?: string
     content: string
     mode?: string
     permissionScope?: AgentPermissionScope
@@ -140,9 +143,13 @@ export const agentRuntimeService = {
     projectId?: string
     workspaceContext?: unknown
     promptLibrary?: Array<Record<string, unknown>>
+    selectedSkillIds?: string[]
+    canvasNodeContext?: CanvasAgentNodeContext
   }) =>
     requestJson<{
       threadId: string
+      conversationId?: string
+      requestId?: string
       text: string
       proposals: AgentWorkspaceProposal[]
       diagnostics?: Record<string, unknown>
@@ -161,6 +168,10 @@ export const agentRuntimeService = {
     contentType: string
     analysisType: 'style' | 'freeform' | 'prompt'
     content: string
+    history?: Array<{ role: 'user' | 'assistant'; text: string }>
+    mediaAction?: 'chat' | 'preview' | 'selection-rewrite'
+    mediaPreview?: Record<string, unknown> | null
+    selection?: { start: number; end: number; text: string } | null
   }) =>
     requestJson<{
       threadId: string
@@ -231,7 +242,7 @@ export function parseAgentWorkspaceProposals(
   const seenProposalIds = new Set<string>()
   const jsonCandidates = [
     ...text.matchAll(/```json\s*([\s\S]*?)```/gi),
-    ...text.matchAll(/(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|free_canvas_text_update|free_canvas_text_create)"[\s\S]*\})/gi)
+    ...text.matchAll(/(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|free_canvas_text_update|free_canvas_text_create|media_prompt_preview)"[\s\S]*\})/gi)
   ].map(match => match[1])
 
   for (const candidate of jsonCandidates) {
@@ -348,12 +359,43 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
   }
 
   if (kind === 'free_canvas_text_update' && proposal.nodeId && typeof proposal.userText === 'string') {
+    const editMode = proposal.editMode === 'append' || proposal.editMode === 'rewrite_selection'
+      ? proposal.editMode
+      : 'rewrite_all'
+    const selection = editMode === 'rewrite_selection'
+      && Number.isFinite(Number(proposal.selection?.start))
+      && Number.isFinite(Number(proposal.selection?.end))
+      && typeof proposal.selection?.selectedText === 'string'
+      ? {
+          start: Number(proposal.selection.start),
+          end: Number(proposal.selection.end),
+          selectedText: proposal.selection.selectedText
+        }
+      : undefined
     return {
       ...base,
       kind: 'free_canvas_text_update',
       nodeId: String(proposal.nodeId),
-      mode: proposal.mode === 'append' ? 'append' : 'replace',
-      userText: String(proposal.userText)
+      editMode,
+      userText: String(proposal.userText),
+      selection,
+      baseNodeRevision: Number.isFinite(Number(proposal.baseNodeRevision)) ? Number(proposal.baseNodeRevision) : undefined,
+      templateDigest: typeof proposal.templateDigest === 'string' ? proposal.templateDigest : undefined,
+      baseContentDigest: typeof proposal.baseContentDigest === 'string' ? proposal.baseContentDigest : undefined
+    }
+  }
+
+  if (kind === 'media_prompt_preview' && proposal.previewDraft?.label && proposal.previewDraft?.content) {
+    return {
+      ...base,
+      kind: 'media_prompt_preview',
+      previewDraft: {
+        ...proposal.previewDraft,
+        type: isKnownCardType(proposal.previewDraft.type) ? proposal.previewDraft.type : 'custom',
+        category: String(proposal.previewDraft.category || 'media').trim() || 'media',
+        label: String(proposal.previewDraft.label).trim(),
+        content: String(proposal.previewDraft.content).trim()
+      }
     }
   }
 

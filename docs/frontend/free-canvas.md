@@ -206,12 +206,15 @@ all bounded nodes, edges, and text fields split into:
 
 Builder chatboxes remain workspace scoped and do not grant Prompt Library write permissions.
 
-The current pi policy is selection-driven:
+The current pi policy is attachment- and role-driven:
 
-- one selected text node permits only an update proposal for that exact node ID;
-- no selected text node permits only a new text-node proposal;
-- a selected non-text node does not grant mutation access to that node;
-- every proposal requires explicit Apply or Reject.
+- **补全** on a text node attaches it as the single writable target; **发送到 Agent** attaches it as a read-only reference;
+- the Agent composer displays up to ten full node labels, with the target first, and supports atomic `@` references to attached nodes;
+- completion can only append a new user segment; rewrite can replace a validated user-text selection or the complete user part;
+- template segments and reference nodes are always read-only, and explicit context without a target is discussion-only;
+- every proposal requires explicit Apply or Reject and passes revision/template/content freshness checks before application.
+
+The complete interaction and request contract is maintained in [Canvas Agent Omnireference Prompt Editing](./canvas-agent-reference-editing.md).
 
 ## Right Panel Prompt Library Preview
 
@@ -282,8 +285,8 @@ node, adding images by toolbar/drag/paste, resizing a single selected image, ope
 annotation editor, verifying mode-filtered annotation editing, checking that modal `Delete` never
 deletes the image node, confirming arrow/freehand gestures stop on pointer release, cropping an
 image from each edge direction, connecting nodes, switching the side panel between Agent and
-Prompt library preview, approving or rejecting a `free_canvas_text_update` proposal, and creating a
-`free_canvas_text_create` proposal when no text node is selected.
+Prompt library preview, renaming a text node, attaching target/reference labels, inserting `@`
+mentions, and approving or rejecting append, whole-part rewrite, and selection rewrite proposals.
 
 Quick-message manual checks should confirm the drawer and lightweight dialog have no note field,
 and that clicking a quick message inserts only a red preset text node even when the preset has

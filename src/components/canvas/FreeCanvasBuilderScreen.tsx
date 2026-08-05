@@ -59,10 +59,15 @@ import {
   createFreeCanvasImageAnnotation,
   createFreeCanvasTextNode,
   createQuickTextNode,
+  appendFreeCanvasUserText,
+  freeCanvasPresetText,
   freeCanvasTextSegmentsToPlainText,
+  freeCanvasUserText,
   completeFreeCanvasImageGeneration,
   failFreeCanvasImageGeneration,
   isRunningFreeCanvasImageGeneration,
+  renameFreeCanvasTextNode,
+  replaceFreeCanvasUserTextRange,
   replaceFreeCanvasTextRange,
   replaceFreeCanvasImageAnnotations,
   removeFreeCanvasProjectNodes,
@@ -153,7 +158,7 @@ import {
   type ImageGenerationRun,
   type ProjectResource
 } from '@/storage/storage-service-client'
-import type { AgentWorkspaceProposal } from '@/models/Agent.model'
+import type { AgentWorkspaceProposal, CanvasAgentSelection } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
 import type { FreeCanvasImageAnnotationKind, IFreeCanvasImageAnnotation, IFreeCanvasImageGeneratorNode, IFreeCanvasImageNode, IFreeCanvasNode, IFreeCanvasProject, IFreeCanvasTextNode, IPromptProject } from '@/models/PromptHistory.model'
 
@@ -178,6 +183,8 @@ type FreeCanvasFlowNodeData = {
   onTextCopy: (nodeId: string) => void
   onTextRangeReplace: (nodeId: string, range: { start: number; end: number }, insertedText: string, color: string) => void
   onTextStyleChange: (nodeId: string, updates: Parameters<typeof updateFreeCanvasTextNodeStyle>[2]) => void
+  onTextRename: (nodeId: string, title: string) => string | null
+  onTextSelectionChange: (nodeId: string, selection?: Omit<CanvasAgentSelection, 'baseContentDigest'>) => void
   onImageResize: (nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => void
   resultThumbnailUrl?: string
   onOpenImageHistory: (nodeId: string) => void
@@ -296,7 +303,16 @@ const FreeCanvasBuilderInner = ({
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>(
     () => freeCanvas.selectedNodeId ? [freeCanvas.selectedNodeId] : []
   )
-  const [agentDraftRequest, setAgentDraftRequest] = useState<{ id: string; content: string } | undefined>()
+  const [agentDraftRequest, setAgentDraftRequest] = useState<{
+    id: string
+    canvasNode: {
+      nodeId: string
+      role: 'target' | 'reference'
+      mode?: 'complete' | 'rewrite'
+      selection?: CanvasAgentSelection
+    }
+  } | undefined>()
+  const [textSelections, setTextSelections] = useState<Record<string, Omit<CanvasAgentSelection, 'baseContentDigest'>>>({})
   const [nodeContextMenu, setNodeContextMenu] = useState<{
     nodeId: string
     x: number
@@ -682,6 +698,31 @@ const FreeCanvasBuilderInner = ({
     onChange(updateFreeCanvasTextNodeStyle(freeCanvas, nodeId, updates))
   }, [freeCanvas, onChange])
 
+  const renameTextNode = useCallback((nodeId: string, title: string): string | null => {
+    try {
+      onChange(renameFreeCanvasTextNode(freeCanvasRef.current, nodeId, title))
+      return null
+    } catch (error) {
+      return error instanceof Error && error.message === 'text_node_title_duplicate'
+        ? '节点名称不能重复'
+        : '名称需为 1–32 个字符，且不能包含 @'
+    }
+  }, [onChange])
+
+  const rememberTextSelection = useCallback((
+    nodeId: string,
+    selection?: Omit<CanvasAgentSelection, 'baseContentDigest'>
+  ) => {
+    setTextSelections(current => {
+      if (!selection) {
+        const next = { ...current }
+        delete next[nodeId]
+        return next
+      }
+      return { ...current, [nodeId]: selection }
+    })
+  }, [])
+
   const copyTextNode = useCallback((nodeId: string) => {
     const node = freeCanvasRef.current.nodes.find((candidate): candidate is IFreeCanvasTextNode =>
       candidate.id === nodeId && candidate.kind === 'text'
@@ -698,19 +739,37 @@ const FreeCanvasBuilderInner = ({
       .catch(() => setClipboardNotice('复制文本失败'))
   }, [])
 
-  const completeTextNodeWithAgent = useCallback((nodeId: string) => {
+  const sendTextNodeToAgent = useCallback(async (
+    nodeId: string,
+    role: 'target' | 'reference'
+  ) => {
     const node = freeCanvasRef.current.nodes.find((candidate): candidate is IFreeCanvasTextNode =>
       candidate.id === nodeId && candidate.kind === 'text'
     )
     if (!node || previewMode) return
-    const text = freeCanvasTextSegmentsToPlainText(node.segments)
+    const storedSelection = role === 'target' ? textSelections[nodeId] : undefined
+    const userText = freeCanvasUserText(node)
+    const validSelection = storedSelection
+      && storedSelection.start >= 0
+      && storedSelection.end <= userText.length
+      && userText.slice(storedSelection.start, storedSelection.end) === storedSelection.selectedText
+      ? {
+          ...storedSelection,
+          baseContentDigest: await sha256Text(userText)
+        }
+      : undefined
     setRightPanelCollapsed(false)
     setRightPanelMode('agent')
     setAgentDraftRequest({
-      id: `complete-text-node-${node.id}-${Date.now()}`,
-      content: `请读取当前选中的文字节点和画布上下文，补全下面内容，并直接更新该文字节点：\n\n${text}`
+      id: `canvas-agent-node-${node.id}-${role}-${Date.now()}`,
+      canvasNode: {
+        nodeId: node.id,
+        role,
+        ...(role === 'target' ? { mode: 'complete' as const } : {}),
+        ...(validSelection ? { selection: validSelection } : {})
+      }
     })
-  }, [previewMode])
+  }, [previewMode, textSelections])
 
   const resizeImageNode = useCallback((nodeId: string, frame: { position?: { x: number; y: number }; width: number; height: number }) => {
     emitGenerationCanvas(updateFreeCanvasImageNodeFrame(freeCanvasRef.current, nodeId, frame))
@@ -1759,6 +1818,9 @@ const FreeCanvasBuilderInner = ({
       ? selectedNodeIds
       : [nodeId]
     applyCanvasCommand({ kind: 'delete-nodes', nodeIds })
+    setTextSelections(current => Object.fromEntries(
+      Object.entries(current).filter(([candidateId]) => !nodeIds.includes(candidateId))
+    ))
   }, [applyCanvasCommand, selectedNodeIds])
 
   const rasterVisibleImageNode = useCallback(async (node: IFreeCanvasImageNode): Promise<Blob> => {
@@ -1880,11 +1942,15 @@ const FreeCanvasBuilderInner = ({
       return
     }
     if (command === 'complete') {
-      completeTextNodeWithAgent(nodeId)
+      void sendTextNodeToAgent(nodeId, 'target')
+      return
+    }
+    if (command === 'send-to-agent') {
+      void sendTextNodeToAgent(nodeId, 'reference')
       return
     }
     deleteCanvasNodes(nodeId)
-  }, [completeTextNodeWithAgent, copyTextNode, deleteCanvasNodes])
+  }, [copyTextNode, deleteCanvasNodes, sendTextNodeToAgent])
 
   useEffect(() => {
     const handleLocalShortcut = (event: KeyboardEvent) => {
@@ -2173,6 +2239,8 @@ const FreeCanvasBuilderInner = ({
       onTextCopy: copyTextNode,
       onTextRangeReplace: replaceTextRange,
       onTextStyleChange: updateTextStyle,
+      onTextRename: renameTextNode,
+      onTextSelectionChange: rememberTextSelection,
       onImageResize: resizeImageNode,
       resultThumbnailUrl: node.kind === 'image-generator' && node.primaryAssetId
         ? canvasImageAssetUrl(node.primaryAssetId)
@@ -2192,7 +2260,7 @@ const FreeCanvasBuilderInner = ({
         referenceCount: freeCanvas.edges.filter(edge => edge.target === node.id && edge.targetHandle === 'reference-image').length
       } : undefined
     }
-  })), [activeProject.id, continueLegacyImageCreation, copyTextNode, editingNodeId, executeImageCommand, freeCanvas.edges, freeCanvas.nodes, onConfigureImageModel, replaceTextRange, resizeImageNode, selectedImageCommands, selectedImageNode?.id, selectedNodeIds, updateTextStyle])
+  })), [activeProject.id, continueLegacyImageCreation, copyTextNode, editingNodeId, executeImageCommand, freeCanvas.edges, freeCanvas.nodes, onConfigureImageModel, rememberTextSelection, renameTextNode, replaceTextRange, resizeImageNode, selectedImageCommands, selectedImageNode?.id, selectedNodeIds, updateTextStyle])
 
   const [flowNodes, setFlowNodes] = useState<FreeCanvasFlowNode[]>(nodes)
   useEffect(() => {
@@ -2397,10 +2465,54 @@ const FreeCanvasBuilderInner = ({
     void addImageFiles(files, nextNodePosition(reactFlow, freeCanvas.nodes.length))
   }
 
-  const handleApplyAgentProposal = (proposal: AgentWorkspaceProposal) => {
+  const handleApplyAgentProposal = async (proposal: AgentWorkspaceProposal) => {
     if (proposal.kind === 'free_canvas_text_update') {
-      onChange(updateFreeCanvasTextNodeUserText(freeCanvas, proposal.nodeId, proposal.userText, proposal.mode))
-      return
+      const target = freeCanvas.nodes.find(node => node.id === proposal.nodeId)
+      if (!target || target.kind !== 'text') {
+        window.alert('目标文字节点已不存在，请让 Agent 重新生成提案。')
+        return false
+      }
+      const currentRevision = target?.kind === 'text'
+        ? Math.max(0, ...target.segments.map(segment => segment.updatedAt))
+        : undefined
+      if (proposal.baseNodeRevision !== undefined && currentRevision !== proposal.baseNodeRevision) {
+        window.alert('提示词节点或模板已发生变化，请让 Agent 重新生成提案。')
+        return false
+      }
+      const currentUserText = freeCanvasUserText(target)
+      if (proposal.baseContentDigest && await sha256Text(currentUserText) !== proposal.baseContentDigest) {
+        window.alert('用户文字已发生变化，请让 Agent 重新生成提案。')
+        return false
+      }
+      if (proposal.templateDigest && await freeCanvasTemplateDigest(target) !== proposal.templateDigest) {
+        window.alert('模板已发生变化，请让 Agent 重新生成提案。')
+        return false
+      }
+      if (proposal.editMode === 'append') {
+        onChange(appendFreeCanvasUserText(freeCanvas, proposal.nodeId, proposal.userText))
+        return true
+      }
+      if (proposal.editMode === 'rewrite_all') {
+        onChange(updateFreeCanvasTextNodeUserText(freeCanvas, proposal.nodeId, proposal.userText, 'replace'))
+        return true
+      }
+      const selection = proposal.selection
+      if (!selection
+        || selection.start < 0
+        || selection.end <= selection.start
+        || selection.end > currentUserText.length
+        || currentUserText.slice(selection.start, selection.end) !== selection.selectedText
+      ) {
+        window.alert('文字选区已失效，请重新选择后让 Agent 生成提案。')
+        return false
+      }
+      onChange(replaceFreeCanvasUserTextRange(
+        freeCanvas,
+        proposal.nodeId,
+        { start: selection.start, end: selection.end },
+        proposal.userText
+      ))
+      return true
     }
     if (proposal.kind === 'free_canvas_text_create') {
       const node = createFreeCanvasTextNode(
@@ -2417,6 +2529,7 @@ const FreeCanvasBuilderInner = ({
           }
         ]
       }, node.id)
+      return true
     }
   }
 
@@ -3054,6 +3167,8 @@ const FreeCanvasNode = ({ data, selected }: NodeProps<FreeCanvasFlowNode>) => {
         onTextCopy={data.onTextCopy}
         onTextRangeReplace={data.onTextRangeReplace}
         onTextStyleChange={data.onTextStyleChange}
+        onTextRename={data.onTextRename}
+        onTextSelectionChange={data.onTextSelectionChange}
       />
     )
   }
@@ -3098,7 +3213,9 @@ const FreeCanvasTextNodeView = ({
   onEdit,
   onTextCopy,
   onTextRangeReplace,
-  onTextStyleChange
+  onTextStyleChange,
+  onTextRename,
+  onTextSelectionChange
 }: {
   node: IFreeCanvasTextNode
   selected: boolean
@@ -3107,6 +3224,8 @@ const FreeCanvasTextNodeView = ({
   onTextCopy: (nodeId: string) => void
   onTextRangeReplace: (nodeId: string, range: { start: number; end: number }, insertedText: string, color: string) => void
   onTextStyleChange: (nodeId: string, updates: Parameters<typeof updateFreeCanvasTextNodeStyle>[2]) => void
+  onTextRename: (nodeId: string, title: string) => string | null
+  onTextSelectionChange: (nodeId: string, selection?: Omit<CanvasAgentSelection, 'baseContentDigest'>) => void
 }) => {
   const editorRef = useRef<HTMLDivElement>(null)
   const draftTextRef = useRef<string | null>(null)
@@ -3179,6 +3298,11 @@ const FreeCanvasTextNodeView = ({
     document.execCommand('insertText', false, '\n')
   }
 
+  const captureSelection = () => {
+    if (!editing || !editorRef.current) return
+    onTextSelectionChange(node.id, readUserTextSelection(editorRef.current, node))
+  }
+
   return (
     <div
       data-free-canvas-text-node
@@ -3191,10 +3315,18 @@ const FreeCanvasTextNodeView = ({
           node={node}
           onEdit={() => onEdit(node.id)}
           onCopy={() => onTextCopy(node.id)}
+          onRename={title => onTextRename(node.id, title)}
           onStyleChange={updates => onTextStyleChange(node.id, updates)}
         />
       </NodeToolbar>
       <Handle type="target" position={Position.Left} className="!bg-gray-950 !opacity-0 group-hover:!opacity-100" />
+      <div
+        data-free-canvas-text-title
+        className="mb-2 break-all text-[11px] font-semibold leading-4 text-gray-400"
+        title={node.title}
+      >
+        {node.title}
+      </div>
       <div
         ref={editorRef}
         data-free-canvas-text-content
@@ -3205,6 +3337,8 @@ const FreeCanvasTextNodeView = ({
         onInput={handleInput}
         onPaste={handlePaste}
         onKeyDown={handleKeyDown}
+        onMouseUp={captureSelection}
+        onKeyUp={captureSelection}
         onBlur={() => {
           commitDraft()
           onEdit(null)
@@ -3214,8 +3348,13 @@ const FreeCanvasTextNodeView = ({
         }}
       >
         {displayText ? (
-          node.segments.map(segment => (
-            <span key={segment.id} data-segment-source={segment.source} style={{ color: segment.color }}>
+          node.segments.map((segment, index) => (
+            <span
+              key={segment.id}
+              data-segment-index={index}
+              data-segment-source={segment.source}
+              style={{ color: segment.color }}
+            >
               {segment.text}
             </span>
           ))
@@ -4673,19 +4812,42 @@ const TextNodeToolbar = ({
   node,
   onEdit,
   onCopy,
+  onRename,
   onStyleChange
 }: {
   node: IFreeCanvasTextNode
   onEdit: () => void
   onCopy: () => void
+  onRename: (title: string) => string | null
   onStyleChange: (updates: Parameters<typeof updateFreeCanvasTextNodeStyle>[2]) => void
-}) => (
-  <div
-    className="nodrag nowheel flex items-center gap-2 rounded-full border border-gray-200 bg-gray-950 px-3 py-2 text-white shadow-[0_18px_60px_rgba(15,23,42,0.22)]"
-    onPointerDown={event => event.stopPropagation()}
-    onMouseDown={event => event.stopPropagation()}
-    onClick={event => event.stopPropagation()}
-  >
+}) => {
+  const [renaming, setRenaming] = useState(false)
+  const [title, setTitle] = useState(node.title)
+  const [renameError, setRenameError] = useState<string | null>(null)
+  const [styleMenu, setStyleMenu] = useState<'font-size' | 'color' | null>(null)
+  const currentColor = userTextColor(node)
+
+  useEffect(() => {
+    if (!renaming) setTitle(node.title)
+  }, [node.title, renaming])
+
+  const commitRename = () => {
+    const error = onRename(title)
+    if (error) {
+      setRenameError(error)
+      return
+    }
+    setRenameError(null)
+    setRenaming(false)
+  }
+
+  return (
+    <div
+      className="nodrag nowheel relative flex items-center gap-2 rounded-full border border-gray-200 bg-gray-950 px-3 py-2 text-white shadow-[0_18px_60px_rgba(15,23,42,0.22)]"
+      onPointerDown={event => event.stopPropagation()}
+      onMouseDown={event => event.stopPropagation()}
+      onClick={event => event.stopPropagation()}
+    >
     <button
       type="button"
       className="nodrag rounded-full px-3 py-1.5 text-xs font-black text-white hover:bg-white/10"
@@ -4703,34 +4865,136 @@ const TextNodeToolbar = ({
     >
       <Copy className="h-4 w-4" />
     </button>
-    <select
-      className="nodrag min-w-[116px] rounded-full border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-black text-white outline-none transition hover:border-white/40 hover:bg-white/15 focus:border-white/60 focus:ring-2 focus:ring-white/25"
-      data-free-canvas-font-size
-      value={node.fontSize}
-      onChange={event => onStyleChange({ fontSize: event.target.value as IFreeCanvasTextNode['fontSize'] })}
-      title="复制文本"
-      aria-label="复制文本"
-    >
-      {FONT_SIZES.map(size => (
-        <option key={size} value={size} className="bg-white text-gray-950">
-          {size}
-        </option>
-      ))}
-    </select>
-    <div className="h-6 w-px bg-white/20" />
-    <Palette className="h-4 w-4 text-white/70" />
-    {TEXT_COLORS.map(color => (
+    {renaming ? (
+      <div className="relative">
+        <input
+          autoFocus
+          aria-label="文字节点名称"
+          className="nodrag h-8 w-40 rounded-full border border-white bg-white px-3 text-xs font-bold text-gray-950 outline-none focus:border-amber-300 focus:ring-2 focus:ring-amber-300/30"
+          value={title}
+          maxLength={32}
+          onChange={event => {
+            setTitle(event.target.value)
+            setRenameError(null)
+          }}
+          onBlur={commitRename}
+          onKeyDown={event => {
+            event.stopPropagation()
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              commitRename()
+            } else if (event.key === 'Escape') {
+              event.preventDefault()
+              setTitle(node.title)
+              setRenameError(null)
+              setRenaming(false)
+            }
+          }}
+        />
+        {renameError ? (
+          <div role="alert" className="absolute left-0 top-10 w-56 rounded-md bg-red-600 px-2 py-1 text-[10px] font-semibold text-white shadow-lg">
+            {renameError}
+          </div>
+        ) : null}
+      </div>
+    ) : (
       <button
-        key={color}
         type="button"
-        className="nodrag h-5 w-5 rounded-full border border-white/30"
-        style={{ backgroundColor: color }}
-        title={color}
-        onClick={() => onStyleChange({ color })}
-      />
-    ))}
-  </div>
-)
+        className="nodrag flex h-8 w-8 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white"
+        aria-label="重命名文字节点"
+        title="重命名"
+        onClick={() => setRenaming(true)}
+      >
+        <Pencil className="h-4 w-4" />
+      </button>
+    )}
+    <div className="h-6 w-px bg-white/20" />
+    <div className="relative">
+      <button
+        type="button"
+        className={`nodrag flex h-8 w-8 items-center justify-center rounded-full transition ${styleMenu === 'font-size' ? 'bg-white text-gray-950' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+        aria-label="文本大小"
+        aria-haspopup="menu"
+        aria-expanded={styleMenu === 'font-size'}
+        title={`文本大小：${node.fontSize}`}
+        onClick={() => setStyleMenu(current => current === 'font-size' ? null : 'font-size')}
+      >
+        <Type className="h-4 w-4" />
+      </button>
+      {styleMenu === 'font-size' ? (
+        <div
+          data-free-canvas-font-size-menu
+          role="menu"
+          aria-label="选择文本大小"
+          className="absolute left-1/2 top-11 z-50 flex -translate-x-1/2 gap-1 rounded-lg border border-gray-700 bg-gray-950 p-1.5 shadow-xl"
+        >
+          {FONT_SIZES.map(size => (
+            <button
+              key={size}
+              type="button"
+              role="menuitemradio"
+              aria-checked={node.fontSize === size}
+              data-free-canvas-font-size-option
+              data-font-size={size}
+              className={`nodrag rounded-md px-2 py-1.5 text-[10px] font-bold transition ${node.fontSize === size ? 'bg-white text-gray-950' : 'text-white/75 hover:bg-white/10 hover:text-white'}`}
+              onClick={() => {
+                onStyleChange({ fontSize: size })
+                setStyleMenu(null)
+              }}
+            >
+              {size}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+    <div className="relative">
+      <button
+        type="button"
+        className={`nodrag relative flex h-8 w-8 items-center justify-center rounded-full transition ${styleMenu === 'color' ? 'bg-white text-gray-950' : 'text-white/80 hover:bg-white/10 hover:text-white'}`}
+        aria-label="文字颜色"
+        aria-haspopup="menu"
+        aria-expanded={styleMenu === 'color'}
+        title="文字颜色"
+        onClick={() => setStyleMenu(current => current === 'color' ? null : 'color')}
+      >
+        <Palette className="h-4 w-4" />
+        <span
+          aria-hidden="true"
+          className="absolute bottom-0.5 right-0.5 h-2 w-2 rounded-full border border-white/60"
+          style={{ backgroundColor: currentColor }}
+        />
+      </button>
+      {styleMenu === 'color' ? (
+        <div
+          data-free-canvas-color-menu
+          role="menu"
+          aria-label="选择文字颜色"
+          className="absolute right-0 top-11 z-50 grid grid-cols-5 gap-1.5 rounded-lg border border-gray-700 bg-gray-950 p-2 shadow-xl"
+        >
+          {TEXT_COLORS.map(color => (
+            <button
+              key={color}
+              type="button"
+              role="menuitemradio"
+              aria-checked={currentColor === color}
+              data-free-canvas-color-option
+              data-color={color}
+              className={`nodrag h-6 w-6 rounded-full border transition hover:scale-110 ${currentColor === color ? 'border-white ring-2 ring-white/40' : 'border-white/30'}`}
+              style={{ backgroundColor: color }}
+              title={color}
+              onClick={() => {
+                onStyleChange({ color })
+                setStyleMenu(null)
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+    </div>
+  )
+}
 
 export const CanvasBottomToolbar = ({
   positionClassName,
@@ -5051,6 +5315,78 @@ const defaultImageOperationPreservation = (
   if (operation === 'subject-extract') return ['主体身份', '轮廓边缘']
   return ['主体身份', '画面风格']
 }
+
+const readUserTextSelection = (
+  editor: HTMLElement,
+  node: IFreeCanvasTextNode
+): Omit<CanvasAgentSelection, 'baseContentDigest'> | undefined => {
+  const selection = window.getSelection?.()
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return undefined
+  const range = selection.getRangeAt(0)
+  if (!editor.contains(range.startContainer) || !editor.contains(range.endContainer)) return undefined
+
+  const segmentElement = (boundary: Range['startContainer']): HTMLElement | null => {
+    const element = boundary instanceof HTMLElement ? boundary : boundary.parentElement
+    return element?.closest<HTMLElement>('[data-segment-index]') || null
+  }
+  const startElement = segmentElement(range.startContainer)
+  const endElement = segmentElement(range.endContainer)
+  if (!startElement || !endElement
+    || startElement.dataset.segmentSource !== 'user'
+    || endElement.dataset.segmentSource !== 'user') return undefined
+
+  const presetElements = editor.querySelectorAll<HTMLElement>('[data-segment-source="preset"]')
+  for (const presetElement of presetElements) {
+    if (range.intersectsNode(presetElement)) return undefined
+  }
+
+  const logicalOffset = (element: HTMLElement, boundary: Range['startContainer'], offset: number) => {
+    const segmentIndex = Number(element.dataset.segmentIndex)
+    if (!Number.isInteger(segmentIndex) || segmentIndex < 0 || segmentIndex >= node.segments.length) return null
+    const userSegmentsBefore = node.segments.slice(0, segmentIndex).filter(segment => segment.source === 'user')
+    const prefixLength = userSegmentsBefore.reduce((total, segment) => total + segment.text.length, 0)
+      + userSegmentsBefore.length
+    const inside = document.createRange()
+    inside.selectNodeContents(element)
+    inside.setEnd(boundary, offset)
+    return prefixLength + inside.toString().length
+  }
+
+  const start = logicalOffset(startElement, range.startContainer, range.startOffset)
+  const end = logicalOffset(endElement, range.endContainer, range.endOffset)
+  if (start === null || end === null || end <= start) return undefined
+  const userText = freeCanvasUserText(node)
+  const selectedText = userText.slice(start, end)
+  if (!selectedText) return undefined
+  return { start, end, selectedText }
+}
+
+const sha256Text = async (value: string): Promise<string> => {
+  if (!globalThis.crypto?.subtle) throw new Error('sha256_unavailable')
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+const pythonCanonicalJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(pythonCanonicalJson).join(', ')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}: ${pythonCanonicalJson(child)}`)
+    return `{${entries.join(', ')}}`
+  }
+  return JSON.stringify(value)
+}
+
+const freeCanvasTemplateDigest = (node: IFreeCanvasTextNode): Promise<string> => sha256Text(pythonCanonicalJson({
+  presetText: freeCanvasPresetText(node),
+  segments: node.segments.filter(segment => segment.source === 'preset').map(segment => ({
+    id: segment.id,
+    source: segment.source,
+    text: segment.text,
+    color: segment.color
+  }))
+}))
 
 const nodeTypes = {
   freeCanvasNode: FreeCanvasNode,

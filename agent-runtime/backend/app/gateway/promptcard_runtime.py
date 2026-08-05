@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException, Request, Response
@@ -31,6 +34,8 @@ class PromptCardRuntimeMessageRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     thread_id: str | None = Field(default=None, alias="threadId")
+    conversation_id: str | None = Field(default=None, alias="conversationId")
+    request_id: str | None = Field(default=None, alias="requestId")
     content: str = Field(min_length=1, max_length=20_000)
     mode: str | None = None
     permission_scope: str = Field(
@@ -48,6 +53,15 @@ class PromptCardRuntimeMessageRequest(BaseModel):
         alias="promptLibrary",
         max_length=200,
     )
+    selected_skill_ids: list[str] = Field(
+        default_factory=list,
+        alias="selectedSkillIds",
+        max_length=8,
+    )
+    canvas_node_context: dict[str, Any] | None = Field(
+        default=None,
+        alias="canvasNodeContext",
+    )
 
 
 class PromptCardMediaAnalysisRequest(BaseModel):
@@ -58,6 +72,10 @@ class PromptCardMediaAnalysisRequest(BaseModel):
     content_type: str = Field(alias="contentType", min_length=1)
     analysis_type: str = Field(alias="analysisType")
     content: str = Field(default="", max_length=20_000)
+    history: list[dict[str, Any]] = Field(default_factory=list, max_length=40)
+    media_action: str = Field(default="chat", alias="mediaAction")
+    media_preview: dict[str, Any] | None = Field(default=None, alias="mediaPreview")
+    selection: dict[str, Any] | None = None
 
 
 class PromptCardModelConfigRequest(BaseModel):
@@ -137,6 +155,11 @@ class PromptCardRuntimeService:
             for model in MODELS
             if model["modality"] == "chat"
         ]
+        try:
+            skill_catalog = await _storage_request("GET", "/api/skills")
+            skills = skill_catalog.get("skills", [])
+        except HTTPException:
+            skills = []
         return {
             "models": chat_models,
             "tools": [
@@ -144,10 +167,11 @@ class PromptCardRuntimeService:
                 {"name": "emit_canvas_text_update", "group": "proposal"},
                 {"name": "emit_canvas_text_create", "group": "proposal"},
                 {"name": "emit_prompt_library_create", "group": "proposal"},
+                {"name": "emit_media_prompt_preview", "group": "preview"},
             ],
             "builtins": [],
             "subagentEnabled": False,
-            "skills": [],
+            "skills": skills,
             "agents": [
                 {
                     "id": "promptcard-text-agent",
@@ -163,12 +187,70 @@ class PromptCardRuntimeService:
         request: Request,
     ) -> dict[str, Any]:
         payload = body.model_dump(by_alias=True)
+        resolved_canvas_context = _resolve_canvas_node_context(body)
+        payload["canvasNodeContext"] = resolved_canvas_context
+        conversation_id = body.conversation_id
+        request_id = body.request_id or str(uuid.uuid4())
+        skill_snapshots: list[dict[str, Any]] = []
+        if body.permission_scope == "workspace-chatbot-agent" and body.project_id:
+            if not conversation_id:
+                created = await _storage_request("POST", "/api/agent-conversations", json={
+                    "projectId": body.project_id,
+                    "entrypoint": body.permission_scope,
+                    "mode": body.mode or "workspace",
+                    "title": _conversation_title(body.content),
+                })
+                conversation_id = str(created["id"])
+            conversation = await _storage_request(
+                "GET",
+                f"/api/agent-conversations/{quote(conversation_id, safe='')}",
+                params={"projectId": body.project_id},
+            )
+            if conversation.get("projectId") != body.project_id:
+                raise HTTPException(status_code=409, detail="agent_conversation_project_mismatch")
+            if conversation.get("entrypoint") != body.permission_scope:
+                raise HTTPException(status_code=409, detail="agent_conversation_entrypoint_mismatch")
+            if body.mode and conversation.get("mode") != body.mode:
+                raise HTTPException(status_code=409, detail="agent_conversation_mode_mismatch")
+            payload["history"] = _agent_history(conversation.get("messages") or [])
+            skill_snapshots = await _resolve_skill_snapshots(body)
+            payload["skillSnapshots"] = skill_snapshots
+        payload["threadId"] = conversation_id or body.thread_id
+        payload["requestId"] = request_id
         response = await _invoke_text_agent(payload)
         response["proposals"] = validate_agent_proposals(
             response.get("proposals") or [],
             workspace_context=body.workspace_context,
             permission_scope=body.permission_scope,
+            canvas_node_context=resolved_canvas_context,
         )
+        if conversation_id and body.project_id:
+            saved = await _storage_request(
+                "POST",
+                f"/api/agent-conversations/{quote(conversation_id, safe='')}/turns",
+                json={
+                    "projectId": body.project_id,
+                    "requestId": request_id,
+                    "userMessage": {
+                        "role": "user",
+                        "text": body.content,
+                        **(
+                            {"canvasNodeContext": _canvas_node_context_audit(resolved_canvas_context)}
+                            if resolved_canvas_context is not None
+                            else {}
+                        ),
+                    },
+                    "assistantMessage": {"role": "assistant", "text": response.get("text", "")},
+                    "proposals": response["proposals"],
+                    "skillSnapshots": [
+                        {key: skill[key] for key in ("skillId", "revision", "digest")}
+                        for skill in skill_snapshots
+                    ],
+                },
+            )
+            response["conversationId"] = conversation_id
+            response["requestId"] = request_id
+            response["savedTurn"] = saved
         return response
 
     async def analyze_media(
@@ -200,6 +282,11 @@ class PromptCardRuntimeService:
                 "permissionScope": "media-analysis-agent",
                 "workspaceContext": None,
                 "promptLibrary": [],
+                "history": _agent_history(body.history),
+                "mediaAction": body.media_action,
+                "mediaPreview": body.media_preview,
+                "selection": body.selection,
+                "skillSnapshots": await _builtin_skill_snapshot("media.prompt.reverse", {"emit_media_prompt_preview"}),
                 "attachment": {
                     "assetId": body.asset_id,
                     "contentType": asset.content_type,
@@ -207,7 +294,10 @@ class PromptCardRuntimeService:
                 },
             }
         )
-        response["proposals"] = []
+        response["proposals"] = [
+            proposal for proposal in response.get("proposals") or []
+            if body.media_action == "preview" and proposal.get("kind") == "media_prompt_preview"
+        ]
         return response
 
     async def internal_chat(
@@ -301,6 +391,7 @@ def validate_agent_proposals(
     *,
     workspace_context: dict[str, Any] | None,
     permission_scope: str,
+    canvas_node_context: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     validated = []
     snapshot = (
@@ -309,13 +400,25 @@ def validate_agent_proposals(
         else {}
     ) or {}
     selected_node = snapshot.get("selectedNode")
-    selected_text_id = (
-        str(selected_node.get("id"))
-        if isinstance(selected_node, dict)
-        and selected_node.get("kind") == "text"
-        and selected_node.get("id") == snapshot.get("selectedNodeId")
-        else None
-    )
+    if canvas_node_context is not None:
+        selected_text_id = canvas_node_context.get("targetNodeId")
+        selected_node = canvas_node_context.get("targetNode")
+        if not isinstance(selected_node, dict) and selected_text_id:
+            selected_node = next(
+                (
+                    node for node in snapshot.get("nodes", [])
+                    if isinstance(node, dict) and str(node.get("id")) == str(selected_text_id)
+                ),
+                None,
+            )
+    else:
+        selected_text_id = (
+            str(selected_node.get("id"))
+            if isinstance(selected_node, dict)
+            and selected_node.get("kind") == "text"
+            and selected_node.get("id") == snapshot.get("selectedNodeId")
+            else None
+        )
     for index, proposal in enumerate(proposals):
         if not isinstance(proposal, dict):
             continue
@@ -328,10 +431,31 @@ def validate_agent_proposals(
             and isinstance(proposal.get("userText"), str)
             and proposal["userText"].strip()
         ):
-            validated.append(_proposal_base(proposal, index))
+            protected = _canvas_protection(selected_node)
+            protected["editMode"] = "rewrite_all"
+            if canvas_node_context is not None:
+                selection = canvas_node_context.get("selection")
+                edit_mode = (
+                    "append"
+                    if canvas_node_context.get("mode") == "complete"
+                    else "rewrite_selection" if selection else "rewrite_all"
+                )
+                protected["editMode"] = edit_mode
+                if edit_mode == "rewrite_selection":
+                    protected["selection"] = {
+                        "start": selection["start"],
+                        "end": selection["end"],
+                        "selectedText": selection["selectedText"],
+                    }
+            validated.append({
+                **_canvas_proposal_base(proposal, index),
+                "nodeId": str(selected_text_id),
+                **protected,
+            })
         elif (
             permission_scope == "workspace-chatbot-agent"
             and selected_text_id is None
+            and canvas_node_context is None
             and kind == "free_canvas_text_create"
             and isinstance(proposal.get("userText"), str)
             and proposal["userText"].strip()
@@ -357,6 +481,318 @@ def _proposal_base(proposal: dict[str, Any], index: int) -> dict[str, Any]:
         "status": "pending",
         "createdAt": int(proposal.get("createdAt") or int(time.time() * 1000)),
     }
+
+
+def _canvas_proposal_base(proposal: dict[str, Any], index: int) -> dict[str, Any]:
+    model_controlled_fields = {
+        "nodeId",
+        "mode",
+        "editMode",
+        "selection",
+        "baseNodeRevision",
+        "templateDigest",
+        "baseContentDigest",
+    }
+    return _proposal_base(
+        {
+            key: value
+            for key, value in proposal.items()
+            if key not in model_controlled_fields
+        },
+        index,
+    )
+
+
+def _canvas_protection(selected: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(selected, dict):
+        return {}
+    revision = selected.get("revision")
+    protected = {
+        "presetText": selected.get("presetText", ""),
+        "segments": [
+            segment for segment in selected.get("segments", [])
+            if isinstance(segment, dict) and segment.get("source") == "preset"
+        ],
+    }
+    digest = hashlib.sha256(
+        json.dumps(protected, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    return {
+        "baseNodeRevision": revision,
+        "templateDigest": f"sha256:{digest}",
+        "baseContentDigest": _text_digest(str(selected.get("userText") or "")),
+    }
+
+
+def _text_digest(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _resolve_canvas_node_context(body: PromptCardRuntimeMessageRequest) -> dict[str, Any] | None:
+    raw = body.canvas_node_context
+    if raw is None:
+        return None
+    if body.permission_scope != "workspace-chatbot-agent":
+        raise HTTPException(status_code=422, detail="canvas_node_context_scope_invalid")
+    mode = raw.get("mode")
+    if mode not in {"complete", "rewrite", "prompt-library"}:
+        raise HTTPException(status_code=422, detail="canvas_node_context_mode_invalid")
+    workspace_context = body.workspace_context
+    if not isinstance(workspace_context, dict):
+        raise HTTPException(status_code=422, detail="canvas_node_context_workspace_invalid")
+    context_project_id = str(workspace_context.get("projectId") or "")
+    if not body.project_id or context_project_id != body.project_id:
+        raise HTTPException(status_code=409, detail="canvas_node_context_project_mismatch")
+    snapshot = workspace_context.get("snapshot")
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("nodes"), list):
+        raise HTTPException(status_code=422, detail="canvas_node_context_workspace_invalid")
+    nodes = {
+        str(node.get("id")): node
+        for node in snapshot.get("nodes", [])
+        if isinstance(node, dict) and node.get("id")
+    }
+    raw_target_id = raw.get("targetNodeId")
+    if raw_target_id is not None and (
+        not isinstance(raw_target_id, str) or not raw_target_id.strip()
+    ):
+        raise HTTPException(status_code=422, detail="canvas_node_context_nodes_invalid")
+    target_id = raw_target_id.strip() if isinstance(raw_target_id, str) else None
+    if mode == "prompt-library" and target_id:
+        raise HTTPException(status_code=422, detail="canvas_prompt_library_target_forbidden")
+    raw_reference_ids = raw.get("referenceNodeIds")
+    if not isinstance(raw_reference_ids, list) or any(
+        not isinstance(node_id, str) or not node_id.strip()
+        for node_id in raw_reference_ids
+    ):
+        raise HTTPException(status_code=422, detail="canvas_node_context_nodes_invalid")
+    reference_ids = [node_id.strip() for node_id in raw_reference_ids]
+    if len(reference_ids) != len(set(reference_ids)) or len(reference_ids) + (1 if target_id else 0) > 10:
+        raise HTTPException(status_code=422, detail="canvas_node_context_nodes_invalid")
+    if target_id and target_id in reference_ids:
+        raise HTTPException(status_code=422, detail="canvas_node_context_roles_invalid")
+    attached_ids = ({target_id} if target_id else set()) | set(reference_ids)
+    if any(node_id not in nodes or nodes[node_id].get("kind") != "text" for node_id in attached_ids):
+        raise HTTPException(status_code=422, detail="canvas_node_context_node_invalid")
+    mentions = raw.get("mentions")
+    if not isinstance(mentions, list) or any(
+        not isinstance(mention, dict)
+        or not isinstance(mention.get("nodeId"), str)
+        or mention["nodeId"] not in attached_ids
+        for mention in mentions
+    ):
+        raise HTTPException(status_code=422, detail="canvas_node_context_mentions_invalid")
+    selection = raw.get("selection")
+    if selection is not None:
+        if mode != "rewrite" or not target_id or not isinstance(selection, dict):
+            raise HTTPException(status_code=422, detail="canvas_node_context_selection_invalid")
+        target_text = str(nodes[target_id].get("userText") or "")
+        start = selection.get("start")
+        end = selection.get("end")
+        selected_text = selection.get("selectedText")
+        if (
+            not isinstance(start, int)
+            or isinstance(start, bool)
+            or not isinstance(end, int)
+            or isinstance(end, bool)
+            or start < 0
+            or end <= start
+            or not isinstance(selected_text, str)
+            or _utf16_slice(target_text, start, end) != selected_text
+            or selection.get("baseContentDigest") != _text_digest(target_text)
+        ):
+            raise HTTPException(status_code=409, detail="canvas_node_context_selection_stale")
+        selection = {
+            "start": start,
+            "end": end,
+            "selectedText": selected_text,
+            "baseContentDigest": _text_digest(target_text),
+        }
+    def node_name(node_id: str) -> str:
+        return str(nodes[node_id].get("title") or node_id)[:32]
+
+    target = (
+        {"nodeId": target_id, "name": node_name(target_id)}
+        if target_id
+        else None
+    )
+    references = [
+        {"nodeId": node_id, "name": node_name(node_id)}
+        for node_id in reference_ids
+    ]
+    canonical_mentions = [
+        {"nodeId": mention["nodeId"], "label": node_name(mention["nodeId"])}
+        for mention in mentions
+    ]
+    return {
+        "mode": mode,
+        "targetNodeId": target_id,
+        "referenceNodeIds": reference_ids,
+        "mentions": canonical_mentions,
+        **({"selection": selection} if selection else {}),
+        "target": target,
+        "references": references,
+        "targetNode": nodes.get(target_id) if target_id else None,
+        "referenceNodes": [nodes[node_id] for node_id in reference_ids],
+    }
+
+
+def _canvas_node_context_audit(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "mode": context["mode"],
+        "target": context.get("target"),
+        "references": list(context.get("references") or []),
+        "mentions": list(context.get("mentions") or []),
+        **(
+            {"selection": {
+                "start": context["selection"]["start"],
+                "end": context["selection"]["end"],
+                "selectedText": context["selection"]["selectedText"],
+                "baseContentDigest": context["selection"]["baseContentDigest"],
+            }}
+            if context.get("selection")
+            else {}
+        ),
+    }
+
+
+def _utf16_slice(value: str, start: int, end: int) -> str | None:
+    encoded = value.encode("utf-16-le")
+    if end * 2 > len(encoded):
+        return None
+    try:
+        return encoded[start * 2:end * 2].decode("utf-16-le")
+    except UnicodeDecodeError:
+        return None
+
+
+def _agent_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    history = []
+    for message in messages[-40:]:
+        if not isinstance(message, dict):
+            continue
+        role = str(message.get("role") or "")
+        if role not in {"user", "assistant"}:
+            continue
+        text = str(message.get("text") or "").strip()
+        if text:
+            history.append({"role": role, "content": [{"type": "text", "text": text}]})
+    return history
+
+
+def _conversation_title(content: str) -> str:
+    normalized = " ".join(content.strip().split())
+    return normalized[:48] or "New conversation"
+
+
+def _allowed_tool_names(body: PromptCardRuntimeMessageRequest) -> set[str]:
+    tools: set[str] = set()
+    if body.permission_scope == "prompt-library-agent":
+        tools.add("search_prompt_library")
+    if body.canvas_node_context is not None:
+        if body.canvas_node_context.get("mode") == "prompt-library":
+            tools.add("search_prompt_library")
+        elif body.canvas_node_context.get("targetNodeId"):
+            tools.add("emit_canvas_text_update")
+        return tools
+    snapshot = (body.workspace_context or {}).get("snapshot") or {}
+    selected = snapshot.get("selectedNode")
+    if isinstance(selected, dict) and selected.get("kind") == "text":
+        tools.add("emit_canvas_text_update")
+    else:
+        tools.add("emit_canvas_text_create")
+    return tools
+
+
+async def _resolve_skill_snapshots(body: PromptCardRuntimeMessageRequest) -> list[dict[str, Any]]:
+    allowed_tools = _allowed_tool_names(body)
+    snapshots = (
+        []
+        if (body.canvas_node_context or {}).get("mode") == "prompt-library"
+        else await _builtin_skill_snapshot("canvas.prompt.edit", allowed_tools)
+    )
+    if not body.selected_skill_ids:
+        return snapshots
+    catalog = await _storage_request("GET", "/api/skills")
+    by_id = {
+        str(item.get("id")): item
+        for item in catalog.get("skills", [])
+        if isinstance(item, dict)
+    }
+    for skill_id in body.selected_skill_ids:
+        summary = by_id.get(skill_id)
+        if not summary:
+            raise HTTPException(status_code=404, detail="selected_skill_not_found")
+        if summary.get("source") != "external":
+            raise HTTPException(status_code=403, detail="selected_skill_not_user_triggerable")
+        dependencies = set(summary.get("toolDependencies") or [])
+        if not dependencies.issubset(allowed_tools):
+            raise HTTPException(status_code=403, detail="skill_tool_dependency_not_allowed")
+        detail = await _storage_request("GET", f"/api/skills/{quote(skill_id, safe='')}")
+        snapshot = _current_skill_revision(detail)
+        if not snapshot:
+            raise HTTPException(status_code=409, detail="selected_skill_revision_unavailable")
+        snapshots.append(snapshot)
+    return snapshots[:8]
+
+
+async def _builtin_skill_snapshot(capability_id: str, allowed_tools: set[str]) -> list[dict[str, Any]]:
+    catalog = await _storage_request("GET", "/api/skills")
+    for summary in catalog.get("skills", []):
+        if not isinstance(summary, dict) or summary.get("capabilityId") != capability_id:
+            continue
+        dependencies = set(summary.get("toolDependencies") or [])
+        if not dependencies.issubset(allowed_tools):
+            return []
+        detail = await _storage_request("GET", f"/api/skills/{quote(str(summary['id']), safe='')}")
+        snapshot = _current_skill_revision(detail)
+        return [snapshot] if snapshot else []
+    return []
+
+
+def _current_skill_revision(detail: dict[str, Any]) -> dict[str, Any] | None:
+    current = detail.get("currentRevision")
+    revision = next(
+        (
+            item for item in detail.get("revisions", [])
+            if isinstance(item, dict) and item.get("revision") == current
+        ),
+        None,
+    )
+    if not revision:
+        return None
+    return {
+        "skillId": str(detail.get("id")),
+        "revision": int(revision["revision"]),
+        "digest": str(revision["digest"]),
+        "instructions": str(revision.get("instructions") or ""),
+        "references": list(revision.get("references") or []),
+    }
+
+
+async def _storage_request(
+    method: str,
+    path: str,
+    *,
+    params: dict[str, Any] | None = None,
+    json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    base_url = os.getenv("PROMPTCARD_STORAGE_URL", "http://127.0.0.1:8002").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.request(method, f"{base_url}{path}", params=params, json=json)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=503, detail="storage_unavailable") from None
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail="agent_storage_item_not_found")
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail="agent_storage_failed")
+    try:
+        payload = response.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="agent_storage_invalid_response") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail="agent_storage_invalid_response")
+    return payload
 
 
 async def _invoke_text_agent(payload: dict[str, Any]) -> dict[str, Any]:

@@ -55,8 +55,21 @@ vi.mock('@xyflow/react', () => {
 })
 
 vi.mock('@/components/AgentCollaborationPanel', () => ({
-  AIChatbotBox: ({ draftRequest }: { draftRequest?: { content: string } }) => (
-    <div data-agent-panel data-agent-draft={draftRequest?.content || ''} />
+  AIChatbotBox: ({ draftRequest, onApplyWorkspaceProposal }: {
+    draftRequest?: {
+      content?: string
+      canvasNode?: { nodeId: string; role: string; mode?: string }
+    }
+    onApplyWorkspaceProposal?: (proposal: unknown) => void
+  }) => (
+    <div
+      data-agent-panel
+      data-agent-draft={draftRequest?.content || ''}
+      data-agent-node-id={draftRequest?.canvasNode?.nodeId || ''}
+      data-agent-node-role={draftRequest?.canvasNode?.role || ''}
+      data-agent-node-mode={draftRequest?.canvasNode?.mode || ''}
+      data-agent-apply={onApplyWorkspaceProposal}
+    />
   )
 }))
 vi.mock('@/components/PromptLibraryPreviewMode', () => ({ PromptLibraryPreviewPanel: () => <div data-prompt-panel /> }))
@@ -693,7 +706,7 @@ describe('project-level free canvas image generation entry', () => {
     }))
   })
 
-  it('opens the compact text-node menu and stages completion in the Agent composer', async () => {
+  it('stages a target label without injecting text and can stage a reference label', async () => {
     const node = createFreeCanvasTextNode('待补全的文字节点', { x: 120, y: 160 }, 1)
     const canvas = {
       ...createFreeCanvasProject(1, { nodes: [node] }),
@@ -730,7 +743,7 @@ describe('project-level free canvas image generation entry', () => {
 
     const menu = renderer.root.findByProps({ 'aria-label': '文字节点菜单' })
     const labels = menu.findAllByType('button').map(button => button.findAllByType('span')[1]?.children[0])
-    expect(labels).toEqual(expect.arrayContaining(['复制', '补全', '删除']))
+    expect(labels).toEqual(expect.arrayContaining(['复制', '补全', '发送到 Agent', '删除']))
     expect(onChange).not.toHaveBeenCalled()
 
     const complete = menu.findAllByType('button').find(button => (
@@ -738,8 +751,136 @@ describe('project-level free canvas image generation entry', () => {
     ))!
     act(() => complete.props.onClick())
 
-    expect(renderer.root.findByProps({ 'data-agent-panel': true }).props['data-agent-draft'])
-      .toContain('待补全的文字节点')
+    const panel = renderer.root.findByProps({ 'data-agent-panel': true })
+    expect(panel.props['data-agent-draft']).toBe('')
+    expect(panel.props['data-agent-node-id']).toBe(node.id)
+    expect(panel.props['data-agent-node-role']).toBe('target')
+    expect(panel.props['data-agent-node-mode']).toBe('complete')
+
+    act(() => reactFlow.props.onNodeContextMenu({
+      preventDefault: vi.fn(),
+      clientX: 240,
+      clientY: 180,
+      currentTarget: null
+    }, reactFlow.props.nodes[0]))
+    const referenceMenu = renderer.root.findByProps({ 'aria-label': '文字节点菜单' })
+    const sendToAgent = referenceMenu.findAllByType('button').find(button => (
+      button.findAllByType('span').some(span => span.children.includes('发送到 Agent'))
+    ))!
+    act(() => sendToAgent.props.onClick())
+
+    const referencePanel = renderer.root.findByProps({ 'data-agent-panel': true })
+    expect(referencePanel.props['data-agent-draft']).toBe('')
+    expect(referencePanel.props['data-agent-node-id']).toBe(node.id)
+    expect(referencePanel.props['data-agent-node-role']).toBe('reference')
+  })
+
+  it('keeps text styling controls collapsed and renders a readable rename input', async () => {
+    const node = { ...createFreeCanvasTextNode('Body', { x: 120, y: 160 }, 1), title: '完整节点名称' }
+    const canvas = { ...createFreeCanvasProject(1, { nodes: [node] }), selectedNodeId: node.id }
+    const onChange = vi.fn()
+    let renderer!: ReturnType<typeof create>
+
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={onChange}
+        />
+      )
+    })
+
+    const reactFlow = renderer.root.find(candidate => (
+      typeof candidate.props.onNodeContextMenu === 'function' && Array.isArray(candidate.props.nodes)
+    ))
+    const TextNode = reactFlow.props.nodeTypes.freeCanvasNode
+    let nodeRenderer!: ReturnType<typeof create>
+    await act(async () => {
+      nodeRenderer = create(<TextNode data={reactFlow.props.nodes[0].data} selected />)
+    })
+    expect(nodeRenderer.root.findByProps({ 'data-free-canvas-text-title': true }).children).toEqual(['完整节点名称'])
+    expect(nodeRenderer.root.findAllByProps({ 'data-free-canvas-font-size-menu': true })).toHaveLength(0)
+    expect(nodeRenderer.root.findAllByProps({ 'data-free-canvas-color-menu': true })).toHaveLength(0)
+
+    act(() => nodeRenderer.root.findByProps({ 'aria-label': '文本大小' }).props.onClick())
+    const fontSizeMenu = nodeRenderer.root.findByProps({ 'data-free-canvas-font-size-menu': true })
+    expect(fontSizeMenu.findAllByProps({ 'data-free-canvas-font-size-option': true })).toHaveLength(5)
+    act(() => fontSizeMenu.findByProps({ 'data-font-size': 'huge' }).props.onClick())
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      nodes: [expect.objectContaining({ id: node.id, fontSize: 'huge' })]
+    }))
+
+    act(() => nodeRenderer.root.findByProps({ 'aria-label': '文字颜色' }).props.onClick())
+    const colorMenu = nodeRenderer.root.findByProps({ 'data-free-canvas-color-menu': true })
+    expect(colorMenu.findAllByProps({ 'data-free-canvas-color-option': true })).toHaveLength(10)
+    act(() => colorMenu.findByProps({ 'data-color': '#3b82f6' }).props.onClick())
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      nodes: [expect.objectContaining({
+        id: node.id,
+        segments: [expect.objectContaining({ color: '#3b82f6' })]
+      })]
+    }))
+
+    act(() => nodeRenderer.root.findByProps({ 'aria-label': '重命名文字节点' }).props.onClick())
+    const input = nodeRenderer.root.findByProps({ 'aria-label': '文字节点名称' })
+    expect(input.props.className).toContain('bg-white')
+    expect(input.props.className).toContain('text-gray-950')
+    act(() => input.props.onChange({ target: { value: '新的节点名称' } }))
+    act(() => input.props.onKeyDown({ key: 'Enter', preventDefault: vi.fn(), stopPropagation: vi.fn() }))
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      nodes: [expect.objectContaining({ id: node.id, title: '新的节点名称' })]
+    }))
+  })
+
+  it('applies append proposals as a new user segment and rejects stale selection rewrites', async () => {
+    const node = createFreeCanvasTextNode('Original', { x: 120, y: 160 }, 10)
+    const canvas = { ...createFreeCanvasProject(1, { nodes: [node] }), selectedNodeId: node.id }
+    const onChange = vi.fn()
+    const alert = vi.fn()
+    ;(window as unknown as { alert: typeof alert }).alert = alert
+    let renderer!: ReturnType<typeof create>
+
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={onChange}
+        />
+      )
+    })
+    const apply = renderer.root.findByProps({ 'data-agent-panel': true }).props['data-agent-apply']
+    await act(async () => apply({
+      kind: 'free_canvas_text_update',
+      nodeId: node.id,
+      editMode: 'append',
+      userText: 'Added',
+      baseNodeRevision: 10
+    }))
+    const appended = onChange.mock.calls[onChange.mock.calls.length - 1]?.[0]
+    expect(appended.nodes[0].segments.map((segment: { text: string }) => segment.text)).toEqual(['Original', 'Added'])
+
+    onChange.mockClear()
+    await act(async () => apply({
+      kind: 'free_canvas_text_update',
+      nodeId: node.id,
+      editMode: 'rewrite_selection',
+      userText: 'Changed',
+      selection: { start: 0, end: 4, selectedText: 'Wrong' },
+      baseNodeRevision: 10
+    }))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(alert).toHaveBeenCalled()
   })
 
   it('persists a generated result node before marking its placement as placed', async () => {

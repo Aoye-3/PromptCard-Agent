@@ -18,11 +18,6 @@ const compactText = (value: string | undefined) => {
   return text.length > MAX_TEXT_LENGTH ? `${text.slice(0, MAX_TEXT_LENGTH)}...` : text
 }
 
-const compactMultilineText = (value: string | undefined) => {
-  const text = String(value || '').replace(/[^\S\r\n]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
-  return text.length > MAX_TEXT_LENGTH ? `${text.slice(0, MAX_TEXT_LENGTH)}...` : text
-}
-
 const compactCard = (card: ICard) => ({
   id: card.id,
   type: card.type,
@@ -304,13 +299,14 @@ function compactFreeCanvasTextNode(node: IFreeCanvasTextNode) {
     id: node.id,
     kind: node.kind,
     title: compactText(node.title),
-    displayText: compactMultilineText(freeCanvasTextDisplay(node)),
-    presetText: compactMultilineText(freeCanvasPresetText(node)),
-    userText: compactMultilineText(freeCanvasUserText(node)),
+    displayText: freeCanvasTextDisplay(node),
+    presetText: freeCanvasPresetText(node),
+    userText: freeCanvasUserText(node),
+    revision: Math.max(0, ...node.segments.map(segment => segment.updatedAt)),
     segments: node.segments.map(segment => ({
       id: segment.id,
       source: segment.source,
-      text: compactMultilineText(segment.text),
+      text: segment.text,
       color: segment.color
     }))
   }

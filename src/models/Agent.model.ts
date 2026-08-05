@@ -20,6 +20,7 @@ export type AgentSessionKey = string
 
 export interface AgentConversationSession {
   threadId?: string
+  conversationId?: string
   messages: AgentMessage[]
   proposals: AgentWorkspaceProposal[]
   running: boolean
@@ -42,11 +43,18 @@ export interface AgentModelInfo {
 }
 
 export interface AgentSkillInfo {
+  id?: string
   name: string
+  slug?: string
   description?: string
   category?: string
   enabled?: boolean
   source?: string
+  trustState?: string
+  revision?: number
+  digest?: string
+  capabilityId?: string | null
+  toolDependencies?: string[]
   [key: string]: unknown
 }
 
@@ -98,6 +106,23 @@ export interface AgentWorkspaceContext {
   projectId: string
   projectTitle: string
   snapshot: Record<string, unknown>
+}
+
+export type CanvasAgentEditMode = 'complete' | 'rewrite' | 'prompt-library'
+
+export interface CanvasAgentSelection {
+  start: number
+  end: number
+  selectedText: string
+  baseContentDigest: string
+}
+
+export interface CanvasAgentNodeContext {
+  mode: CanvasAgentEditMode
+  targetNodeId: string | null
+  referenceNodeIds: string[]
+  mentions: Array<{ nodeId: string; label: string }>
+  selection?: CanvasAgentSelection
 }
 
 export interface AgentCardCreateProposal {
@@ -176,8 +201,25 @@ export interface AgentFreeCanvasTextUpdateProposal {
   runId?: string | null
   agentName: string
   nodeId: string
-  mode: 'replace' | 'append'
+  editMode: 'append' | 'rewrite_all' | 'rewrite_selection'
   userText: string
+  selection?: Pick<CanvasAgentSelection, 'start' | 'end' | 'selectedText'>
+  baseNodeRevision?: number
+  templateDigest?: string
+  baseContentDigest?: string
+  rationale: string
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: number
+}
+
+export interface AgentMediaPromptPreviewProposal {
+  kind: 'media_prompt_preview'
+  contextId?: string
+  id: string
+  threadId?: string | null
+  runId?: string | null
+  agentName: string
+  previewDraft: PromptLibraryPresetDraft
   rationale: string
   status: 'pending' | 'approved' | 'rejected'
   createdAt: number
@@ -205,6 +247,7 @@ export type AgentWorkspaceProposal =
   | AgentThreeStageFieldUpdateProposal
   | AgentFreeCanvasTextUpdateProposal
   | AgentFreeCanvasTextCreateProposal
+  | AgentMediaPromptPreviewProposal
 
 export type PromptLibrarySnapshotPreset = Pick<
   IPreset,

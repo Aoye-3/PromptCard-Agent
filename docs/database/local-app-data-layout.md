@@ -63,16 +63,16 @@ They may initialize or migrate an empty SQLite database transactionally. They do
 
 ## File Ownership
 
-- `data/promptcard.sqlite3`: active and deleted projects, Prompt Library presets, revisions, ordering, asset metadata, Recent Capture metadata, and migration records.
+- `data/promptcard.sqlite3`: active and deleted projects, Prompt Library presets, revisions, ordering, asset metadata, Recent Capture metadata, project text-Agent conversations and proposals, Skill revisions, and migration records.
 - `data/assets/`: uploaded PNG, JPEG, WebP, MP4, and WebM assets referenced by `assetId`.
 - Legacy JSON files are preserved as read-only migration sources and are no longer runtime write targets.
-- Agent Runtime state: model connection metadata in the launcher-selected workspace path. pi text sessions are process-local.
+- Agent Runtime state: model connection metadata in the launcher-selected workspace path. Project text-Agent history belongs to `data/promptcard.sqlite3`; pi is request-stateless.
 - `logs/`: desktop-launched storage/Agent logs, runtime manifests, and generated Tauri configuration.
 - `backups/`: automatic JSON migration backups and SQLite-consistent manual or pre-update snapshots.
 - `logs/desktop-profile/config/desktop-shell.json`: desktop shell runtime metadata when the Profile config surface is used.
 - `logs/desktop-profile/config/update-source.json`: sidebar Update module repository URL, remote name, branch, and last-check metadata.
 
-Browser storage remains outside this filesystem profile. `localforage` still owns UI-only cache, prompt history, templates, settings, and legacy migration flags; `localStorage` still owns language, Agent sessions, and the older AI settings record.
+Browser storage remains outside this filesystem profile. `localforage` still owns UI-only cache, prompt history, templates, settings, and legacy migration flags; `localStorage` owns language, the selected Agent conversation ID, and the older AI settings record. The current Agent composer draft is component state, and browser storage does not own Agent transcripts.
 
 ## Update Boundary
 

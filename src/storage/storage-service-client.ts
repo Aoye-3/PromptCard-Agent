@@ -99,11 +99,13 @@ export interface RecentCaptureRegistrationRequest {
     label?: string
     content?: string
     type?: CardType
+    category?: string
   }>
   prompt?: {
     label: string
     content: string
     type: CardType
+    category?: string
   }
 }
 
@@ -275,6 +277,42 @@ export interface ProjectResourceSnapshot {
 export interface ProjectResourceLayout {
   folders: Array<Pick<ProjectResourceFolder, 'id' | 'parentId' | 'sortOrder' | 'revision'>>
   resources: Array<Pick<ProjectResource, 'id' | 'folderId' | 'sortOrder' | 'revision'>>
+}
+
+export interface AgentConversationSummary {
+  id: string
+  projectId: string
+  entrypoint: string
+  mode: string
+  title: string
+  status: 'active' | 'trash'
+  createdAt: number
+  updatedAt: number
+  deletedAt?: number | null
+}
+
+export interface AgentConversationDetail extends AgentConversationSummary {
+  messages: Array<{ id?: string; role: 'user' | 'assistant' | 'system'; text: string; createdAt?: number }>
+  proposals: Array<Record<string, unknown>>
+  turns: Array<Record<string, unknown>>
+}
+
+export interface AgentConversationPage {
+  conversations: AgentConversationSummary[]
+  nextCursor: string | null
+}
+
+export interface SkillSummary {
+  id: string
+  slug: string
+  name: string
+  description: string
+  source: 'builtin' | 'external'
+  trustState: 'first-party' | 'trusted' | 'untrusted'
+  capabilityId?: string | null
+  toolDependencies: string[]
+  revision: number
+  digest: string
 }
 
 export type CreateProjectResourceFolder = Pick<ProjectResourceFolder, 'name'> &
@@ -611,6 +649,68 @@ export const storageServiceClient = {
       const placement = normalizeImageGenerationPlacement(payload)[0]
       if (!placement) throw new StorageHttpError(502, 'invalid_response', 'Storage returned an invalid placement')
       return placement
+    }
+  },
+  agentConversations: {
+    list(
+      projectId: string,
+      status: 'active' | 'trash' = 'active',
+      cursor?: string | null,
+      limit = 50
+    ): Promise<AgentConversationPage> {
+      const params = new URLSearchParams({ projectId, status, limit: String(limit) })
+      if (cursor) params.set('cursor', cursor)
+      return request(`/storage-api/agent-conversations?${params.toString()}`)
+    },
+    create(input: {
+      projectId: string
+      entrypoint: string
+      mode: string
+      title?: string
+    }): Promise<AgentConversationSummary> {
+      return request('/storage-api/agent-conversations', {
+        method: 'POST',
+        body: JSON.stringify(input)
+      })
+    },
+    get(id: string, projectId: string, includeTrash = false): Promise<AgentConversationDetail> {
+      const params = new URLSearchParams({ projectId })
+      if (includeTrash) params.set('includeTrash', 'true')
+      return request(`/storage-api/agent-conversations/${encodeURIComponent(id)}?${params.toString()}`)
+    },
+    rename(id: string, projectId: string, title: string): Promise<AgentConversationDetail> {
+      return request(`/storage-api/agent-conversations/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ projectId, title })
+      })
+    },
+    trash(id: string, projectId: string): Promise<AgentConversationSummary> {
+      return request(`/storage-api/agent-conversations/${encodeURIComponent(id)}/trash`, {
+        method: 'POST', body: JSON.stringify({ projectId })
+      })
+    },
+    restore(id: string, projectId: string): Promise<AgentConversationSummary> {
+      return request(`/storage-api/agent-conversations/${encodeURIComponent(id)}/restore`, {
+        method: 'POST', body: JSON.stringify({ projectId })
+      })
+    },
+    deleteForever(id: string, projectId: string): Promise<{ ok: true }> {
+      return request(`/storage-api/agent-conversations/${encodeURIComponent(id)}`, {
+        method: 'DELETE', body: JSON.stringify({ projectId })
+      })
+    },
+    updateProposal(id: string, proposalId: string, projectId: string, status: 'approved' | 'rejected') {
+      return request(`/storage-api/agent-conversations/${encodeURIComponent(id)}/proposals/${encodeURIComponent(proposalId)}`, {
+        method: 'PATCH', body: JSON.stringify({ projectId, status })
+      })
+    }
+  },
+  skills: {
+    async list(): Promise<SkillSummary[]> {
+      return (await request<{ skills: SkillSummary[] }>('/storage-api/skills')).skills
+    },
+    get(id: string): Promise<SkillSummary & { currentRevision: number; revisions: Array<Record<string, unknown>> }> {
+      return request(`/storage-api/skills/${encodeURIComponent(id)}`)
     }
   },
   projectResources: {

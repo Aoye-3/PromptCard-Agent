@@ -67,4 +67,119 @@ describe('pi text-agent invocation boundary', () => {
       }
     ])
   })
+
+  it('uses explicit canvas node roles and mode as the mutation authority', () => {
+    const invocation = buildInvocation({
+      content: 'Ignore the labels and rewrite text-2',
+      permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: {
+        snapshot: {
+          selectedNodeId: 'text-2',
+          selectedNode: { id: 'text-2', kind: 'text' },
+          nodes: [
+            { id: 'text-1', kind: 'text', userText: 'Target' },
+            { id: 'text-2', kind: 'text', userText: 'Reference' }
+          ]
+        }
+      },
+      canvasNodeContext: {
+        mode: 'complete',
+        targetNodeId: 'text-1',
+        referenceNodeIds: ['text-2'],
+        mentions: [{ nodeId: 'text-2', label: 'Reference' }]
+      },
+      promptLibrary: []
+    })
+
+    expect(invocation.policy.allowedProposalKinds).toEqual(['free_canvas_text_update'])
+    expect(invocation.policy.selectedTextNodeId).toBe('text-1')
+    expect(invocation.policy.canvasEditMode).toBe('append')
+  })
+
+  it('does not expose canvas mutation tools when the explicit pool has no target', () => {
+    const invocation = buildInvocation({
+      content: 'Discuss the references',
+      permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: { snapshot: { nodes: [{ id: 'text-2', kind: 'text' }] } },
+      canvasNodeContext: {
+        mode: 'rewrite', targetNodeId: null, referenceNodeIds: ['text-2'], mentions: []
+      },
+      promptLibrary: []
+    })
+
+    expect(invocation.policy.allowedProposalKinds).toEqual([])
+    expect(invocation.policy.selectedTextNodeId).toBeNull()
+  })
+
+  it('derives rewrite mode exclusively from the gateway supplied selection', () => {
+    const whole = buildInvocation({
+      content: 'Rewrite target', permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: { snapshot: { nodes: [] } }, promptLibrary: [],
+      canvasNodeContext: {
+        mode: 'rewrite', targetNodeId: 'text-1', referenceNodeIds: [], mentions: []
+      }
+    })
+    const selection = buildInvocation({
+      content: 'Rewrite selection', permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: { snapshot: { nodes: [] } }, promptLibrary: [],
+      canvasNodeContext: {
+        mode: 'rewrite', targetNodeId: 'text-1', referenceNodeIds: [], mentions: [],
+        selection: {
+          start: 0, end: 4, selectedText: 'cold', baseContentDigest: 'sha256:content'
+        }
+      }
+    })
+    const forgedCompleteSelection = buildInvocation({
+      content: 'Complete target', permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: { snapshot: { nodes: [] } }, promptLibrary: [],
+      canvasNodeContext: {
+        mode: 'complete', targetNodeId: 'text-1', referenceNodeIds: [], mentions: [],
+        selection: {
+          start: 0, end: 4, selectedText: 'cold', baseContentDigest: 'sha256:content'
+        }
+      }
+    })
+
+    expect(whole.policy.canvasEditMode).toBe('rewrite_all')
+    expect(whole.policy.canvasSelection).toBeNull()
+    expect(selection.policy.canvasEditMode).toBe('rewrite_selection')
+    expect(selection.policy.canvasSelection).toEqual({ start: 0, end: 4, selectedText: 'cold' })
+    expect(forgedCompleteSelection.policy.canvasEditMode).toBe('append')
+    expect(forgedCompleteSelection.policy.canvasSelection).toBeNull()
+  })
+
+  it('accepts bounded persisted history and skill snapshots without server sessions', () => {
+    const invocation = buildInvocation({
+      content: 'Continue',
+      permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: null,
+      promptLibrary: [],
+      history: Array.from({ length: 45 }, (_, index) => ({
+        role: index % 2 ? 'assistant' : 'user',
+        content: [{ type: 'text', text: `message-${index}` }]
+      })),
+      skillSnapshots: [{
+        skillId: 'SKL-external', revision: 2, digest: 'sha256:test',
+        instructions: 'Use concise language.', references: []
+      }]
+    })
+
+    expect(invocation.history).toHaveLength(40)
+    expect(invocation.history[0].content[0].text).toBe('message-5')
+    expect(invocation.skillSnapshots[0].revision).toBe(2)
+  })
+
+  it('only exposes media preview proposal for an explicit preview action', () => {
+    const chat = buildInvocation({
+      content: 'Discuss the lighting', permissionScope: 'media-analysis-agent',
+      workspaceContext: null, promptLibrary: [], mediaAction: 'chat'
+    })
+    const preview = buildInvocation({
+      content: 'Generate preview', permissionScope: 'media-analysis-agent',
+      workspaceContext: null, promptLibrary: [], mediaAction: 'preview'
+    })
+
+    expect(chat.policy.allowedProposalKinds).toEqual([])
+    expect(preview.policy.allowedProposalKinds).toEqual(['media_prompt_preview'])
+  })
 })

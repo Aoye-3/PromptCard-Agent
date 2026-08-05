@@ -30,6 +30,8 @@ class PromptCardRuntimeMessageResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     thread_id: str = Field(alias="threadId")
+    conversation_id: str | None = Field(default=None, alias="conversationId")
+    request_id: str | None = Field(default=None, alias="requestId")
     text: str
     proposals: list[dict[str, Any]]
     diagnostics: dict[str, Any] = Field(default_factory=dict)

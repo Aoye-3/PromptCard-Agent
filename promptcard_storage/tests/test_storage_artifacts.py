@@ -51,7 +51,7 @@ class StorageArtifactLifecycleTest(unittest.TestCase):
         finally:
             connection.close()
 
-        self.assertEqual(version, 7)
+        self.assertEqual(version, 8)
         self.assertEqual(row, ("active", "legacy.png", len(PNG)))
 
     def test_schema_v5_migrates_existing_asset_to_active_without_changing_metadata(self) -> None:
@@ -73,7 +73,7 @@ class StorageArtifactLifecycleTest(unittest.TestCase):
                    SELECT asset_id, original_filename, relative_path, content_type, size, created_at FROM assets_v6"""
             )
             connection.execute("DROP TABLE assets_v6")
-            connection.execute("DELETE FROM schema_migrations WHERE version=7")
+            connection.execute("DELETE FROM schema_migrations WHERE version>=6")
             connection.execute(
                 "INSERT INTO schema_migrations(version, name, applied_at) VALUES (5, 'add-image-asset-derivations', 1)"
             )
@@ -92,7 +92,7 @@ class StorageArtifactLifecycleTest(unittest.TestCase):
             version = connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
         finally:
             connection.close()
-        self.assertEqual(version, 7)
+        self.assertEqual(version, 8)
         self.assertEqual(row, ("active", "legacy-v5.png", len(PNG)))
         self.assertTrue(migrated.get_asset(asset["id"])[0].is_file())
 

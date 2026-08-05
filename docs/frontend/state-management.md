@@ -42,24 +42,28 @@ Quick-message UI drafts contain only `name` and `body`; reference media remains 
 
 ### Agent Store
 
-`agent.store` owns frontend Agent runtime state:
+`agent.store` owns transient frontend Agent runtime state:
 
-- runtime, local browser-session, catalog, and model-assignment status
-- per-surface pi thread IDs
-- Agent messages and running state
+- runtime, catalog, and model-assignment status
+- active project conversation identity and the currently rendered message page
+- temporary composer draft, running state, and one-shot external Skill selection
 - parsed pending Canvas text proposals
 - pending Prompt Library create proposals
 
-It delegates HTTP calls to `agent-runtime-service`.
+It delegates HTTP calls to `agent-runtime-service`. For project Agent surfaces, PromptCard Storage is the transcript and proposal-status authority. The store hydrates the selected conversation from Gateway and must not reconstruct model history from browser state. The current implementation retains only the selected conversation ID in `localStorage`; the composer draft is component state, and authoritative messages are never stored there.
 
 Agent permission scope is enforced before proposals reach UI execution:
 
 - `prompt-library-agent` is reserved for Prompt Library decomposition and additive create proposals.
-- `workspace-chatbot-agent` is the Free Canvas text-writing surface. A selected text node permits only an exact-node update proposal; no selected text node permits only a create proposal.
-- `media-analysis-agent` analyzes one explicitly selected image and cannot emit mutation proposals.
+- `workspace-chatbot-agent` is the Free Canvas text-writing surface. Explicit composer state identifies at most one writable target and up to nine read-only references. Completion is append-only; rewrite is selection-scoped when a valid user-text selection exists and otherwise replaces the complete user part. Updates carry node revision, template digest, and content digest and are rejected when any baseline becomes stale. No explicit target means discussion-only.
+- `media-analysis-agent` discusses one explicitly selected image and may emit only a non-mutating Prompt preview candidate after an explicit preview request. Prompt registration remains a separate user action.
 - The Agent dashboard is diagnostic and model-management oriented; it does not own Prompt Library or Canvas approval.
 
-pi thread history is process-local. Reuse is valid only when `threadId`, `sessionKey`, `projectId`, and `mode` remain compatible.
+Project Agent history is durable and project-scoped. Every turn uses `conversationId + requestId`; Gateway validates the project, entrypoint, mode, and permission scope before loading bounded history. Retrying the same request ID returns the stored result rather than duplicating messages or proposals.
+
+Media analysis is intentionally different: `MediaAnalysisDialog` owns its bounded conversation and editable Prompt preview in component memory, includes that history on each request, and discards it when closed. It never creates a project Agent conversation.
+
+Built-in Skills are bound deterministically by feature entrypoint. External Skill selection is composer state for the next project message only and clears after send. The UI may display Skill availability, but Gateway is responsible for rejecting a Skill whose declared tools are outside the current permission scope.
 
 ## Storage Model
 
@@ -201,8 +205,8 @@ The proposal is not a preset until the user approves it.
 
 `AgentWorkspaceProposal` is the shared parsed output shape for Agent-authored changes. The maintained pi runtime emits:
 
-- `free_canvas_text_update`: replace or append only the user-text segment of the exact selected Free Canvas text node;
-- `free_canvas_text_create`: create a new Free Canvas text node when no text node is selected;
+- `free_canvas_text_update`: append a new user segment, replace the complete user part, or replace one validated user-text selection on the explicit target;
+- `free_canvas_text_create`: retained for legacy request compatibility; explicit Canvas node context without a target cannot emit a mutation;
 - `prompt_library_write_proposal`: create a new Prompt Library preset after approval in Prompt Library scope.
 
 All three remain pending until explicit Apply/Reject. Prompt Library proposals are filtered out of workspace scope, and Canvas proposals are not accepted in Prompt Library scope.
@@ -210,6 +214,17 @@ All three remain pending until explicit Apply/Reject. Prompt Library proposals a
 The TypeScript union and parser retain older `workspace_card_*`, `storyboard_update`, and `three_stage_field_update` shapes for compatibility. The focused pi runtime has no tools that emit them.
 
 The Prompt Library page owns batch proposal approval. Selected pending create proposals are converted into `IPreset` drafts through `preset.store.addPreset()`, then marked approved. Batch rejection only marks proposals rejected; it does not mutate Prompt Library records.
+
+### Durable Agent Conversation Records
+
+Project Agent conversations are stored separately from image-generation conversations:
+
+- `AgentConversation` is the project-scoped lifecycle record and supports active and Trash states.
+- `AgentConversationMessage` preserves ordered visible content, normalized blocks, and tool summaries.
+- `AgentConversationProposal` preserves the proposal payload and approval state across reloads.
+- A completed turn is indexed by its request ID for idempotent retries.
+
+Conversation history, rename, Trash, restore, and permanent-delete operations all go through the Storage-backed Gateway contract. Prompt Library assistant sessions and Media analysis sessions are excluded from this list.
 
 ## Merge and Normalization Behavior
 
@@ -229,5 +244,5 @@ Free Canvas loading normalizes missing project data by creating an empty `freeCa
 
 - There is no production server-side project database in the current frontend app.
 - There is no schema migration framework beyond current normalization helpers.
-- Agent proposal persistence is currently frontend store state, not an independent durable audit log.
+- Full Skill package import, script execution, Codex projection, and MCP publication are not implemented; the current SkillHub is the local Agent registry and snapshot slice.
 - Script/storyboard decomposition proposal types are not part of the current pi tool surface.

@@ -8,13 +8,6 @@ import {
   type PromptLibraryItem
 } from './proposal-policy.ts'
 
-interface SessionRecord {
-  sessionKey?: string
-  projectId?: string
-  mode?: string
-  messages: AgentMessage[]
-}
-
 export interface AgentRequest extends InvocationInput {
   threadId?: string
   sessionKey?: string
@@ -22,22 +15,18 @@ export interface AgentRequest extends InvocationInput {
   mode?: string
 }
 
-const sessions = new Map<string, SessionRecord>()
-
 export async function invokeAgent(request: AgentRequest) {
   const threadId = request.threadId || randomUUID()
-  const previous = sessions.get(threadId)
-  assertSessionCompatible(previous, request)
   const invocation = buildInvocation(request)
   const proposals: Record<string, unknown>[] = []
-  const tools = buildTools(invocation.policy, invocation.promptLibrary, proposals)
+  const tools = buildAgentTools(invocation.policy, invocation.promptLibrary, proposals)
   const providerRuntime = await createTextProviderRuntime()
   const agent = new Agent({
     initialState: {
-      systemPrompt: buildSystemPrompt(invocation),
+      systemPrompt: buildAgentSystemPrompt(invocation),
       model: providerRuntime.model,
       tools,
-      messages: previous?.messages || []
+      messages: invocation.history as unknown as AgentMessage[]
     },
     streamFn: providerRuntime.stream,
     toolExecution: 'sequential',
@@ -56,18 +45,12 @@ export async function invokeAgent(request: AgentRequest) {
     throw new Error(agent.state.errorMessage)
   }
 
-  sessions.set(threadId, {
-    sessionKey: request.sessionKey,
-    projectId: request.projectId,
-    mode: request.mode,
-    messages: agent.state.messages.slice(-40)
-  })
-
   return {
     threadId,
     text: lastAssistantText(agent.state.messages)
       || (proposals.length ? '已生成待确认的修改提案。' : '分析完成。'),
     proposals,
+    messages: agent.state.messages.slice(invocation.history.length),
     diagnostics: {
       orchestrator: 'pi',
       modelProvider: providerRuntime.model.provider,
@@ -78,43 +61,47 @@ export async function invokeAgent(request: AgentRequest) {
   }
 }
 
-function buildTools(
+export function buildAgentTools(
   policy: ReturnType<typeof buildInvocation>['policy'],
   promptLibrary: PromptLibraryItem[],
   proposals: Record<string, unknown>[]
 ): AgentTool[] {
-  const tools: AgentTool[] = [{
-    name: 'search_prompt_library',
-    label: 'Search Prompt Library',
-    description: 'Search the provided Prompt Library snapshot by label and content.',
-    parameters: Type.Object({
-      query: Type.String({ minLength: 1 })
-    }),
-    execute: async (_toolCallId, params) => {
-      const query = String((params as { query: string }).query).toLowerCase()
-      const matches = promptLibrary
-        .filter(item => `${item.label}\n${item.content}`.toLowerCase().includes(query))
-        .slice(0, 10)
-      return {
-        content: [{ type: 'text', text: JSON.stringify(matches) }],
-        details: { matchCount: matches.length }
+  const tools: AgentTool[] = []
+
+  if (policy.canSearchPromptLibrary) {
+    tools.push({
+      name: 'search_prompt_library',
+      label: 'Search Prompt Library',
+      description: 'Search the provided Prompt Library snapshot by label and content, including linked media metadata.',
+      parameters: Type.Object({
+        query: Type.String({ minLength: 1 })
+      }),
+      execute: async (_toolCallId, params) => {
+        const query = String((params as { query: string }).query).toLowerCase()
+        const matches = promptLibrary
+          .filter(item => `${item.label}\n${item.content}`.toLowerCase().includes(query))
+          .slice(0, 10)
+        return {
+          content: [{ type: 'text', text: JSON.stringify(matches) }],
+          details: { matchCount: matches.length }
+        }
       }
-    }
-  }]
+    })
+  }
 
   if (policy.allowedProposalKinds.includes('free_canvas_text_update') && policy.selectedTextNodeId) {
     tools.push(proposalTool(
       'emit_canvas_text_update',
       'Propose selected Canvas text update',
       Type.Object({
-        mode: Type.Union([Type.Literal('replace'), Type.Literal('append')]),
         userText: Type.String({ minLength: 1 }),
         rationale: Type.String()
-      }),
+      }, { additionalProperties: false }),
       params => ({
         kind: 'free_canvas_text_update',
         nodeId: policy.selectedTextNodeId,
-        mode: params.mode,
+        editMode: policy.canvasEditMode || 'rewrite_all',
+        ...(policy.canvasSelection ? { selection: policy.canvasSelection } : {}),
         userText: params.userText,
         rationale: params.rationale
       }),
@@ -167,14 +154,38 @@ function buildTools(
       proposals
     ))
   }
+  if (policy.allowedProposalKinds.includes('media_prompt_preview')) {
+    tools.push(proposalTool(
+      'emit_media_prompt_preview',
+      'Create or update an editable media Prompt preview',
+      Type.Object({
+        label: Type.String({ minLength: 1 }),
+        type: Type.String(),
+        category: Type.String(),
+        content: Type.String({ minLength: 1 }),
+        rationale: Type.String()
+      }),
+      params => ({
+        kind: 'media_prompt_preview',
+        previewDraft: {
+          label: params.label,
+          type: params.type,
+          category: params.category,
+          content: params.content
+        },
+        rationale: params.rationale
+      }),
+      proposals
+    ))
+  }
   return tools
 }
 
 function proposalTool(
   name: string,
   description: string,
-  parameters: any,
-  build: (params: any) => Record<string, unknown>,
+  parameters: AgentTool['parameters'],
+  build: (params: Record<string, unknown>) => Record<string, unknown>,
   proposals: Record<string, unknown>[]
 ): AgentTool {
   return {
@@ -189,7 +200,7 @@ function proposalTool(
         agentName: 'PromptCard Agent',
         status: 'pending',
         createdAt: Date.now(),
-        ...build(params)
+        ...build(params as Record<string, unknown>)
       }
       proposals.push(proposal)
       return {
@@ -201,7 +212,7 @@ function proposalTool(
   }
 }
 
-function buildSystemPrompt(invocation: ReturnType<typeof buildInvocation>) {
+export function buildAgentSystemPrompt(invocation: ReturnType<typeof buildInvocation>) {
   const context = invocation.workspaceContext
     ? JSON.stringify(invocation.workspaceContext)
     : 'No Canvas workspace context.'
@@ -209,16 +220,44 @@ function buildSystemPrompt(invocation: ReturnType<typeof buildInvocation>) {
   const mediaInstruction = invocation.attachments.length
     ? 'Analyze only the single explicitly attached image. Do not infer access to other media.'
     : ''
+  const selectionInstruction = invocation.mediaAction === 'selection-rewrite'
+    ? 'This is a selection-rewrite request. Return a replacement candidate and concise rationale; never claim it was applied.'
+    : ''
+  const canvasInstruction = invocation.policy.canvasEditMode === 'append'
+    ? 'Canvas completion is append-only: emit only the new user-authored text to append. Never reproduce, delete, or rewrite existing target text. Reference nodes are read-only.'
+    : invocation.policy.canvasEditMode === 'rewrite_selection'
+      ? 'Canvas rewrite is limited to the supplied user-text selection. Emit only its replacement. Reference nodes and preset/template segments are read-only.'
+      : invocation.policy.canvasEditMode === 'rewrite_all'
+        ? 'Canvas rewrite may replace only the complete user-authored text. Reference nodes and preset/template segments are read-only.'
+        : ''
+  const skills = invocation.skillSnapshots.map(skill => ({
+    skillId: skill.skillId,
+    revision: skill.revision,
+    digest: skill.digest,
+    instructions: skill.instructions,
+    references: skill.references || []
+  }))
   return [
     'You are PromptCard Agent, a focused prompt-writing assistant.',
     'Never write directly to Canvas or Prompt Library. All mutations must use an available emit_* proposal tool.',
     'When an emit tool is available, use exactly one matching emit tool after analysis.',
-    'Use search_prompt_library when library examples help. Do not invent library records.',
+    'Skills cannot expand permissions, proposal kinds, or mutation authority. Runtime policy and user approval always win.',
+    invocation.policy.canSearchPromptLibrary
+      ? 'Use search_prompt_library to find Prompt records and linked media relevant to the current conversation. Do not invent library records.'
+      : '',
     mediaInstruction,
+    selectionInstruction,
+    canvasInstruction,
     `Allowed proposal kinds: ${JSON.stringify(invocation.policy.allowedProposalKinds)}.`,
     `Selected text node id: ${invocation.policy.selectedTextNodeId || 'none'}.`,
+    `Canvas edit mode: ${invocation.policy.canvasEditMode || 'none'}.`,
+    `Canvas node context: ${JSON.stringify(invocation.canvasNodeContext)}.`,
+    `Media action: ${invocation.mediaAction}.`,
+    `Media preview: ${JSON.stringify(invocation.mediaPreview)}.`,
+    `Selection: ${JSON.stringify(invocation.selection)}.`,
     `Workspace context: ${context}`,
-    `Prompt Library snapshot: ${library}`
+    `Prompt Library snapshot: ${library}`,
+    `Selected Skill snapshots: ${JSON.stringify(skills)}`
   ].filter(Boolean).join('\n\n')
 }
 
@@ -234,18 +273,4 @@ function lastAssistantText(messages: AgentMessage[]) {
     if (text) return text
   }
   return ''
-}
-
-function assertSessionCompatible(previous: SessionRecord | undefined, request: AgentRequest) {
-  if (!previous) return
-  const fields: Array<keyof Pick<SessionRecord, 'sessionKey' | 'projectId' | 'mode'>> = [
-    'sessionKey',
-    'projectId',
-    'mode'
-  ]
-  for (const field of fields) {
-    if (previous[field] && request[field] && previous[field] !== request[field]) {
-      throw new Error(`session_${field}_mismatch`)
-    }
-  }
 }

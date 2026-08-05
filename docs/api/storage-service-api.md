@@ -4,7 +4,7 @@ The local storage service is the durable source of truth for projects, Prompt Li
 
 ## Health
 
-`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, `recentCaptures`, and `projectResources`. Project resource support requires schema version `7`.
+`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, `recentCaptures`, `projectResources`, `agentConversations`, and `skillHub`. The current service reports schema version `8`; project resources were introduced in v7, while durable Agent conversations and the minimal Skill registry require v8.
 
 - `GET /health`
 
@@ -133,7 +133,7 @@ The Media UI labels deletion as **Remove record**. `DELETE /api/recent-captures/
 
 Creates accept a complete capture metadata payload and return the stored item with service timestamps and `revision`. Updates require the current `revision` and replace only supplied mutable fields. Stale revisions return `409` with the current item. Malformed payloads return `400`.
 
-Registration is one SQLite transaction. `mode: "separate"` creates one preset per Capture; `mode: "merged"` creates one preset whose `meta.media` contains every selected asset. Each request item carries Capture `id` and `revision`, while user-confirmed label/content/type fields are supplied per item or in the merged `prompt` object. The response is `{ "presets": [...], "captures": [...] }`. Missing captures/assets, stale revisions, blank Prompt fields, or already-registered captures roll back the entire batch. Preset `meta.media[].assetId` is copied by reference, while `meta.recentCaptureSources` preserves Capture provenance.
+Registration is one SQLite transaction. `mode: "separate"` creates one preset per Capture; `mode: "merged"` creates one preset whose `meta.media` contains every selected asset. Each request item carries Capture `id` and `revision`, while user-confirmed label/content/type/category fields are supplied per item or in the merged `prompt` object. `category` is optional and falls back to `type`. The response is `{ "presets": [...], "captures": [...] }`. Missing captures/assets, stale revisions, blank Prompt fields, or already-registered captures roll back the entire batch. Preset `meta.media[].assetId` is copied by reference, while `meta.recentCaptureSources` preserves Capture provenance.
 
 Separate request:
 
@@ -141,7 +141,7 @@ Separate request:
 {
   "mode": "separate",
   "captures": [
-    { "id": "capture-1", "revision": 2, "label": "Hero", "content": "cinematic hero portrait", "type": "subject" }
+    { "id": "capture-1", "revision": 2, "label": "Hero", "content": "cinematic hero portrait", "type": "subject", "category": "cinematic-characters" }
   ]
 }
 ```
@@ -160,6 +160,55 @@ Merged request:
 ```
 
 Registration returns `400` for invalid modes, empty/blank Prompt fields, or already-registered items; `404` for missing Capture or asset records; and `409` for stale revisions. A failure response never contains a partially inserted Preset or partially updated Capture.
+
+## Project Agent Conversations
+
+- `POST /api/agent-conversations`
+- `GET /api/agent-conversations?projectId=...&status=active|trash&cursor=...&limit=50`
+- `GET /api/agent-conversations/{id}?projectId=...&includeTrash=false`
+- `PATCH /api/agent-conversations/{id}`
+- `POST /api/agent-conversations/{id}/turns`
+- `PATCH /api/agent-conversations/{id}/proposals/{proposalId}`
+- `POST /api/agent-conversations/{id}/trash`
+- `POST /api/agent-conversations/{id}/restore`
+- `DELETE /api/agent-conversations/{id}`
+
+Conversations are always owned by one active project and record `entrypoint`, `mode`, title, lifecycle status, and timestamps. Active and Trash lists are separate, ordered by `updatedAt DESC, id DESC`, and return `{ "conversations": [...], "nextCursor": "..." }`. The detail projection adds ordered `messages`, durable `proposals`, and stored turn results.
+
+Creating a turn requires:
+
+```json
+{
+  "projectId": "project-1",
+  "requestId": "request-1",
+  "userMessage": { "role": "user", "text": "Complete the selected prompt." },
+  "assistantMessage": { "role": "assistant", "text": "A proposal is ready." },
+  "proposals": [],
+  "skillSnapshots": [
+    { "skillId": "SKL-canvas-prompt-editor", "revision": 1, "digest": "sha256:..." }
+  ]
+}
+```
+
+`(conversationId, requestId)` is unique. Repeating it returns the first stored result without inserting duplicate messages or proposals. Proposal status accepts only `approved` or `rejected` and is updated through the project-scoped proposal route.
+
+Moving a conversation to Trash preserves all child records. Restore returns it to the active list. Permanent deletion is accepted only from Trash and cascades turns, messages, and proposals. Conversation Trash is independent of project, Prompt, and asset Trash.
+
+## Skill Registry
+
+- `GET /api/skills`
+- `GET /api/skills/{skillId}`
+- `POST /api/skills`
+- `POST /api/skills/{skillId}/revisions`
+
+Schema v8 seeds two first-party Skills:
+
+- `SKL-canvas-prompt-editor`, capability `canvas.prompt.edit`
+- `SKL-media-prompt-reverse`, capability `media.prompt.reverse`
+
+Each Skill summary exposes stable ID/slug, name, description, `builtin|external` source, trust state, optional capability ID, declared tool dependencies, current revision, and digest. Detail returns immutable revisions containing instructions, bounded references, digest, and creation time.
+
+The mutation routes create external Skills and append external revisions only. Built-in revisions are application-managed. The current API is a minimal local registry: it does not import archives, execute scripts, publish to Codex, enable hosts, archive packages, or delete revisions.
 
 ## Projects
 

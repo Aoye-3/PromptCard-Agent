@@ -16,11 +16,11 @@ The core rule is simple: source can be updated from GitHub; user data must not b
 | User assets | User | `data/assets/` | No | Generated content, imported media, project material, and other user files. Projects and presets store references only. |
 | User backups | User | `backups/` | No | Migration, manual, and pre-update snapshots. |
 | Desktop logs | User/runtime | `logs/desktop-profile/logs/` | No | Runtime diagnostics for the editable desktop shell. |
-| Agent Runtime state | User/runtime | `logs/desktop-profile/agent-runtime/.promptcard-runtime/` | No | Model connection metadata; pi conversation state is process-local. |
+| Agent Runtime state | User/runtime | `logs/desktop-profile/agent-runtime/.promptcard-runtime/` | No | Model connection metadata only; project conversation history belongs to PromptCard Storage. |
 | Desktop profile metadata | User/runtime | `logs/desktop-profile/config/desktop-shell.json` | No | Profile identity and source-root metadata. |
 | Update source metadata | User/runtime | `logs/desktop-profile/config/update-source.json` | No | GitHub repository URL, remote name, branch, last checked commit, and check timestamp. |
 | Browser UI cache | User/browser profile | localforage `PromptCard/promptcard` | No | Settings, prompt history, templates, old migration markers, and UI-only cache. |
-| Browser local settings | User/browser profile | localStorage | No | Language, Agent sessions, and older AI settings such as `prompt_card_config`. |
+| Browser local settings | User/browser profile | localStorage | No | Language, selected Agent conversation ID, and older AI settings such as `prompt_card_config`; no authoritative transcript. |
 | Bundled prompt seeds | Source/example | `public/prompt-library-presets.json` | Yes | Read by the storage service only when seeding an empty database. |
 | Documentation assets | Source/example | `docs/assets/` | Yes | Example/reference material for documentation. |
 | Test fixtures | Source/example | test files and fixture directories | Yes | Maintained with code and allowed to change through source updates. |
@@ -70,12 +70,14 @@ Startup must verify that Storage Service health reports the expected repository 
 
 The local storage service owns durable project data:
 
-- SQLite database: projects, project-scoped resource folders/resources, presets, Recent Captures, asset metadata and lifecycle, Trash state, schema migrations, and browser import markers.
+- SQLite database: projects, project-scoped resource folders/resources, presets, Recent Captures, asset metadata and lifecycle, text-Agent conversations and proposals, Skill revisions, Trash state, schema migrations, and browser import markers.
 - Assets directory: user file bytes addressed by generated `assetId` values. Schema v6 tracks `active -> trash -> deleted`; permanent deletion leaves a lightweight tombstone.
 - Backup/restore: SQLite-consistent backups that include both database and asset files.
 - Migration: read-only import from legacy JSON and browser cache.
 
 Schema v7 stores project resource metadata independently from project JSON. Every resource query is scoped by an active `project_id`; project Trash preserves rows read-only, permanent project deletion cascades metadata, and source/preview/provider asset IDs remain strong references.
+
+Schema v8 stores project text-Agent conversations, messages, proposal state, idempotent completed turns, and the minimal Skill registry independently from project JSON. The Agent conversation Trash is a separate lifecycle surface. Media analysis history is intentionally not stored.
 
 Frontend code must use `src/utils/storage.ts`, `storageServiceClient.projectResources`, and `/storage-api/*`. It must not write project, resource, preset, Recent Capture, or asset data directly to files.
 

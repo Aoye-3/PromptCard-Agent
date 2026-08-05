@@ -97,6 +97,27 @@ describe('storageServiceClient', () => {
     await expect(storageServiceClient.projects.getById('missing')).resolves.toBeNull()
   })
 
+  test('manages project agent conversations and skills through scoped endpoints', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({
+      conversations: [], skills: []
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await storageServiceClient.agentConversations.list('project/1', 'trash')
+    await storageServiceClient.agentConversations.create({
+      projectId: 'project/1', entrypoint: 'workspace-chatbot-agent', mode: 'free-canvas'
+    })
+    await storageServiceClient.agentConversations.trash('conversation/1', 'project/1')
+    await storageServiceClient.agentConversations.restore('conversation/1', 'project/1')
+    await storageServiceClient.agentConversations.deleteForever('conversation/1', 'project/1')
+    await storageServiceClient.skills.list()
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/storage-api/agent-conversations?projectId=project%2F1&status=trash&limit=50', expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/storage-api/agent-conversations/conversation%2F1/trash', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/storage-api/agent-conversations/conversation%2F1', expect.objectContaining({ method: 'DELETE' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/storage-api/skills', expect.any(Object))
+  })
+
   test('reports request timeouts', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {

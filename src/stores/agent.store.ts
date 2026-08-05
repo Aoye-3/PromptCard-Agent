@@ -14,7 +14,8 @@ import type {
   AgentUser,
   AgentWorkspaceContext,
   AgentWorkspaceMode,
-  AgentWorkspaceProposal
+  AgentWorkspaceProposal,
+  CanvasAgentNodeContext
 } from '@/models/Agent.model'
 import type { IPreset } from '@/models/Card.model'
 
@@ -47,15 +48,18 @@ interface AgentState {
       mode?: AgentWorkspaceMode
       permissionScope?: AgentPermissionScope
       sessionKey: AgentSessionKey
+      conversationId?: string
+      selectedSkillIds?: string[]
+      canvasNodeContext?: CanvasAgentNodeContext
     }
   ) => Promise<AgentWorkspaceProposal[]>
   getAgentSession: (sessionKey: AgentSessionKey) => AgentConversationSession
+  hydrateSession: (sessionKey: AgentSessionKey, session: Partial<AgentConversationSession>) => void
   markProposalStatus: (id: string, status: 'approved' | 'rejected', sessionKey: AgentSessionKey) => void
   clearMessages: (sessionKey: AgentSessionKey) => void
 }
 
 const messageId = () => `agent-message-${Date.now()}-${Math.random().toString(16).slice(2)}`
-const STORAGE_KEY = 'promptcard-agent-sessions-v1'
 
 const emptySession = (): AgentConversationSession => ({
   messages: [],
@@ -66,49 +70,6 @@ const emptySession = (): AgentConversationSession => ({
 
 const getSessionFromState = (state: Pick<AgentState, 'sessionsByKey'>, sessionKey: AgentSessionKey) =>
   state.sessionsByKey[sessionKey] || emptySession()
-
-const persistSessions = (sessionsByKey: Record<AgentSessionKey, AgentConversationSession>) => {
-  if (typeof window === 'undefined') return
-  const serializable = Object.fromEntries(
-    Object.entries(sessionsByKey).map(([key, session]) => [
-      key,
-      {
-        threadId: session.threadId,
-        messages: session.messages,
-        proposals: session.proposals,
-        updatedAt: session.updatedAt
-      }
-    ])
-  )
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(serializable))
-}
-
-const loadPersistedSessions = (): Record<AgentSessionKey, AgentConversationSession> => {
-  if (typeof window === 'undefined') return {}
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return {}
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return {}
-    return Object.fromEntries(
-      Object.entries(parsed as Record<string, Partial<AgentConversationSession>>)
-        .filter(([, value]) => value && typeof value === 'object')
-        .map(([key, value]) => [
-          key,
-          {
-            threadId: typeof value.threadId === 'string' ? value.threadId : undefined,
-            messages: Array.isArray(value.messages) ? value.messages : [],
-            proposals: Array.isArray(value.proposals) ? value.proposals : [],
-            running: false,
-            runtimeError: undefined,
-            updatedAt: typeof value.updatedAt === 'number' ? value.updatedAt : 0
-          }
-        ])
-    )
-  } catch {
-    return {}
-  }
-}
 
 const loadRuntimeCatalog = async () => {
   const catalog = await agentRuntimeService.catalog()
@@ -132,7 +93,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   builtinTools: [],
   subagentEnabled: false,
   agents: [],
-  sessionsByKey: loadPersistedSessions(),
+  sessionsByKey: {},
   modelConfigSaving: false,
   modelConfigTesting: false,
 
@@ -243,13 +204,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
       const result = await agentRuntimeService.sendMessage({
         threadId: getSessionFromState(get(), sessionKey).threadId,
+        ...(options?.conversationId ? { conversationId: options.conversationId } : {}),
+        requestId: messageId(),
         content,
         mode: options?.mode,
         permissionScope: options?.permissionScope || (options?.workspaceContext ? 'workspace-chatbot-agent' : 'prompt-library-agent'),
         sessionKey,
         projectId: options?.workspaceContext?.projectId,
         workspaceContext: options?.workspaceContext,
-        promptLibrary: presets.map(preset => ({
+        ...(options?.selectedSkillIds?.length ? { selectedSkillIds: options.selectedSkillIds } : {}),
+        ...(options?.canvasNodeContext ? { canvasNodeContext: options.canvasNodeContext } : {}),
+        promptLibrary: (
+          options?.permissionScope === 'prompt-library-agent'
+          || options?.canvasNodeContext?.mode === 'prompt-library'
+            ? presets.slice(0, 200)
+            : []
+        ).map(preset => ({
           id: preset.id,
           type: preset.type,
           category: preset.category,
@@ -269,6 +239,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           ...session,
           running: false,
           threadId: result.threadId,
+          conversationId: result.conversationId || options?.conversationId || session.conversationId,
           messages: [
             ...session.messages,
             {
@@ -308,6 +279,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   getAgentSession: (sessionKey) => getSessionFromState(get(), sessionKey),
 
+  hydrateSession: (sessionKey, session) => {
+    set(state => ({
+      sessionsByKey: updateSessions(state.sessionsByKey, sessionKey, current => ({
+        ...current,
+        ...session,
+        messages: session.messages || current.messages,
+        proposals: session.proposals || current.proposals,
+        running: false
+      }))
+    }))
+  },
+
   markProposalStatus: (id, status, sessionKey) => {
     set(state => ({
       sessionsByKey: updateSessions(state.sessionsByKey, sessionKey, session => ({
@@ -337,7 +320,6 @@ function updateSessions(
     ...sessionsByKey,
     [sessionKey]: updater(getSessionFromState({ sessionsByKey }, sessionKey))
   }
-  persistSessions(next)
   return next
 }
 

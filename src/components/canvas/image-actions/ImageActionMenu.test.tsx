@@ -77,6 +77,7 @@ describe('image action menu surfaces', () => {
     expect(html).toContain('aria-label="文字节点菜单"')
     expect(html).toContain('复制')
     expect(html).toContain('补全')
+    expect(html).toContain('发送到 Agent')
     expect(html).toContain('删除')
     expect(html).toContain('Ctrl+C')
     expect(html).toContain('Backspace')

@@ -8,4 +8,5 @@
 - [Builder Template Library](./builder-template-library.md)
 - [Three-stage Builder](./three-stage-builder.md)
 - [Free Canvas Workspace](./free-canvas.md)
+- [Canvas Agent Omnireference Prompt Editing](./canvas-agent-reference-editing.md)
 - [Contextual Image Actions](./contextual-image-actions.md)

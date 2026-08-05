@@ -10,6 +10,7 @@
   <a href="#产品总览">产品总览</a> ·
   <a href="#一条完整的本地创作链路">创作链路</a> ·
   <a href="#核心功能">核心功能</a> ·
+  <a href="#全能参考式提示词辅助编辑">提示词辅助编辑</a> ·
   <a href="#快速启动">快速启动</a> ·
   <a href="#技术架构">技术架构</a>
 </p>
@@ -19,7 +20,7 @@ PMAgent-Canvas 是面向 AIGC 创作者的本地桌面 Agent 画布。它把参�
 当前核心模型：
 
 - **Seedream 5.0 Pro**：图片生成、参考图生成与图片编辑。
-- **Doubao Seed 2.0**：提示词生成、Prompt 优化与 Agent 对话。
+- **Doubao Seed 2.0**：持久化 Agent 对话、媒体提示词倒推，以及全能参考式 Prompt 补全与重写。
 
 > [!IMPORTANT]
 > 当前仓库提供的是 **Windows 桌面开发预览**。双击 `start-desktop.vbs` 可以启动可编辑源码对应的桌面壳；它不是已签名的免环境安装包。
@@ -91,6 +92,22 @@ Prompt 不再只是一次性的文本。PMAgent-Canvas 将提示词、参考媒�
   <img src="./assets/readme/screenshots/agent-collaboration.webp" width="100%" alt="PMAgent-Canvas 快捷消息节点、悬浮编辑工具和 Agent 协作面板">
 </p>
 
+## 全能参考式提示词辅助编辑
+
+Canvas Agent 将图片生成中的“全能参考”关系带到文本提示词编辑：先指定一个被编辑目标，再挂载多个只读参考，通过 `@节点` 明确描述目标与参考之间的关系。节点正文不会被塞进输入框，用户可以在保持对话清晰的同时组织复杂 Prompt 上下文。
+
+- **一个目标、多个参考**：最多挂载 10 个文本节点；左侧唯一目标可写，其余节点始终只读。
+- **原子化 `@` 引用**：输入 `@` 只显示已挂载节点，可以表达“以 `@目标` 为修改对象，参考 `@风格` 和 `@镜头`”等关系。
+- **补全模式**：仅在目标已有用户内容后追加新的用户段，不覆盖原文。
+- **重写模式**：有有效用户段选区时只替换选区；没有选区时只重写目标的完整用户部分。
+- **Prompt 库调取模式**：普通对话不加载 Prompt Library；只有显式切换到该只读模式时，Agent 才会基于当前对话搜索 Prompt 与关联媒体，不产生 Canvas 写入提案。
+- **模板保护**：模板段只用于语义与结构参考，Agent、Gateway 和提案应用层都不允许修改。
+- **先预览再写入**：结果以差异提案显示；节点 revision、模板摘要、用户内容摘要或选区发生变化时，旧提案会被拒绝。
+- **稳定节点身份**：文本节点使用 `TXT-XXXXXX` 默认名称，可在画布顶部工具栏重命名；画布标签和 `@` 列表同步更新。
+- **持久化聊天视图**：会话历史在独立滚动区域中显示，用户消息靠右、Agent 消息靠左，便于持续讨论与回看。
+
+详细交互、安全边界与请求协议见 [Canvas Agent 全能参考式提示词编辑](./docs/frontend/canvas-agent-reference-editing.md)。
+
 ## 使用场景
 
 ### AIGC 分镜头指令图制作
@@ -150,7 +167,7 @@ start-desktop.vbs
 
 | 能力槽位 | 当前核心模型 | 用途 |
 | --- | --- | --- |
-| 文本 / Agent | Doubao Seed 2.0 | Agent 对话、提示词生成与优化 |
+| 文本 / Agent | Doubao Seed 2.0 | 持久化对话、媒体提示词倒推、Canvas Prompt 补全与重写 |
 | 图片生成 / 编辑 | Seedream 5.0 Pro | 文生图、参考图生成与图片编辑 |
 
 模型凭据由后端写入操作系统密钥环，不进入浏览器存储、项目 JSON、生成历史或 API 响应。未配置凭据时，模型调用会返回 `credential_missing`。
@@ -180,6 +197,7 @@ start-desktop.vbs
 - [Agent Runtime 边界](./docs/architecture/agent-runtime-boundary.md)
 - [Agent Runtime API](./docs/api/agent-runtime-api.md)
 - [前端应用结构](./docs/frontend/app-shell.md)
+- [Canvas Agent 全能参考式提示词编辑](./docs/frontend/canvas-agent-reference-editing.md)
 - [图片生成与模型管理](./docs/architecture/image-generation-and-model-management.md)
 
 <details>

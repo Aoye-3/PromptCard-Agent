@@ -14,6 +14,8 @@ Responsibilities:
 - secure PI-native provider forwarding with Python-owned credentials
 - SDK-backed text adapters, with Volcengine Ark as the first adapter
 - Media Library image loading
+- project conversation coordination through PromptCard Storage
+- first-party capability binding, one-shot external Skill resolution, and tool-dependency validation
 - existing image-generation routing and lifecycle
 - internal authentication between local services
 
@@ -26,9 +28,9 @@ Location: `text-agent-runtime/`
 Responsibilities:
 
 - pi agent loop using `@earendil-works/pi-agent-core`
-- short in-memory session history
-- Prompt Library snapshot search
-- proposal-only tools for Canvas text and Prompt Library creation
+- request-scoped normalized conversation history supplied by Gateway
+- explicit, request-scoped Prompt Library snapshot search
+- proposal-only tools for Canvas text, Prompt Library creation, and Media Prompt preview
 - PI `createProvider`/`createModels` registration for PI-native and SDK-backed text families
 - multimodal message forwarding through the selected text provider
 
@@ -38,12 +40,25 @@ The pi service does not hold model credentials and cannot write to Canvas, Stora
 
 1. The frontend posts to the Python Gateway.
 2. The Gateway validates browser session and CSRF state.
-3. The Gateway forwards a bounded request to pi with an internal token.
-4. pi decides whether to search the provided Prompt Library snapshot or emit one allowed proposal.
-5. pi resolves `chat.primary` through the non-secret internal descriptor and its `Models` collection.
-6. PI-native calls use PI's API implementation through the secure Gateway proxy; SDK-backed calls dispatch through the Gateway text adapter registry.
-7. The Gateway validates returned proposals again before returning them to the frontend.
-8. The user explicitly applies or rejects each proposal.
+3. For project chat, Gateway validates the conversation scope, loads bounded SQLite history, and resolves the feature plus one-shot Skill snapshots. Media chat instead forwards bounded temporary history from the current dialog.
+4. The Gateway forwards normalized history, current context, allowed tools, and bounded Skill snapshots to pi with an internal token.
+5. pi exposes Prompt Library search only for an explicit `prompt-library` request; other project chat receives an empty library and no search tool. It may otherwise emit one proposal allowed by the request policy.
+6. pi resolves `chat.primary` through the non-secret internal descriptor and its `Models` collection.
+7. PI-native calls use PI's API implementation through the secure Gateway proxy; SDK-backed calls dispatch through the Gateway text adapter registry.
+8. The Gateway validates returned proposals again and persists the project turn, proposal status, tool summary, and exact Skill revision/digest. Media responses are not persisted.
+9. The user explicitly applies or rejects each proposal.
+
+## Prompt Library lookup boundary
+
+Canvas Prompt Library lookup is a distinct, read-only request mode, not ambient Agent knowledge:
+
+- Normal Agent discussion, `complete`, and `rewrite` requests neither inject nor search Prompt Library data.
+- The frontend sends Prompt records only when `canvasNodeContext.mode` is `prompt-library`, with a hard maximum of 200 items. Each record may include its associated `meta.media` data.
+- `buildInvocation` keeps at most the first 100 items and enables `search_prompt_library`; the search tool reads only that bounded request snapshot.
+- The mode requires `targetNodeId: null`. Gateway grants no Canvas emit tool, the pi policy has no allowed Canvas proposal kind, and returned Canvas write proposals are discarded.
+- The mode does not write Prompt Library data. The separate `prompt-library-agent` permission scope retains its existing proposal-only creation contract and must not be confused with Canvas read-only lookup.
+
+The embedded Agent UI keeps conversation history in its own scroll container and renders user turns on the right and Agent turns on the left. Validation failures remain visible above the conversation area: the frontend recognizes Prompt Library item-limit errors and otherwise displays a whitespace-normalized, 240-character summary of the original Runtime error.
 
 ## Commands
 

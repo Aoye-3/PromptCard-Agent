@@ -20,7 +20,7 @@
 - Confirm update apply rejects a dirty Git worktree before running `git merge --ff-only FETCH_HEAD`
 - Confirm a SQLite/assets backup under `backups/` succeeds before source files are changed
 - Confirm incomplete capabilities are labeled as roadmap or not yet implemented
-- Confirm PromptCard Storage health reports schema v7 before enabling Seedream 5.0 Pro generation
+- Confirm PromptCard Storage health reports schema v8, including `agentConversations` and `skillHub`, before enabling the current application surface
 - Confirm `npm.cmd run test:e2e` owns its real SQLite Storage, Fake Runtime, and Vite service processes, refuses preoccupied ports, and releases ports `38100–38102` after success, failure, timeout, and no-match exits
 - Confirm the image-generation Playwright configuration passes through the same owned-service runner without an existing service on ports `38100–38102`
 - Confirm JPEG/PNG/WebP direct input plus BMP/TIFF/GIF/HEIC/HEIF original-and-derivative import

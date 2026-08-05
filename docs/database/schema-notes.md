@@ -12,6 +12,11 @@ Core frontend schemas:
 - `IThreeStageForm`
 - `PromptLibraryWriteProposal`
 - `AgentWorkspaceProposal`
+- `AgentConversation`
+- `AgentConversationMessage`
+- `AgentConversationProposal`
+- `AgentSkill`
+- `AgentSkillRevision`
 - `RecentCaptureItem`
 - `RecentCaptureItemViewModel`
 - `IFreeCanvasImageGeneratorNode`
@@ -75,6 +80,26 @@ PromptCard Storage schema v7 adds `project_resource_folders` and `project_resour
 Folders use nullable `parent_id`, integer `sort_order`, and optimistic `revision`. The application rejects cycles and non-empty deletion. Resources use `kind: "subject" | "material"`, name, source/preview/provider asset IDs, decoded dimensions, MIME type, nullable folder, order, and revision. Subject folders are prohibited by a database check, and `(project_id, kind, source_asset_id)` is unique.
 
 All three asset IDs are foreign-key and diagnostics references. Removing a resource never deletes those assets. Layout changes validate every supplied revision and commit parent/folder/order changes in one transaction.
+
+## Agent Conversation And Skill Tables
+
+PromptCard Storage schema v8 makes SQLite the durable authority for project Agent conversations and the minimal Skill registry.
+
+Project conversation tables:
+
+- `agent_conversations` stores the owning `project_id`, `entrypoint`, `mode`, title, `active | trash` status, and lifecycle timestamps. It is separate from image-generation conversations.
+- `agent_conversation_messages` stores ordered user, assistant, and tool-visible records. Visible text, normalized content blocks, and tool summaries are retained so Gateway can reconstruct bounded model history after any process restart.
+- `agent_conversation_proposals` stores proposal payloads and `pending | approved | rejected` status against the originating message. Reloading a conversation therefore restores both the transcript and unresolved approvals.
+- `agent_conversation_turns` keys each completed turn by `(conversation_id, request_id)` and stores the response envelope used for idempotent retry handling.
+
+Every conversation lookup is project-scoped. Moving a conversation to Trash retains its messages, proposals, and completed turns; permanent deletion is accepted only from Trash and cascades those child rows. Permanent project deletion also cascades its Agent conversations. Media analysis does not write any of these tables.
+
+Skill registry tables:
+
+- `agent_skills` stores the stable Skill identity and slug, source, trust state, capability binding, declared Runtime tool dependencies, active revision, and lifecycle timestamps.
+- `agent_skill_revisions` stores immutable revision content, digest, instructions, allowed references, and creation metadata. A digest identifies the exact snapshot supplied to a run.
+
+Schema v8 seeds the trusted first-party `canvas-prompt-editor` and `media-prompt-reverse` Skills. First-party Skills are read-only through the public Storage API. External Skills may be registered and revised, but the initial implementation supplies only their instructions and references to the local text Agent; it does not execute Skill scripts.
 
 ## Recent Capture Shape
 

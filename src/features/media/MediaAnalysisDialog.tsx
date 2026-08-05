@@ -1,139 +1,143 @@
-import { FileText, MessageSquare, ShieldCheck, Wand2, X } from 'lucide-react'
-import { useState } from 'react'
+import { Check, FileText, Loader2, Send, ShieldCheck, Sparkles, Wand2, X } from 'lucide-react'
+import { useRef, useState } from 'react'
 import { useI18n } from '@/i18n'
+import type { AgentMediaPromptPreviewProposal } from '@/models/Agent.model'
 import { agentRuntimeService } from '@/services/agent-runtime-service'
+import { storageServiceClient } from '@/storage/storage-service-client'
+import type { CardType } from '@/models/Card.model'
 import type { RecentCaptureItemViewModel } from './media-types'
 import { RecentCapturePreview } from './RecentCapturePreview'
 
-export const MediaAnalysisDialog = ({
-  capture,
-  onClose
-}: {
-  capture: RecentCaptureItemViewModel | null
-  onClose: () => void
-}) => {
+type ChatMessage = { id: string; role: 'user' | 'assistant'; text: string }
+type PromptPreview = { version: number; label: string; type: CardType; category: string; content: string; rationale: string }
+type SelectionDiff = { start: number; end: number; before: string; after: string }
+
+export const MediaAnalysisDialog = ({ capture, onClose }: { capture: RecentCaptureItemViewModel | null; onClose: () => void }) => {
   const { t } = useI18n()
-  const [agentInput, setAgentInput] = useState('')
-  const [analysisOutput, setAnalysisOutput] = useState('')
-  const [analysisError, setAnalysisError] = useState('')
-  const [analysisRunning, setAnalysisRunning] = useState(false)
+  const previewRef = useRef<HTMLTextAreaElement>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [draft, setDraft] = useState('')
+  const [preview, setPreview] = useState<PromptPreview | null>(null)
+  const [selectionDiff, setSelectionDiff] = useState<SelectionDiff | null>(null)
+  const [running, setRunning] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
   if (!capture) return null
   const selectedCapture = capture
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 px-4 py-6 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t('mediaAnalysisDialogAria')} data-media-analysis-dialog>
-      <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-gray-100 px-5 py-4">
-          <div className="min-w-0">
-            <div className="text-xs font-black uppercase tracking-wide text-amber-500">{t('mediaAnalysisDialogKicker')}</div>
-            <h2 className="truncate text-xl font-black text-gray-950">{capture.title}</h2>
-          </div>
-          <button type="button" onClick={onClose} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-50 hover:text-gray-950" aria-label={t('mediaAnalysisDialogCloseAria')}>
-            <X className="h-5 w-5" />
-          </button>
-        </header>
+  async function sendChat(action: 'chat' | 'preview' | 'selection-rewrite' = 'chat') {
+    if (running) return
+    const selection = action === 'selection-rewrite' && preview && previewRef.current
+      ? {
+          start: previewRef.current.selectionStart,
+          end: previewRef.current.selectionEnd,
+          text: preview.content.slice(previewRef.current.selectionStart, previewRef.current.selectionEnd)
+        }
+      : null
+    if (action === 'chat' && !draft.trim()) return
+    if (action === 'selection-rewrite' && (!selection || !selection.text || !draft.trim())) return
+    const content = action === 'preview'
+      ? `${preview ? '更新' : '生成'}当前讨论形成的 Prompt 预览。`
+      : draft.trim()
+    const userMessage = { id: `media-user-${Date.now()}`, role: 'user' as const, text: content }
+    setMessages(current => [...current, userMessage])
+    setRunning(true)
+    setError('')
+    try {
+      await agentRuntimeService.bootstrap()
+      const result = await agentRuntimeService.analyzeMedia({
+        assetId: selectedCapture.assetId,
+        contentType: selectedCapture.contentType,
+        analysisType: action === 'preview' ? 'prompt' : 'freeform',
+        content,
+        history: messages.map(message => ({ role: message.role, text: message.text })),
+        mediaAction: action,
+        mediaPreview: preview,
+        selection
+      })
+      setMessages(current => [...current, { id: `media-agent-${Date.now()}`, role: 'assistant', text: result.text }])
+      if (action === 'preview') {
+        const proposal = result.proposals.find(item => item.kind === 'media_prompt_preview') as AgentMediaPromptPreviewProposal | undefined
+        if (proposal) setPreview({ version: (preview?.version || 0) + 1, ...proposal.previewDraft, rationale: proposal.rationale })
+      } else if (action === 'selection-rewrite' && selection) {
+        setSelectionDiff({ ...selection, before: selection.text, after: result.text.trim() })
+      }
+      setDraft('')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setRunning(false)
+    }
+  }
 
-        <div className="grid min-h-0 flex-1 gap-4 overflow-y-auto bg-[#f7f7f5] p-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(360px,1.05fr)]">
-          <section className="grid min-h-[560px] gap-3 rounded-lg border border-gray-200 bg-white p-4" style={{ gridTemplateRows: '6fr 3fr 1fr' }} data-media-dossier>
-            <div className="min-h-0" data-media-analysis-preview>
-              <div className="mb-2 text-xs font-black uppercase tracking-wide text-gray-500">{t('mediaAnalysisPreviewLabel')}</div>
-              <RecentCapturePreview capture={capture} />
-              <div className="mt-2 flex flex-wrap gap-2 text-xs font-bold text-gray-400">
-                <span>{capture.contentType}</span>
-                <span>{capture.sizeLabel}</span>
-                {capture.dimensionsLabel ? <span>{capture.dimensionsLabel}</span> : null}
-              </div>
-            </div>
-            <label className="min-h-0" data-media-analysis-prompt>
-              <span className="mb-2 block text-xs font-black uppercase tracking-wide text-gray-500">{t('mediaAnalysisPromptDraftLabel')}</span>
-              <textarea readOnly value={capture.prompt} className="h-[calc(100%-24px)] min-h-[120px] w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-6 text-gray-800" />
-            </label>
-            <label className="min-h-0" data-media-analysis-note>
-              <span className="mb-2 block text-xs font-black uppercase tracking-wide text-gray-500">{t('mediaAnalysisNoteLabel')}</span>
-              <textarea readOnly value={capture.userNote} className="h-[calc(100%-24px)] min-h-[72px] w-full resize-none rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-6 text-gray-800" />
-            </label>
+  function applySelectionDiff() {
+    if (!preview || !selectionDiff) return
+    setPreview({
+      ...preview,
+      version: preview.version + 1,
+      content: preview.content.slice(0, selectionDiff.start) + selectionDiff.after + preview.content.slice(selectionDiff.end)
+    })
+    setSelectionDiff(null)
+  }
+
+  async function writePrompt() {
+    if (!preview || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await storageServiceClient.recentCaptures.registerToPromptLibrary({
+        mode: 'separate',
+        captures: [{
+          id: selectedCapture.id,
+          revision: selectedCapture.revision,
+          label: preview.label,
+          content: preview.content,
+          type: preview.type,
+          category: preview.category
+        }]
+      })
+      onClose()
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={t('mediaAnalysisDialogAria')} data-media-analysis-dialog>
+      <div className="flex max-h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+        <header className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
+          <div><div className="text-xs font-black uppercase tracking-wide text-amber-500">临时媒体对话</div><h2 className="mt-1 truncate text-xl font-black">{capture.title}</h2></div>
+          <button type="button" onClick={onClose} className="rounded-lg border border-gray-200 p-2 text-gray-500 hover:bg-gray-50" aria-label={t('mediaAnalysisDialogCloseAria')}><X className="h-5 w-5" /></button>
+        </header>
+        <div className="grid min-h-0 flex-1 overflow-y-auto bg-[#f7f7f5] lg:grid-cols-[minmax(300px,0.8fr)_minmax(420px,1.2fr)]">
+          <section className="space-y-4 border-r border-gray-200 p-4" data-media-dossier>
+            <div data-media-analysis-preview><div className="mb-2 text-xs font-black uppercase tracking-wide text-gray-500">媒体预览</div><RecentCapturePreview capture={capture} /><div className="mt-2 flex gap-2 text-xs font-bold text-gray-400"><span>{capture.contentType}</span><span>{capture.sizeLabel}</span>{capture.dimensionsLabel ? <span>{capture.dimensionsLabel}</span> : null}</div></div>
+            <label data-media-analysis-prompt><span className="mb-1 block text-xs font-bold text-gray-500">原始 Prompt</span><textarea readOnly value={capture.prompt} className="min-h-24 w-full resize-none rounded-lg border border-gray-200 bg-white p-3 text-xs leading-5 text-gray-700" /></label>
+            <label data-media-analysis-note><span className="mb-1 block text-xs font-bold text-gray-500">备注</span><textarea readOnly value={capture.userNote} className="min-h-16 w-full resize-none rounded-lg border border-gray-200 bg-white p-3 text-xs leading-5 text-gray-700" /></label>
+            <div className="flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50 p-3 text-xs font-semibold leading-5 text-emerald-800"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />只使用当前素材；关闭窗口即清空对话。内置 Media Prompt Reverse Skill 已启用。</div>
           </section>
 
-          <section className="flex min-h-[560px] flex-col rounded-lg border border-gray-200 bg-white" data-media-agent-workspace>
-            <div className="border-b border-gray-100 p-4">
-              <h3 className="text-sm font-black text-gray-950">{t('mediaAnalysisWorkspaceTitle')}</h3>
-              <p className="mt-1 text-xs font-semibold leading-5 text-gray-500">{t('mediaAnalysisWorkspaceDescription')}</p>
+          <section className="grid min-h-[620px] grid-rows-[minmax(180px,1fr)_auto_minmax(220px,1fr)] gap-3 p-4" data-media-agent-workspace>
+            <div className="min-h-0 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3" data-media-analysis-chat>
+              <div className="mb-3 flex items-center gap-2 text-xs font-black uppercase tracking-wide text-gray-500"><Sparkles className="h-4 w-4 text-amber-500" />临时讨论</div>
+              {messages.length === 0 ? <p className="text-sm leading-6 text-gray-400">先与 Agent 讨论构图、风格和约束；确认方向后再显式生成 Prompt 预览。</p> : <div className="space-y-2">{messages.map(message => <div key={message.id} className={`rounded-lg px-3 py-2 text-sm leading-6 ${message.role === 'user' ? 'ml-8 bg-gray-950 text-white' : 'mr-8 bg-gray-100 text-gray-700'}`}>{message.text}</div>)}</div>}
             </div>
-            <div className="grid gap-3 p-4">
-              <label>
-                <span className="mb-2 block text-xs font-black uppercase tracking-wide text-gray-500">{t('mediaAnalysisAgentInputLabel')}</span>
-                <textarea
-                  value={agentInput}
-                  onChange={event => setAgentInput(event.target.value)}
-                  placeholder={t('mediaAnalysisAgentInputPlaceholder')}
-                  className="min-h-[112px] w-full resize-none rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-gray-900 placeholder:text-gray-400"
-                />
-              </label>
-
-              <div className="grid gap-2 sm:grid-cols-3" aria-label={t('mediaAnalysisActionsAria')}>
-                <AnalysisAction icon={<Wand2 className="h-4 w-4" />} label={t('mediaAnalysisActionStyle')} disabled={analysisRunning} onClick={() => runAnalysis('style')} />
-                <AnalysisAction icon={<MessageSquare className="h-4 w-4" />} label={t('mediaAnalysisActionSend')} disabled={analysisRunning || !agentInput.trim()} onClick={() => runAnalysis('freeform')} />
-                <AnalysisAction icon={<FileText className="h-4 w-4" />} label={t('mediaAnalysisActionPrompt')} disabled={analysisRunning} onClick={() => runAnalysis('prompt')} />
-              </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-2">
+              <textarea value={draft} onChange={event => setDraft(event.target.value)} placeholder={preview ? '输入讨论内容；也可在下方预览中框选文字后要求局部改写' : '和 Agent 讨论这张素材…'} className="min-h-16 w-full resize-none border-0 p-2 text-sm outline-none" />
+              <div className="flex flex-wrap items-center justify-between gap-2"><button type="button" onClick={() => void sendChat('preview')} disabled={running} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900"><Wand2 className="h-4 w-4" />{preview ? '更新预览' : '生成预览'}</button><div className="flex gap-2">{preview ? <button type="button" onClick={() => void sendChat('selection-rewrite')} disabled={running || !draft.trim()} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-bold">改写选区</button> : null}<button type="button" onClick={() => void sendChat('chat')} disabled={running || !draft.trim()} className="inline-flex items-center gap-1.5 rounded-lg bg-gray-950 px-3 py-2 text-xs font-bold text-white">{running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}发送</button></div></div>
+              {error ? <p className="mt-2 text-xs font-semibold text-red-600" role="alert">{error}</p> : null}
             </div>
-
-            <div className="mx-4 mb-4 flex min-h-[180px] flex-1 flex-col rounded-lg border border-dashed border-gray-200 bg-gray-50 p-4" data-media-analysis-output>
-              <div className="text-xs font-black uppercase tracking-wide text-gray-500">{t('mediaAnalysisOutputTitle')}</div>
-              <p className={`mt-3 max-w-xl whitespace-pre-wrap text-sm leading-6 ${analysisError ? 'text-red-600' : 'text-gray-600'}`}>
-                {analysisError || analysisOutput || (analysisRunning ? 'Analyzing…' : t('mediaAnalysisOutputPlaceholder'))}
-              </p>
-            </div>
-
-            <div className="mx-4 mb-4 flex items-start gap-2 rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold leading-5 text-emerald-700">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
-              {t('mediaAnalysisScopeNotice')}
+            <div className="min-h-0 overflow-y-auto rounded-lg border border-gray-200 bg-white p-3" data-media-prompt-preview>
+              <div className="mb-3 flex items-center justify-between"><div className="flex items-center gap-2 text-xs font-black uppercase tracking-wide text-gray-500"><FileText className="h-4 w-4" />Prompt 预览</div>{preview ? <span className="text-[10px] font-bold text-gray-400">v{preview.version}</span> : null}</div>
+              {!preview ? <button type="button" disabled className="mb-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gray-300 px-4 py-2.5 text-sm font-bold text-white"><FileText className="h-4 w-4" />写入 Prompt 库</button> : null}
+              {!preview ? <div className="flex min-h-32 items-center justify-center rounded-lg border border-dashed border-gray-200 text-sm text-gray-400">讨论完成后点击“生成预览”</div> : <div className="space-y-2"><div className="grid grid-cols-[1fr_120px] gap-2"><input value={preview.label} onChange={event => setPreview({ ...preview, label: event.target.value })} aria-label="Prompt 名称" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-bold" /><input value={preview.category} onChange={event => setPreview({ ...preview, category: event.target.value })} aria-label="Prompt 分类" className="rounded-lg border border-gray-200 px-3 py-2 text-sm" /></div><textarea ref={previewRef} value={preview.content} onChange={event => setPreview({ ...preview, version: preview.version + 1, content: event.target.value })} className="min-h-32 w-full resize-y rounded-lg border border-gray-200 p-3 text-sm leading-6" /><p className="text-xs leading-5 text-gray-500">{preview.rationale}</p>{selectionDiff ? <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-xs"><div className="grid grid-cols-2 gap-2"><div><b>原文</b><p className="mt-1 line-through">{selectionDiff.before}</p></div><div><b>候选</b><p className="mt-1">{selectionDiff.after}</p></div></div><div className="mt-2 flex justify-end gap-2"><button type="button" onClick={() => setSelectionDiff(null)} className="px-2 py-1 font-bold">取消</button><button type="button" onClick={applySelectionDiff} className="inline-flex items-center gap-1 rounded bg-sky-700 px-2 py-1 font-bold text-white"><Check className="h-3 w-3" />确认替换</button></div></div> : null}<button type="button" onClick={() => void writePrompt()} disabled={saving || !preview.content.trim() || !preview.label.trim()} className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gray-950 px-4 py-2.5 text-sm font-bold text-white disabled:bg-gray-300">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}写入 Prompt 库</button></div>}
             </div>
           </section>
         </div>
       </div>
     </div>
   )
-
-  async function runAnalysis(analysisType: 'style' | 'freeform' | 'prompt') {
-    setAnalysisRunning(true)
-    setAnalysisError('')
-    try {
-      await agentRuntimeService.bootstrap()
-      const result = await agentRuntimeService.analyzeMedia({
-        assetId: selectedCapture.assetId,
-        contentType: selectedCapture.contentType,
-        analysisType,
-        content: agentInput.trim()
-      })
-      setAnalysisOutput(result.text)
-    } catch (error) {
-      setAnalysisError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setAnalysisRunning(false)
-    }
-  }
 }
-
-const AnalysisAction = ({
-  icon,
-  label,
-  disabled,
-  onClick
-}: {
-  icon: JSX.Element
-  label: string
-  disabled: boolean
-  onClick: () => void
-}) => (
-  <button
-    type="button"
-    disabled={disabled}
-    onClick={onClick}
-    className="inline-flex min-h-[42px] items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-black text-gray-800 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
-    data-media-analysis-action
-  >
-    {icon}
-    {label}
-  </button>
-)

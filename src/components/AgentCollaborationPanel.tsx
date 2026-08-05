@@ -1,27 +1,44 @@
-import { useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
-import { Bot, Check, Loader2, MoreHorizontal, RefreshCw, Send, Wand2, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Bot, Check, Loader2, MoreHorizontal, Puzzle, RefreshCw, Send, Wand2, X } from 'lucide-react'
 import { useAgentStore } from '@/stores/agent.store'
 import { usePresetStore } from '@/stores/preset.store'
 import type {
   AgentMessage,
   AgentWorkspaceContext,
   AgentWorkspaceMode,
-  AgentWorkspaceProposal
+  AgentWorkspaceProposal,
+  CanvasAgentEditMode,
+  CanvasAgentSelection
 } from '@/models/Agent.model'
+import { AgentConversationMenu } from '@/components/agent/AgentConversationMenu'
+import { CanvasAgentComposer, type CanvasAgentNodeSummary } from '@/components/agent/CanvasAgentComposer'
+import {
+  attachCanvasAgentNode,
+  clearCanvasAgentTarget,
+  removeCanvasAgentNode,
+  type CanvasAgentAttachment
+} from '@/components/agent/canvas-agent-composer-model'
+import { storageServiceClient, type AgentConversationDetail } from '@/storage/storage-service-client'
 
 interface AgentCollaborationPanelProps {
   title: string
   mode: AgentWorkspaceMode
   workspaceContext: AgentWorkspaceContext
   sessionKey?: string
-  onApplyWorkspaceProposal: (proposal: AgentWorkspaceProposal) => Promise<void> | void
+  onApplyWorkspaceProposal: (proposal: AgentWorkspaceProposal) => Promise<boolean | void> | boolean | void
   autoApplyWorkspaceChanges?: boolean
   compact?: boolean
   embedded?: boolean
   contextLabel?: string
   draftRequest?: {
     id: string
-    content: string
+    content?: string
+    canvasNode?: {
+      nodeId: string
+      role: CanvasAgentAttachment['role']
+      mode?: CanvasAgentEditMode
+      selection?: CanvasAgentSelection
+    }
   }
 }
 
@@ -60,7 +77,10 @@ export function AgentCollaborationPanel({
     getAgentSession,
     checkRuntime,
     sendMessage,
-    markProposalStatus
+    markProposalStatus,
+    hydrateSession,
+    skills,
+    tools
   } = useAgentStore()
   const session = getAgentSession(sessionKey)
   const messages = session.messages
@@ -70,6 +90,19 @@ export function AgentCollaborationPanel({
   const { presets, initialized, init } = usePresetStore()
   const [draft, setDraft] = useState(embedded ? '' : '告诉 Agent 你想怎么修改当前选中的提示词卡片。')
   const [appliedMessages, setAppliedMessages] = useState<AgentMessage[]>([])
+  const [conversationId, setConversationId] = useState<string>()
+  const [skillMenuOpen, setSkillMenuOpen] = useState(false)
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([])
+  const [canvasAttachments, setCanvasAttachments] = useState<CanvasAgentAttachment[]>([])
+  const [canvasEditMode, setCanvasEditMode] = useState<CanvasAgentEditMode>('complete')
+  const [canvasSelection, setCanvasSelection] = useState<(CanvasAgentSelection & { nodeId: string }) | undefined>()
+  const [composerResetKey, setComposerResetKey] = useState(0)
+  const [composerDraft, setComposerDraft] = useState<{ id: string; content: string }>()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const canvasIdentityRef = useRef(`${sessionKey}:${workspaceContext.projectId}`)
+  const lastDraftRequestIdRef = useRef<string>()
+  const externalSkills = skills.filter(skill => skill.source === 'external' && skill.id)
+  const canvasNodes = useMemo(() => readCanvasNodeSummaries(workspaceContext), [workspaceContext])
 
   useEffect(() => {
     if (!initialized) init()
@@ -77,28 +110,89 @@ export function AgentCollaborationPanel({
   }, [checkRuntime, init, initialized])
 
   useEffect(() => {
-    if (draftRequest) setDraft(draftRequest.content)
-  }, [draftRequest])
+    if (!draftRequest || lastDraftRequestIdRef.current === draftRequest.id) return
+    if (typeof draftRequest.content === 'string') {
+      if (embedded) setComposerDraft({ id: draftRequest.id, content: draftRequest.content })
+      else setDraft(draftRequest.content)
+      lastDraftRequestIdRef.current = draftRequest.id
+    }
+    if (draftRequest.canvasNode && canvasNodes.some(node => node.id === draftRequest.canvasNode!.nodeId)) {
+      const request = draftRequest.canvasNode
+      setCanvasAttachments(current => attachCanvasAgentNode(current, request.nodeId, request.role))
+      if (request.mode) setCanvasEditMode(request.mode)
+      if (request.role === 'target') {
+        setCanvasSelection(request.selection ? { ...request.selection, nodeId: request.nodeId } : undefined)
+      }
+      lastDraftRequestIdRef.current = draftRequest.id
+    }
+  }, [canvasNodes, draftRequest, embedded])
+
+  useEffect(() => {
+    const validIds = new Set(canvasNodes.map(node => node.id))
+    setCanvasAttachments(current => current.filter(attachment => validIds.has(attachment.nodeId)))
+    setCanvasSelection(current => current && validIds.has(current.nodeId) ? current : undefined)
+  }, [canvasNodes])
+
+  useEffect(() => {
+    const identity = `${sessionKey}:${workspaceContext.projectId}`
+    if (canvasIdentityRef.current === identity) return
+    canvasIdentityRef.current = identity
+    setCanvasAttachments([])
+    setCanvasSelection(undefined)
+    setCanvasEditMode('complete')
+    setComposerResetKey(key => key + 1)
+  }, [sessionKey, workspaceContext.projectId])
 
   const conversationMessages = useMemo(
     () => [...messages, ...appliedMessages].sort((a, b) => a.createdAt - b.createdAt),
     [appliedMessages, messages]
   )
 
-  const handleSend = async (content = draft) => {
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [conversationMessages.length, running])
+
+  const handleSend = async (
+    content = draft,
+    mentions: Array<{ nodeId: string; label: string }> = []
+  ) => {
     if (!content.trim() || running) return
+    const promptLibraryMode = canvasEditMode === 'prompt-library'
+    const target = promptLibraryMode
+      ? undefined
+      : canvasAttachments.find(attachment => attachment.role === 'target')
+    const canvasNodeContext = embedded && mode === 'free-canvas-workspace'
+      ? {
+          mode: canvasEditMode,
+          targetNodeId: target?.nodeId || null,
+          referenceNodeIds: canvasAttachments
+            .filter(attachment => promptLibraryMode || attachment.role === 'reference')
+            .map(attachment => attachment.nodeId),
+          mentions,
+          ...(canvasEditMode === 'rewrite' && target && canvasSelection?.nodeId === target.nodeId
+            ? { selection: withoutNodeId(canvasSelection) }
+            : {})
+        }
+      : undefined
     const returnedProposals = await sendMessage(content.trim(), presets, {
       workspaceContext,
       mode,
       permissionScope: 'workspace-chatbot-agent',
-      sessionKey
+      sessionKey,
+      conversationId,
+      selectedSkillIds,
+      canvasNodeContext
     })
+    const succeeded = !getAgentSession(sessionKey).runtimeError
+    if (!succeeded) return
+    setSelectedSkillIds([])
 
     if (autoApplyWorkspaceChanges) {
       const workspaceProposals = returnedProposals.filter(isDirectWorkspaceProposal)
       for (const proposal of workspaceProposals) {
-        await onApplyWorkspaceProposal(proposal)
-        markProposalStatus(proposal.id, 'approved', sessionKey)
+        const applied = await onApplyWorkspaceProposal(proposal)
+        if (applied === false) continue
+        await setProposalStatus(proposal.id, 'approved')
       }
       if (workspaceProposals.length > 0) {
         setAppliedMessages(current => [
@@ -114,13 +208,30 @@ export function AgentCollaborationPanel({
     }
 
     setDraft('')
+    setCanvasAttachments([])
+    setCanvasSelection(undefined)
+    setCanvasEditMode('complete')
+    setComposerResetKey(key => key + 1)
   }
 
-  const handleComposerKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return
-    event.preventDefault()
-    if (runtimeStatus !== 'connected' || running || !draft.trim()) return
-    void handleSend()
+  const setDraftText = (content: string) => {
+    if (embedded) {
+      setComposerDraft({ id: `composer-draft-${Date.now()}-${Math.random()}`, content })
+      return
+    }
+    setDraft(content)
+  }
+
+  const setProposalStatus = async (proposalId: string, status: 'approved' | 'rejected') => {
+    if (conversationId) {
+      await storageServiceClient.agentConversations.updateProposal(
+        conversationId,
+        proposalId,
+        workspaceContext.projectId,
+        status
+      )
+    }
+    markProposalStatus(proposalId, status, sessionKey)
   }
 
   return (
@@ -168,20 +279,30 @@ export function AgentCollaborationPanel({
           </button>
         </div>
         {visibleRuntimeError && (
-          <div className="rounded-2xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-            {visibleRuntimeError}
-          </div>
+          <RuntimeErrorNotice error={visibleRuntimeError} />
         )}
       </div>
       )}
 
       {embedded && visibleRuntimeError && (
-        <div className="mx-3 mt-2 rounded-lg bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">
-          {visibleRuntimeError}
-        </div>
+        <div className="mx-3 mt-2 shrink-0"><RuntimeErrorNotice error={visibleRuntimeError} dense /></div>
       )}
 
-      <div className={`${embedded ? 'flex-1 space-y-2 p-3' : compact ? 'flex-[3_1_0%] space-y-2 p-3' : 'flex-1 space-y-3 p-5'} min-h-0 overflow-y-auto`}>
+      {embedded ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-[#e5e7eb] px-2.5 py-1.5">
+          <AgentConversationMenu
+            projectId={workspaceContext.projectId}
+            mode={mode}
+            activeConversationId={conversationId}
+            onConversationChange={handleConversationChange}
+          />
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-50 px-2 py-1 text-[9px] font-bold text-amber-800" title="此内置 Skill 由画布入口自动绑定">
+            <Wand2 className="h-3 w-3" /> Canvas Prompt Editor
+          </span>
+        </div>
+      ) : null}
+
+      <div aria-label="Agent 对话消息" className={`${embedded ? 'flex-1 space-y-2 p-3' : compact ? 'flex-[3_1_0%] space-y-2 p-3' : 'flex-1 space-y-3 p-5'} min-h-0 overflow-y-auto`}>
         {conversationMessages.length === 0 ? (
           embedded ? (
             <div className="rounded-[10px] border border-[#e5e7eb] bg-white p-3">
@@ -200,7 +321,7 @@ export function AgentCollaborationPanel({
                     className={`flex h-9 w-full items-center gap-2 px-3 text-left text-[11px] font-semibold text-[#4d4c48] transition hover:bg-[#f9fafb] ${
                       index > 0 ? 'border-t border-[#f3f4f6]' : ''
                     }`}
-                    onClick={() => setDraft(item.prompt)}
+                    onClick={() => setDraftText(item.prompt)}
                   >
                     <Wand2 className="h-3 w-3 text-[#87867f]" aria-hidden="true" />
                     {item.label}
@@ -214,24 +335,28 @@ export function AgentCollaborationPanel({
             </div>
           )
         ) : (
-          conversationMessages.slice(-8).map(message => (
+          conversationMessages.map(message => (
             <div
               key={message.id}
-              className={`${compact ? 'rounded-xl px-3 py-2 text-[13px] leading-5' : 'rounded-2xl px-4 py-3 text-sm leading-6'} ${
-                message.role === 'user'
-                  ? 'bg-black text-white'
-                  : message.role === 'system'
-                    ? 'bg-emerald-50 text-emerald-800'
-                    : 'bg-gray-50 text-gray-700'
-              }`}
+              data-agent-message-role={message.role}
+              className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
-              <div className="mb-1 text-[11px] font-black uppercase opacity-60">
-                {message.role === 'user' ? 'You' : message.role === 'system' ? 'Applied' : 'Agent'}
+              <div className={`${compact ? 'rounded-xl px-3 py-2 text-[13px] leading-5' : 'rounded-2xl px-4 py-3 text-sm leading-6'} max-w-[88%] break-words ${
+                message.role === 'user'
+                  ? 'rounded-br-md bg-[#141413] text-white'
+                  : message.role === 'system'
+                    ? 'rounded-bl-md bg-emerald-50 text-emerald-800'
+                    : 'rounded-bl-md bg-[#f3f4f6] text-[#353431]'
+              }`}>
+                <div className="mb-1 text-[10px] font-black uppercase opacity-55">
+                  {message.role === 'user' ? '你' : message.role === 'system' ? '已应用' : 'Agent'}
+                </div>
+                <pre className="whitespace-pre-wrap break-words font-sans">{message.content}</pre>
               </div>
-              <pre className="whitespace-pre-wrap font-sans">{message.content}</pre>
             </div>
           ))
         )}
+        <div ref={messagesEndRef} aria-hidden="true" />
       </div>
 
       {pendingProposals.length > 0 && (
@@ -239,14 +364,20 @@ export function AgentCollaborationPanel({
           {pendingProposals.slice(-3).map(proposal => (
             <div key={proposal.id} className="rounded-xl border border-amber-200 bg-amber-50 p-3">
               <div className="text-xs font-black text-amber-900">{proposalTitle(proposal)}</div>
-              <p className="mt-1 line-clamp-3 text-xs leading-5 text-amber-800">{proposalSummary(proposal)}</p>
+              {proposal.kind === 'free_canvas_text_update' ? (
+                <>
+                  <div className="mt-1 text-[10px] font-bold text-emerald-700">模板保持不变 · {canvasProposalModeLabel(proposal.editMode)}</div>
+                  <CanvasTextProposalPreview proposal={proposal} node={canvasNodes.find(node => node.id === proposal.nodeId)} />
+                </>
+              ) : <p className="mt-1 line-clamp-3 text-xs leading-5 text-amber-800">{proposalSummary(proposal)}</p>}
               <div className="mt-2 flex gap-2">
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 rounded-full bg-gray-950 px-3 py-1.5 text-xs font-black text-white"
                   onClick={async () => {
-                    await onApplyWorkspaceProposal(proposal)
-                    markProposalStatus(proposal.id, 'approved', sessionKey)
+                    const applied = await onApplyWorkspaceProposal(proposal)
+                    if (applied === false) return
+                    await setProposalStatus(proposal.id, 'approved')
                   }}
                 >
                   <Check className="h-3.5 w-3.5" />
@@ -255,7 +386,7 @@ export function AgentCollaborationPanel({
                 <button
                   type="button"
                   className="inline-flex items-center gap-1 rounded-full border border-amber-300 px-3 py-1.5 text-xs font-black text-amber-900"
-                  onClick={() => markProposalStatus(proposal.id, 'rejected', sessionKey)}
+                  onClick={() => void setProposalStatus(proposal.id, 'rejected')}
                 >
                   <X className="h-3.5 w-3.5" />
                   Reject
@@ -268,12 +399,12 @@ export function AgentCollaborationPanel({
 
       {embedded ? (
         <div className="shrink-0 border-t border-[#e5e7eb] bg-white p-2.5">
-          <div className="mb-2 flex min-w-0 items-center gap-1.5">
+          <div className="relative mb-2 flex min-w-0 items-center gap-1.5">
             {agentQuickPrompts.slice(0, 2).map(item => (
               <QuickPrompt
                 key={item.label}
                 label={item.label}
-                onClick={() => setDraft(item.prompt)}
+                onClick={() => setDraftText(item.prompt)}
                 dense
               />
             ))}
@@ -282,42 +413,70 @@ export function AgentCollaborationPanel({
               aria-label={agentQuickPrompts[2].label}
               title={agentQuickPrompts[2].label}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-[#e5e7eb] bg-white text-[#5e5d59] transition hover:bg-[#f9fafb] hover:text-[#141413]"
-              onClick={() => setDraft(agentQuickPrompts[2].prompt)}
+              onClick={() => setDraftText(agentQuickPrompts[2].prompt)}
             >
               <MoreHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
             </button>
+            <button
+              type="button"
+              className={`ml-auto inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-[10px] font-bold ${selectedSkillIds.length ? 'border-sky-200 bg-sky-50 text-sky-800' : 'border-[#e5e7eb] text-[#5e5d59]'}`}
+              onClick={() => setSkillMenuOpen(value => !value)}
+              aria-expanded={skillMenuOpen}
+            >
+              <Puzzle className="h-3 w-3" /> Skill{selectedSkillIds.length ? ` · ${selectedSkillIds.length}` : ''}
+            </button>
+            {skillMenuOpen ? (
+              <div className="absolute bottom-9 right-0 z-30 w-64 rounded-lg border border-gray-200 bg-white p-2 shadow-xl">
+                <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-gray-400">仅作用于下一条消息</div>
+                {externalSkills.length === 0 ? <div className="px-2 py-3 text-xs text-gray-400">暂无可主动触发的外置 Skill</div> : externalSkills.map(skill => {
+                  const dependencies = skill.toolDependencies || []
+                  const availableTools = new Set(tools.map(tool => tool.name))
+                  const unavailable = dependencies.some(name => !availableTools.has(name))
+                  const selected = selectedSkillIds.includes(skill.id!)
+                  return <label key={skill.id} className={`flex items-start gap-2 rounded-md px-2 py-2 text-xs ${unavailable ? 'cursor-not-allowed opacity-45' : 'cursor-pointer hover:bg-gray-50'}`} title={unavailable ? `缺少工具：${dependencies.filter(name => !availableTools.has(name)).join(', ')}` : skill.description}>
+                    <input type="checkbox" disabled={unavailable} checked={selected} onChange={() => setSelectedSkillIds(current => selected ? current.filter(id => id !== skill.id) : [...current, skill.id!])} />
+                    <span><span className="block font-bold text-gray-800">{skill.name}</span><span className="mt-0.5 block text-[10px] text-gray-400">v{skill.revision || 1} · {skill.trustState || skill.source}</span></span>
+                  </label>
+                })}
+              </div>
+            ) : null}
           </div>
-          <div className="rounded-[10px] border border-[#d1d5db] bg-white p-2 shadow-[0_0_0_1px_rgba(20,20,19,0.02)] focus-within:border-[#87867f]">
-            <textarea
-              className="min-h-[58px] max-h-32 w-full resize-none border-0 bg-transparent px-1 py-0.5 text-[13px] leading-5 text-[#141413] outline-none placeholder:text-[#87867f]"
-              value={draft}
-              onChange={event => setDraft(event.target.value)}
-              onKeyDown={handleComposerKeyDown}
-              placeholder="描述你想修改的内容，Enter 发送，Shift+Enter 换行"
-            />
-            <div className="mt-1 flex items-center justify-between">
-              <span className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-[#f3f4f6] px-2 text-[10px] font-semibold text-[#5e5d59]">
-                <Bot className="h-3 w-3" aria-hidden="true" />
-                画布上下文
-              </span>
-              <button
-                type="button"
-                aria-label="发送给 Agent"
-                title="发送给 Agent"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#141413] text-white transition hover:bg-[#30302e] disabled:bg-[#d1cfc5]"
-                onClick={() => handleSend()}
-                disabled={runtimeStatus !== 'connected' || running || !draft.trim()}
-              >
-                {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-              </button>
-            </div>
-          </div>
+          <CanvasAgentComposer
+            nodes={canvasNodes}
+            attachments={canvasAttachments}
+            editMode={canvasEditMode}
+            selection={canvasSelection ? withoutNodeId(canvasSelection) : undefined}
+            running={running}
+            disabled={runtimeStatus !== 'connected' || running}
+            externalDraft={composerDraft}
+            resetKey={composerResetKey}
+            onEditModeChange={nextMode => {
+              setCanvasEditMode(nextMode)
+              if (nextMode === 'prompt-library') {
+                setCanvasAttachments(clearCanvasAgentTarget)
+                setCanvasSelection(undefined)
+              }
+            }}
+            onRemoveNode={nodeId => {
+              setCanvasAttachments(current => removeCanvasAgentNode(current, nodeId))
+              setCanvasSelection(current => current?.nodeId === nodeId ? undefined : current)
+            }}
+            onSetTarget={nodeId => {
+              setCanvasAttachments(current => attachCanvasAgentNode(current, nodeId, 'target'))
+              setCanvasSelection(undefined)
+            }}
+            onClearTarget={() => {
+              setCanvasAttachments(clearCanvasAgentTarget)
+              setCanvasSelection(undefined)
+            }}
+            onSubmit={(content, mentions) => void handleSend(content, mentions)}
+          />
         </div>
       ) : (
       <div className={`${compact ? 'shrink-0 p-3' : 'p-5'} border-t border-gray-100`}>
         <div className={`${compact ? 'mb-2 gap-1.5' : 'mb-3 gap-2'} flex flex-wrap`}>
           {agentQuickPrompts.map(item => (
-            <QuickPrompt key={item.label} label={item.label} onClick={() => setDraft(item.prompt)} />
+            <QuickPrompt key={item.label} label={item.label} onClick={() => setDraftText(item.prompt)} />
           ))}
         </div>
         <textarea
@@ -340,6 +499,50 @@ export function AgentCollaborationPanel({
 
     </div>
   )
+
+  function handleConversationChange(conversation: AgentConversationDetail) {
+    setConversationId(conversation.id)
+    hydrateSession(sessionKey, {
+      conversationId: conversation.id,
+      threadId: conversation.id,
+      messages: conversation.messages.map((message, index) => ({
+        id: message.id || `stored-message-${index}`,
+        role: message.role,
+        content: message.text,
+        createdAt: message.createdAt || conversation.createdAt + index
+      })),
+      proposals: conversation.proposals as unknown as AgentWorkspaceProposal[],
+      updatedAt: conversation.updatedAt
+    })
+    setCanvasAttachments([])
+    setCanvasSelection(undefined)
+    setCanvasEditMode('complete')
+    setComposerResetKey(key => key + 1)
+  }
+}
+
+function readCanvasNodeSummaries(workspaceContext: AgentWorkspaceContext): CanvasAgentNodeSummary[] {
+  const nodes = Array.isArray(workspaceContext.snapshot.nodes) ? workspaceContext.snapshot.nodes : []
+  return nodes.flatMap(value => {
+    if (!value || typeof value !== 'object') return []
+    const node = value as Record<string, unknown>
+    if (node.kind !== 'text' || typeof node.id !== 'string') return []
+    return [{
+      id: node.id,
+      title: String(node.title || node.id),
+      displayText: String(node.displayText || ''),
+      userText: String(node.userText || '')
+    }]
+  })
+}
+
+function withoutNodeId(selection: CanvasAgentSelection & { nodeId: string }): CanvasAgentSelection {
+  return {
+    start: selection.start,
+    end: selection.end,
+    selectedText: selection.selectedText,
+    baseContentDigest: selection.baseContentDigest
+  }
 }
 
 function QuickPrompt({ label, onClick, dense = false }: { label: string; onClick: () => void; dense?: boolean }) {
@@ -355,6 +558,30 @@ function QuickPrompt({ label, onClick, dense = false }: { label: string; onClick
       <span className="truncate">{label}</span>
     </button>
   )
+}
+
+function CanvasTextProposalPreview({
+  proposal,
+  node
+}: {
+  proposal: Extract<AgentWorkspaceProposal, { kind: 'free_canvas_text_update' }>
+  node?: CanvasAgentNodeSummary
+}) {
+  const before = proposal.editMode === 'rewrite_selection'
+    ? proposal.selection?.selectedText || ''
+    : node?.userText || ''
+  return (
+    <div className="mt-2 grid gap-1 text-[10px] leading-4">
+      {proposal.editMode !== 'append' ? <div className="rounded-md bg-white/70 px-2 py-1 text-amber-900"><span className="font-bold">修改前：</span>{before || '（空）'}</div> : null}
+      <div className="rounded-md bg-white px-2 py-1 text-amber-950"><span className="font-bold">{proposal.editMode === 'append' ? '新增内容：' : '修改后：'}</span>{proposal.userText}</div>
+    </div>
+  )
+}
+
+function canvasProposalModeLabel(mode: Extract<AgentWorkspaceProposal, { kind: 'free_canvas_text_update' }>['editMode']) {
+  if (mode === 'append') return '仅追加用户内容'
+  if (mode === 'rewrite_selection') return '仅改写选区'
+  return '改写整个用户部分'
 }
 
 function isDirectWorkspaceProposal(proposal: AgentWorkspaceProposal) {
@@ -391,6 +618,26 @@ function summarizeAppliedChanges(proposals: AgentWorkspaceProposal[]) {
 }
 
 export const AIChatbotBox = AgentCollaborationPanel
+
+function RuntimeErrorNotice({ error, dense = false }: { error: string; dense?: boolean }) {
+  return (
+    <div
+      role="alert"
+      className={`${dense ? 'rounded-lg px-2.5 py-2 text-[11px]' : 'rounded-xl px-3 py-2.5 text-xs'} border border-red-200 bg-red-50 font-semibold leading-5 text-red-700`}
+    >
+      {summarizeRuntimeError(error)}
+    </div>
+  )
+}
+
+function summarizeRuntimeError(error: string) {
+  const promptLibraryLimit = error.match(/at most\s+(\d+)\s+items[\s\S]*?not\s+(\d+)/i)
+  if (promptLibraryLimit) {
+    return `Prompt Library 条目超过上限（${promptLibraryLimit[2]}/${promptLibraryLimit[1]}）`
+  }
+  const normalized = error.replace(/\s+/g, ' ').trim()
+  return normalized.length > 240 ? `${normalized.slice(0, 237)}…` : normalized
+}
 
 function statusText(status: string) {
   if (status === 'connected') return 'Runtime connected'

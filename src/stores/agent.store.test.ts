@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAgentStore } from './agent.store'
 import type { AgentWorkspaceContext, AgentWorkspaceProposal } from '@/models/Agent.model'
+import type { IPreset } from '@/models/Card.model'
 
 const workspaceProposal: AgentWorkspaceProposal = {
   kind: 'workspace_card_update',
@@ -111,6 +112,7 @@ describe('agent store', () => {
     expect(session.proposals).toEqual([expectedProposal])
     expect(serviceMock.sendMessage).toHaveBeenCalledWith({
       threadId: undefined,
+      requestId: expect.any(String),
       content: 'Improve selected card',
       mode: 'card-workspace',
       permissionScope: 'workspace-chatbot-agent',
@@ -119,6 +121,58 @@ describe('agent store', () => {
       promptLibrary: [],
       workspaceContext
     })
+  })
+
+  it('forwards explicit Canvas node roles and edit mode to the Gateway', async () => {
+    const canvasNodeContext = {
+      mode: 'complete' as const,
+      targetNodeId: 'text-1',
+      referenceNodeIds: ['text-2'],
+      mentions: [{ nodeId: 'text-2', label: 'Reference' }]
+    }
+
+    await useAgentStore.getState().sendMessage('参考 @Reference 补全目标', [], {
+      sessionKey: 'workspace:free-canvas:project-1',
+      mode: 'free-canvas-workspace',
+      workspaceContext: {
+        contextId: 'free-canvas:project-1:canvas',
+        mode: 'free-canvas-workspace',
+        projectId: 'project-1',
+        projectTitle: 'Project',
+        snapshot: {}
+      },
+      canvasNodeContext
+    })
+
+    expect(serviceMock.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ canvasNodeContext }))
+  })
+
+  it('does not attach the Prompt Library to ordinary Canvas completion requests', async () => {
+    await useAgentStore.getState().sendMessage('补全目标', promptLibraryPresets(254), {
+      sessionKey: 'workspace:free-canvas:project-1',
+      mode: 'free-canvas-workspace',
+      permissionScope: 'workspace-chatbot-agent',
+      canvasNodeContext: {
+        mode: 'complete', targetNodeId: 'text-1', referenceNodeIds: [], mentions: []
+      }
+    })
+
+    expect(serviceMock.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ promptLibrary: [] }))
+  })
+
+  it('sends a bounded Prompt Library snapshot only in retrieval mode', async () => {
+    await useAgentStore.getState().sendMessage('查找建筑风格 Prompt', promptLibraryPresets(254), {
+      sessionKey: 'workspace:free-canvas:project-1',
+      mode: 'free-canvas-workspace',
+      permissionScope: 'workspace-chatbot-agent',
+      canvasNodeContext: {
+        mode: 'prompt-library', targetNodeId: null, referenceNodeIds: [], mentions: []
+      }
+    })
+
+    const request = serviceMock.sendMessage.mock.calls[serviceMock.sendMessage.mock.calls.length - 1]?.[0]
+    expect(request.promptLibrary).toHaveLength(200)
+    expect(request.promptLibrary[0].meta.media[0].id).toBe('media-0')
   })
 
   it('keeps Agent panel and project chat sessions isolated', async () => {
@@ -215,3 +269,15 @@ describe('agent store', () => {
     expect(useAgentStore.getState().modelConfigTestResult).toEqual({ success: true, message: 'ok' })
   })
 })
+
+function promptLibraryPresets(count: number): IPreset[] {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `preset-${index}`,
+    type: 'style',
+    category: 'style',
+    label: `Preset ${index}`,
+    content: `Prompt ${index}`,
+    usageCount: 0,
+    meta: { media: [{ id: `media-${index}` }] }
+  }))
+}

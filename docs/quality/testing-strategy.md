@@ -16,7 +16,7 @@ The current frontend test suite covers several core utilities and stores:
 - card persistence
 - example store behavior
 - Agent runtime proposal parsing
-- pi proposal policy for selected/no-selection Canvas text behavior
+- pi proposal policy for Canvas target/reference roles and append/rewrite behavior
 - PromptCard Runtime boundary and local internal-token authentication
 - Media Library one-image multimodal analysis boundary
 - Agent workspace context building
@@ -149,10 +149,12 @@ The focused image-generation commands are the regression gate for this feature. 
 
 ### Agent Collaboration Flow
 
-- Select one Canvas text node, ask the Agent to improve it, and confirm only a pending `free_canvas_text_update` for that exact node appears.
-- Reject the proposal and confirm Canvas is unchanged.
-- Apply the proposal and confirm the selected text node changes.
-- Clear Canvas selection, ask the Agent to write from Prompt Library context, and confirm a pending `free_canvas_text_create` appears.
+- Attach target X and reference nodes Y/Z, mention them with `@`, and confirm only X can receive a pending `free_canvas_text_update`.
+- In completion mode, confirm Apply appends a new user segment without changing existing user or template text.
+- In rewrite mode, confirm a current user-text selection is replaced locally and the no-selection case replaces only the complete user part.
+- Change the node, template, user content, or selected source text after generation and confirm the stale proposal is rejected.
+- Remove the target while keeping references and confirm discussion works but no Canvas mutation proposal is accepted.
+- Reject a proposal and confirm Canvas is unchanged.
 - Confirm no Canvas mutation occurs before Apply.
 - When runtime is disconnected, the panel shows a readable error while Canvas editing and Image Generation remain usable.
 
@@ -200,4 +202,4 @@ The focused image-generation commands are the regression gate for this feature. 
 
 - The automated image-generation integration uses a dependency-injected provider and deterministic local image result. Real Windows Credential Locker + live Ark coverage remains a release-time manual smoke test.
 - Agent live-model tests depend on the selected provider's configured keyring credential and should not run in generic CI without secret configuration.
-- Durable Agent proposal audit tests are not applicable until such storage exists.
+- Durable Agent tests cover idempotent turns, project isolation, proposal-state reload, conversation Trash/restore/permanent-delete, and recorded Skill revision/digest audit.

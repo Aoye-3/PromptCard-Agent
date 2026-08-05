@@ -19,8 +19,8 @@
 
 | 界面模式 | Runtime 模式 | 允许的结果 |
 | --- | --- | --- |
-| 补全 | `complete` | `append`：只追加新的用户段，不改已有内容 |
-| 改写（产品文案也称“重写”） | `rewrite` | 有有效选区时 `rewrite_selection`；否则 `rewrite_all` |
+| 补全 | `complete` | 在原节点内部按精确锚点穿插黑色 `user` 段，原段不变 |
+| 改写（产品文案也称“重写”） | `rewrite` | 在原节点右侧创建完整派生文本节点，原节点不变 |
 | Prompt 库调取 | `prompt-library` | 只读搜索 Prompt 及其 `meta.media` 关联信息，不产生 Canvas 提案 |
 
 6. Agent 返回差异提案。用户确认前不修改画布。发送成功后，输入、节点标签、选区、模式和一次性 Skill 自动清空；请求失败时保留，便于重试。
@@ -36,7 +36,7 @@
 
 画布右键菜单提供两条不同的入口语义：“补全”是快捷操作，会直接把节点挂载为被修改对象并切换到补全模式；“发送到 Agent”只把节点加入参考池，因此不会隐式赋予写权限。
 
-前端不会把节点正文拼进可见消息。它只发送用户可见文本、节点 ID、角色、名称、模式、mentions 和可选选区元数据。Gateway 从当前项目的 `workspaceContext.snapshot` 按 ID 解析真实节点内容，并重新校验节点类型、项目归属和角色关系。
+前端不会把节点正文拼进可见消息。它只发送用户可见文本、节点 ID、角色、名称、模式和 mentions。Gateway 从当前项目的 `workspaceContext.snapshot` 按 ID 解析真实节点与分段，并重新校验节点类型、项目归属和角色关系。文本选区不再参与新版改写。
 
 ## Prompt Library lookup mode
 
@@ -51,46 +51,65 @@
 
 对话历史区是独立的纵向滚动容器，不会随底部编辑器一起滚动。用户消息右对齐，Agent 消息左对齐；发送或收到新消息时历史区滚动到最新消息。Runtime 校验失败时，编辑器上方显示错误摘要：Prompt 条目超限会显示实际数量和上限，其他原始校验错误会压缩空白并截断为最多 240 个字符，便于定位请求边界问题。
 
-## Selection rewrite
-
-局部重写只允许作用于目标节点的 `userText`：
-
-- 选区必须完整落在用户段内，不能跨越模板段或来自其他节点；
-- 偏移采用浏览器 UTF-16 字符索引，Gateway 使用相同语义校验，包括 emoji 等代理对字符；
-- 请求携带 `start`、`end`、`selectedText` 和 `baseContentDigest`；
-- 选区失效、正文变化或摘要不一致时，Gateway 拒绝请求并要求重新选择。
-
 ## Proposal and apply boundary
 
-Canvas Agent 继续使用统一的 `free_canvas_text_update` 提案：
+新版 Canvas Agent 使用统一工具 `emit_canvas_prompt_edit`，但 Gateway 按本轮模式提供不同参数 schema。模型不能提交 `nodeId` 或自行改变模式。
+
+补全返回 `free_canvas_text_insertions`：
 
 ```ts
 {
-  kind: "free_canvas_text_update"
-  editMode: "append" | "rewrite_all" | "rewrite_selection"
-  userText: string
-  selection?: { start: number; end: number; selectedText: string }
+  kind: "free_canvas_text_insertions"
+  nodeId: string
+  insertions: Array<{
+    text: string
+    reason: string
+    anchor:
+      | { type: "segment"; segmentId: string; position: "before" | "after" }
+      | { type: "text"; segmentId: string; text: string; position: "before" | "after" }
+  }>
   baseNodeRevision: number
   templateDigest: string
-  baseContentDigest: string
+  baseSegmentsDigest: string
+  rationale: string
 }
 ```
 
-模型工具 schema 不接受任意节点 ID、模板内容或编辑模式。Gateway 根据已校验请求注入目标和 `editMode`，并移除模型伪造的节点、模式、revision、选区和摘要。
+一次最多 16 个插入项。文本锚点必须同时指定 `segmentId` 和 `text`：前端只在该目标分段内查找该子串，且出现次数必须恰好为 1；`before`/`after` 分别在子串字符边界的前后插入。段边缘继续使用 segment 锚点。任一锚点无效时整份提案拒绝。应用可以拆分被锚定的原分段，但不能改变任何原字符、顺序、来源或颜色；新增段固定为 `source: "user"`、`color: "#111827"`。字符串按原始 UTF-16 边界切片，因此中文、emoji 和换行均保留原顺序与内容。预览先渲染完整红黑交错结果，并列出每处插入理由。
+
+改写返回扩展的 `free_canvas_text_create`：
+
+```ts
+{
+  kind: "free_canvas_text_create"
+  sourceNodeId: string
+  userText: string
+  basis: {
+    baseNodeRevision: number
+    templateDigest: string
+    baseSegmentsDigest: string
+  }
+  rationale: string
+}
+```
+
+批准后使用现有避碰布局在源节点右侧创建新节点，继承宽度与字号，正文为黑色用户段，标题采用 `源名称 · 改写` 并自动去重。新节点 `meta` 记录来源节点、基准 revision、模型和 Skill provenance。
 
 应用提案前，前端再次检查：
 
 - 目标节点仍存在且仍为文本节点；
 - `baseNodeRevision` 未变化；
 - `templateDigest` 未变化；
-- `baseContentDigest` 未变化；
-- 局部重写的选区原文仍完全一致。
+- `baseSegmentsDigest` 未变化；
+- 所有插入锚点仍精确有效，或改写的源节点仍与基准一致。
 
 任一检查失败都不会写入，也不会把提案误标为已批准。
 
+旧持久化 `free_canvas_text_update` 提案仍可按 revision 1/2 的旧逻辑预览、批准或拒绝，但新版会话不再生成 `append`、`rewrite_all` 或 `rewrite_selection`。
+
 ## Skill binding
 
-Free Canvas 提示词编辑入口确定性绑定第一方 `canvas-prompt-editor` revision 2。该 Skill 描述补全、整段重写和选区重写三种契约，并明确模板与参考节点只读。
+Free Canvas 提示词编辑入口确定性绑定第一方 `canvas-prompt-editor` revision 3。该 Skill 要求补全先识别缺口并选择精确锚点，禁止无理由统一追加到末尾；改写只能创建完整派生节点。模板段、目标原段和参考节点全部只读。Revision 1/2 保留用于历史审计。
 
 Skill 只提供受限 instructions/references，不执行脚本，也不能授予工具、改变目标、绕过 Gateway 校验或跳过用户确认。实际运行使用的 Skill ID、revision 和 digest 会随持久化项目会话记录，便于审计。
 

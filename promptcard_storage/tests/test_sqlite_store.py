@@ -171,7 +171,7 @@ class SqliteStoreTest(unittest.TestCase):
         store = JsonCollectionStore(self.data_dir)
         health = store.health()
 
-        self.assertEqual(health["schemaVersion"], 8)
+        self.assertEqual(health["schemaVersion"], 9)
         self.assertEqual(health["serviceVersion"], "2.0.0")
         self.assertTrue(health["capabilities"]["sqlite"])
         self.assertTrue(health["capabilities"]["presetBatch"])
@@ -195,7 +195,7 @@ class SqliteStoreTest(unittest.TestCase):
 
         manifest = store.backup(destination)
 
-        self.assertEqual(manifest["schemaVersion"], 8)
+        self.assertEqual(manifest["schemaVersion"], 9)
         self.assertTrue((destination / "promptcard.sqlite3").is_file())
         self.assertTrue((destination / "manifest.json").is_file())
         self.assertEqual(len(list((destination / "assets").iterdir())), 1)
@@ -203,6 +203,7 @@ class SqliteStoreTest(unittest.TestCase):
     def test_agent_conversation_persists_messages_proposals_and_idempotent_requests(self) -> None:
         store = JsonCollectionStore(self.data_dir)
         store.create_project(project("p1", "One"))
+        store.create_project(project("p2", "Two"))
         conversation = store.create_agent_conversation({
             "id": "conversation-1",
             "projectId": "p1",
@@ -220,6 +221,7 @@ class SqliteStoreTest(unittest.TestCase):
                 "assistantMessage": {"id": "message-agent", "role": "assistant", "text": "Here is a proposal"},
                 "proposals": [{"id": "proposal-1", "kind": "free_canvas_text_update", "status": "pending"}],
                 "skillSnapshots": [{"skillId": "SKL-canvas", "revision": 1, "digest": "sha256:test"}],
+                "modelSnapshot": {"connectionId": "connection-a", "providerId": "ark", "modelId": "model-a"},
             },
         )
         replay = store.append_agent_conversation_turn(
@@ -238,6 +240,52 @@ class SqliteStoreTest(unittest.TestCase):
         self.assertEqual([message["role"] for message in detail["messages"]], ["user", "assistant"])
         self.assertEqual(detail["proposals"][0]["id"], "proposal-1")
         self.assertEqual(detail["turns"][0]["skillSnapshots"][0]["skillId"], "SKL-canvas")
+        self.assertEqual(detail["turns"][0]["modelSnapshot"]["modelId"], "model-a")
+        with self.assertRaises(MissingItem):
+            store.append_agent_conversation_turn(
+                conversation["id"], "p2", {"requestId": "request-1"}
+            )
+
+    def test_agent_conversation_model_binding_is_project_scoped_and_persisted(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        store.create_project(project("p1", "One"))
+        store.create_project(project("p2", "Two"))
+        created = store.create_agent_conversation({
+            "id": "conversation-model", "projectId": "p1", "entrypoint": "workspace-chatbot-agent",
+            "mode": "card", "modelBinding": {"connectionId": "connection-a", "providerId": "ark", "modelId": "model-a"},
+        })
+
+        self.assertEqual(created["modelBinding"]["modelId"], "model-a")
+        self.assertEqual(store.list_agent_conversations("p1")["conversations"][0]["modelBinding"], created["modelBinding"])
+        updated = store.update_agent_conversation_model_binding(
+            "conversation-model", "p1", {"connectionId": "connection-b", "providerId": "openai", "modelId": "model-b"}
+        )
+        self.assertEqual(updated["modelBinding"]["connectionId"], "connection-b")
+        self.assertEqual(store.get_agent_conversation("conversation-model", "p1")["modelBinding"], updated["modelBinding"])
+        with self.assertRaises(MissingItem):
+            store.update_agent_conversation_model_binding("conversation-model", "p2", None)
+
+    def test_v8_agent_conversations_migrate_model_binding_column(self) -> None:
+        store = JsonCollectionStore(self.data_dir)
+        store.create_project(project("p1", "One"))
+        store.create_agent_conversation({
+            "id": "conversation-v8", "projectId": "p1", "entrypoint": "workspace-chatbot-agent", "mode": "card",
+        })
+        database_path = self.data_dir / "promptcard.sqlite3"
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute("ALTER TABLE agent_conversations DROP COLUMN model_binding_json")
+            connection.execute("DELETE FROM schema_migrations WHERE version=9")
+            connection.execute(
+                "INSERT INTO schema_migrations(version, name, applied_at) VALUES (8, 'legacy-v8', 1)"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        migrated = JsonCollectionStore(self.data_dir)
+        self.assertEqual(migrated.health()["schemaVersion"], 9)
+        self.assertIsNone(migrated.get_agent_conversation("conversation-v8", "p1")["modelBinding"])
 
     def test_agent_conversation_trash_restore_and_permanent_delete_are_project_scoped(self) -> None:
         store = JsonCollectionStore(self.data_dir)
@@ -262,8 +310,9 @@ class SqliteStoreTest(unittest.TestCase):
 
         self.assertEqual({skill["slug"] for skill in skills}, {"canvas-prompt-editor", "media-prompt-reverse"})
         canvas = store.get_skill(skills[0]["id"])
-        self.assertEqual(canvas["currentRevision"], 2)
-        self.assertEqual([revision["revision"] for revision in canvas["revisions"]], [2, 1])
+        self.assertEqual(canvas["currentRevision"], 3)
+        self.assertEqual([revision["revision"] for revision in canvas["revisions"]], [3, 2, 1])
+        self.assertEqual(canvas["toolDependencies"], ["emit_canvas_prompt_edit"])
         self.assertTrue(all(revision["digest"].startswith("sha256:") for revision in canvas["revisions"]))
         self.assertEqual(canvas["trustState"], "first-party")
 
@@ -275,24 +324,25 @@ class SqliteStoreTest(unittest.TestCase):
         self.assertIn("reference", current["instructions"])
         self.assertIn("Explain", current["instructions"])
         self.assertIn("cannot expand permissions", current["instructions"])
+        self.assertIn("complete", current["instructions"])
+        self.assertIn("anchor", current["instructions"])
+        self.assertIn("new node", current["instructions"])
+        self.assertIn("read-only", current["instructions"])
 
-        original_revision_one = canvas["revisions"][1]
+        original_revision_one = canvas["revisions"][2]
         connection = sqlite3.connect(self.data_dir / "promptcard.sqlite3")
         connection.execute(
             "UPDATE skills SET current_revision=1 WHERE id=?",
             (canvas["id"],),
         )
-        connection.execute(
-            "DELETE FROM skill_revisions WHERE skill_id=? AND revision=2",
-            (canvas["id"],),
-        )
+        connection.execute("DELETE FROM skill_revisions WHERE skill_id=? AND revision=3", (canvas["id"],))
         connection.commit()
         connection.close()
 
         reopened = JsonCollectionStore(self.data_dir).get_skill(canvas["id"])
-        self.assertEqual(reopened["currentRevision"], 2)
-        self.assertEqual([revision["revision"] for revision in reopened["revisions"]], [2, 1])
-        self.assertEqual(reopened["revisions"][1], original_revision_one)
+        self.assertEqual(reopened["currentRevision"], 3)
+        self.assertEqual([revision["revision"] for revision in reopened["revisions"]], [3, 2, 1])
+        self.assertEqual(reopened["revisions"][2], original_revision_one)
 
         reopened_again = JsonCollectionStore(self.data_dir).get_skill(canvas["id"])
         self.assertEqual(reopened_again["revisions"], reopened["revisions"])

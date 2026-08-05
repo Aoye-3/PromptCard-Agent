@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Agent, type AgentMessage, type AgentTool } from '@earendil-works/pi-agent-core'
 import { Type } from '@earendil-works/pi-ai'
-import { createTextProviderRuntime } from './provider-runtime.ts'
+import { createTextProviderRuntime, type TextModelDescriptor } from './provider-runtime.ts'
 import {
   buildInvocation,
   type InvocationInput,
@@ -13,6 +13,7 @@ export interface AgentRequest extends InvocationInput {
   sessionKey?: string
   projectId?: string
   mode?: string
+  modelDescriptor: TextModelDescriptor
 }
 
 export async function invokeAgent(request: AgentRequest) {
@@ -20,7 +21,7 @@ export async function invokeAgent(request: AgentRequest) {
   const invocation = buildInvocation(request)
   const proposals: Record<string, unknown>[] = []
   const tools = buildAgentTools(invocation.policy, invocation.promptLibrary, proposals)
-  const providerRuntime = await createTextProviderRuntime()
+  const providerRuntime = await createTextProviderRuntime(request.modelDescriptor)
   const agent = new Agent({
     initialState: {
       systemPrompt: buildAgentSystemPrompt(invocation),
@@ -31,7 +32,8 @@ export async function invokeAgent(request: AgentRequest) {
     streamFn: providerRuntime.stream,
     toolExecution: 'sequential',
     afterToolCall: async ({ toolCall }) => (
-      toolCall.name.startsWith('emit_') ? { terminate: true } : undefined
+      toolCall.name === 'emit_canvas_prompt_edit' ? undefined
+        : toolCall.name.startsWith('emit_') ? { terminate: true } : undefined
     )
   })
 
@@ -89,38 +91,52 @@ export function buildAgentTools(
     })
   }
 
-  if (policy.allowedProposalKinds.includes('free_canvas_text_update') && policy.selectedTextNodeId) {
+  if (policy.allowedProposalKinds.includes('free_canvas_text_insertions') && policy.selectedTextNodeId) {
     tools.push(proposalTool(
-      'emit_canvas_text_update',
-      'Propose selected Canvas text update',
+      'emit_canvas_prompt_edit',
+      'Propose anchored Canvas prompt insertions',
       Type.Object({
-        userText: Type.String({ minLength: 1 }),
+        insertions: Type.Array(Type.Object({
+          text: Type.String({ minLength: 1 }),
+          reason: Type.String({ minLength: 1 }),
+          anchor: Type.Union([
+            Type.Object({
+              type: Type.Literal('segment'),
+              segmentId: Type.String({ minLength: 1 }),
+              position: Type.String()
+            }, { additionalProperties: false }),
+            Type.Object({
+              type: Type.Literal('text'),
+              segmentId: Type.String({ minLength: 1 }),
+              text: Type.String({ minLength: 1 }),
+              position: Type.String()
+            }, { additionalProperties: false })
+          ])
+        }, { additionalProperties: false }), { minItems: 1, maxItems: 16 }),
         rationale: Type.String()
       }, { additionalProperties: false }),
       params => ({
-        kind: 'free_canvas_text_update',
+        kind: 'free_canvas_text_insertions',
         nodeId: policy.selectedTextNodeId,
-        editMode: policy.canvasEditMode || 'rewrite_all',
-        ...(policy.canvasSelection ? { selection: policy.canvasSelection } : {}),
-        userText: params.userText,
+        insertions: params.insertions,
         rationale: params.rationale
       }),
-      proposals
+      proposals,
+      params => canvasAnchorError(params.insertions, policy.canvasSegments)
     ))
   }
 
-  if (policy.allowedProposalKinds.includes('free_canvas_text_create')) {
+  if (policy.allowedProposalKinds.includes('free_canvas_text_create') && policy.selectedTextNodeId) {
     tools.push(proposalTool(
-      'emit_canvas_text_create',
-      'Propose creating a Canvas text node',
+      'emit_canvas_prompt_edit',
+      'Propose a Canvas prompt rewrite',
       Type.Object({
-        title: Type.Optional(Type.String()),
         userText: Type.String({ minLength: 1 }),
         rationale: Type.String()
       }),
       params => ({
         kind: 'free_canvas_text_create',
-        title: params.title || 'Agent Prompt',
+        sourceNodeId: policy.selectedTextNodeId,
         userText: params.userText,
         rationale: params.rationale
       }),
@@ -186,7 +202,8 @@ function proposalTool(
   description: string,
   parameters: AgentTool['parameters'],
   build: (params: Record<string, unknown>) => Record<string, unknown>,
-  proposals: Record<string, unknown>[]
+  proposals: Record<string, unknown>[],
+  validate?: (params: Record<string, unknown>) => string | null
 ): AgentTool {
   return {
     name,
@@ -195,6 +212,14 @@ function proposalTool(
     parameters,
     executionMode: 'sequential',
     execute: async (_toolCallId, params) => {
+      const error = validate?.(params as Record<string, unknown>)
+      if (error) {
+        return {
+          content: [{ type: 'text', text: error }],
+          details: { error },
+          terminate: false
+        }
+      }
       const proposal = {
         id: `proposal-${randomUUID()}`,
         agentName: 'PromptCard Agent',
@@ -223,13 +248,11 @@ export function buildAgentSystemPrompt(invocation: ReturnType<typeof buildInvoca
   const selectionInstruction = invocation.mediaAction === 'selection-rewrite'
     ? 'This is a selection-rewrite request. Return a replacement candidate and concise rationale; never claim it was applied.'
     : ''
-  const canvasInstruction = invocation.policy.canvasEditMode === 'append'
-    ? 'Canvas completion is append-only: emit only the new user-authored text to append. Never reproduce, delete, or rewrite existing target text. Reference nodes are read-only.'
-    : invocation.policy.canvasEditMode === 'rewrite_selection'
-      ? 'Canvas rewrite is limited to the supplied user-text selection. Emit only its replacement. Reference nodes and preset/template segments are read-only.'
-      : invocation.policy.canvasEditMode === 'rewrite_all'
-        ? 'Canvas rewrite may replace only the complete user-authored text. Reference nodes and preset/template segments are read-only.'
-        : ''
+  const canvasInstruction = invocation.policy.canvasEditMode === 'insertions'
+    ? 'Canvas completion must add new user-authored text at exact anchors inside the original target segments. Preserve every original character, segment order, source, and color; use segment-edge anchors only for true segment boundaries. Reference nodes are read-only.'
+    : invocation.policy.canvasEditMode === 'derived_node'
+      ? 'Canvas rewrite must emit a complete derived text node. The original target and reference nodes are read-only and must remain unchanged. Any supplied legacy text selection does not limit or alter the derived-node request.'
+      : ''
   const skills = invocation.skillSnapshots.map(skill => ({
     skillId: skill.skillId,
     revision: skill.revision,
@@ -273,4 +296,39 @@ function lastAssistantText(messages: AgentMessage[]) {
     if (text) return text
   }
   return ''
+}
+
+function canvasAnchorError(value: unknown, segments: Array<{ id: string; text: string }>): string | null {
+  if (!Array.isArray(value)) return 'insertions are required'
+  for (const insertion of value) {
+    const anchor = (insertion as { anchor?: Record<string, unknown> }).anchor
+    if (!anchor) return 'each insertion needs an anchor'
+    if (anchor.type === 'segment') {
+      if (!segments.some(segment => segment.id === anchor.segmentId)) return 'segment anchor was not found on the target'
+      continue
+    }
+    if (anchor.type === 'text') {
+      const segment = segments.find(candidate => candidate.id === anchor.segmentId)
+      if (!segment) return 'text anchor segment was not found on the target'
+      if (typeof anchor.text !== 'string' || substringOccurrences(segment.text, anchor.text) !== 1) {
+        return 'text anchor must occur exactly once in the target segment'
+      }
+      continue
+    }
+    return 'anchor type is invalid'
+  }
+  return null
+}
+
+function substringOccurrences(value: string, substring: string): number {
+  if (!substring) return 0
+  let count = 0
+  let start = 0
+  while (start < value.length) {
+    const index = value.indexOf(substring, start)
+    if (index < 0) return count
+    count += 1
+    start = index + 1
+  }
+  return count
 }

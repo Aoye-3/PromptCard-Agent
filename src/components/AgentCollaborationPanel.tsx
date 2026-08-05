@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Check, Loader2, MoreHorizontal, Puzzle, RefreshCw, Send, Wand2, X } from 'lucide-react'
 import { useAgentStore } from '@/stores/agent.store'
 import { usePresetStore } from '@/stores/preset.store'
+import { agentRuntimeService } from '@/services/agent-runtime-service'
 import type {
   AgentMessage,
+  AgentModelInfo,
   AgentWorkspaceContext,
   AgentWorkspaceMode,
   AgentWorkspaceProposal,
@@ -11,7 +13,7 @@ import type {
   CanvasAgentSelection
 } from '@/models/Agent.model'
 import { AgentConversationMenu } from '@/components/agent/AgentConversationMenu'
-import { CanvasAgentComposer, type CanvasAgentNodeSummary } from '@/components/agent/CanvasAgentComposer'
+import { CanvasAgentComposer, type CanvasAgentModelOption, type CanvasAgentNodeSummary } from '@/components/agent/CanvasAgentComposer'
 import {
   attachCanvasAgentNode,
   clearCanvasAgentTarget,
@@ -19,6 +21,8 @@ import {
   type CanvasAgentAttachment
 } from '@/components/agent/canvas-agent-composer-model'
 import { storageServiceClient, type AgentConversationDetail } from '@/storage/storage-service-client'
+import { previewFreeCanvasTextInsertions } from '@/domain/free-canvas/free-canvas-project'
+import type { IFreeCanvasTextNode, IFreeCanvasTextSegment } from '@/models/PromptHistory.model'
 
 interface AgentCollaborationPanelProps {
   title: string
@@ -79,6 +83,7 @@ export function AgentCollaborationPanel({
     sendMessage,
     markProposalStatus,
     hydrateSession,
+    models = [],
     skills,
     tools
   } = useAgentStore()
@@ -98,16 +103,39 @@ export function AgentCollaborationPanel({
   const [canvasSelection, setCanvasSelection] = useState<(CanvasAgentSelection & { nodeId: string }) | undefined>()
   const [composerResetKey, setComposerResetKey] = useState(0)
   const [composerDraft, setComposerDraft] = useState<{ id: string; content: string }>()
+  const [selectedModelKey, setSelectedModelKey] = useState('')
+  const [modelSelectionRequired, setModelSelectionRequired] = useState(false)
+  const [modelSaving, setModelSaving] = useState(false)
+  const [modelSwitchError, setModelSwitchError] = useState<string>()
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const canvasIdentityRef = useRef(`${sessionKey}:${workspaceContext.projectId}`)
   const lastDraftRequestIdRef = useRef<string>()
   const externalSkills = skills.filter(skill => skill.source === 'external' && skill.id)
   const canvasNodes = useMemo(() => readCanvasNodeSummaries(workspaceContext), [workspaceContext])
+  const canvasTextPreviewNodes = useMemo(() => readCanvasTextPreviewNodes(workspaceContext), [workspaceContext])
+  const modelOptions = useMemo(() => models.flatMap(model => {
+    const option = canvasAgentModelOption(model)
+    return option ? [option] : []
+  }), [models])
+  const defaultModel = useMemo(() => (
+    models.find(model => model.isDefault && model.available !== false)
+  ), [models])
+  const effectiveModelKey = modelSelectionRequired
+    ? selectedModelKey
+    : selectedModelKey || (defaultModel ? canvasAgentModelOption(defaultModel)?.key || '' : '')
+  const effectiveModel = models.find(model => canvasAgentModelOption(model)?.key === effectiveModelKey)
 
   useEffect(() => {
     if (!initialized) init()
     checkRuntime()
   }, [checkRuntime, init, initialized])
+
+  useEffect(() => {
+    if (modelSelectionRequired) return
+    if (selectedModelKey && modelOptions.some(model => model.key === selectedModelKey)) return
+    const next = defaultModel ? canvasAgentModelOption(defaultModel) : undefined
+    setSelectedModelKey(next?.key || '')
+  }, [defaultModel, modelOptions, modelSelectionRequired, selectedModelKey])
 
   useEffect(() => {
     if (!draftRequest || lastDraftRequestIdRef.current === draftRequest.id) return
@@ -169,9 +197,6 @@ export function AgentCollaborationPanel({
             .filter(attachment => promptLibraryMode || attachment.role === 'reference')
             .map(attachment => attachment.nodeId),
           mentions,
-          ...(canvasEditMode === 'rewrite' && target && canvasSelection?.nodeId === target.nodeId
-            ? { selection: withoutNodeId(canvasSelection) }
-            : {})
         }
       : undefined
     const returnedProposals = await sendMessage(content.trim(), presets, {
@@ -278,14 +303,14 @@ export function AgentCollaborationPanel({
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
-        {visibleRuntimeError && (
-          <RuntimeErrorNotice error={visibleRuntimeError} />
+        {(visibleRuntimeError || modelSwitchError) && (
+          <RuntimeErrorNotice error={visibleRuntimeError || modelSwitchError!} />
         )}
       </div>
       )}
 
-      {embedded && visibleRuntimeError && (
-        <div className="mx-3 mt-2 shrink-0"><RuntimeErrorNotice error={visibleRuntimeError} dense /></div>
+      {embedded && (visibleRuntimeError || modelSwitchError) && (
+        <div className="mx-3 mt-2 shrink-0"><RuntimeErrorNotice error={visibleRuntimeError || modelSwitchError!} dense /></div>
       )}
 
       {embedded ? (
@@ -369,6 +394,11 @@ export function AgentCollaborationPanel({
                   <div className="mt-1 text-[10px] font-bold text-emerald-700">模板保持不变 · {canvasProposalModeLabel(proposal.editMode)}</div>
                   <CanvasTextProposalPreview proposal={proposal} node={canvasNodes.find(node => node.id === proposal.nodeId)} />
                 </>
+              ) : proposal.kind === 'free_canvas_text_insertions' ? (
+                <CanvasTextInsertionsProposalPreview
+                  proposal={proposal}
+                  node={canvasTextPreviewNodes.find(node => node.id === proposal.nodeId)}
+                />
               ) : <p className="mt-1 line-clamp-3 text-xs leading-5 text-amber-800">{proposalSummary(proposal)}</p>}
               <div className="mt-2 flex gap-2">
                 <button
@@ -447,9 +477,12 @@ export function AgentCollaborationPanel({
             editMode={canvasEditMode}
             selection={canvasSelection ? withoutNodeId(canvasSelection) : undefined}
             running={running}
-            disabled={runtimeStatus !== 'connected' || running}
+            disabled={runtimeStatus !== 'connected' || running || modelSaving || !effectiveModel || effectiveModel.available === false}
             externalDraft={composerDraft}
             resetKey={composerResetKey}
+            modelOptions={modelOptions}
+            selectedModelKey={effectiveModelKey}
+            modelSaving={modelSaving}
             onEditModeChange={nextMode => {
               setCanvasEditMode(nextMode)
               if (nextMode === 'prompt-library') {
@@ -469,6 +502,7 @@ export function AgentCollaborationPanel({
               setCanvasAttachments(clearCanvasAgentTarget)
               setCanvasSelection(undefined)
             }}
+            onModelChange={modelKey => void persistConversationModel(modelKey)}
             onSubmit={(content, mentions) => void handleSend(content, mentions)}
           />
         </div>
@@ -518,6 +552,57 @@ export function AgentCollaborationPanel({
     setCanvasSelection(undefined)
     setCanvasEditMode('complete')
     setComposerResetKey(key => key + 1)
+    const boundModel = conversation.modelBinding
+      ? models.find(model => (
+          model.connectionId === conversation.modelBinding?.connectionId
+          && model.providerId === conversation.modelBinding?.providerId
+          && model.modelId === conversation.modelBinding?.modelId
+        ))
+      : undefined
+    if (conversation.modelBinding && !boundModel) {
+      setSelectedModelKey('')
+      setModelSelectionRequired(true)
+      return
+    }
+    const nextModel = boundModel || defaultModel
+    const nextOption = nextModel ? canvasAgentModelOption(nextModel) : undefined
+    setSelectedModelKey(nextOption?.key || '')
+    setModelSelectionRequired(false)
+    if (!conversation.modelBinding && nextOption) {
+      void persistConversationModel(nextOption.key, conversation.id)
+    }
+  }
+
+  async function persistConversationModel(modelKey: string, targetConversationId = conversationId) {
+    const model = models.find(candidate => canvasAgentModelOption(candidate)?.key === modelKey)
+    if (!model?.connectionId || !model.providerId || !model.modelId || model.available === false) return
+    setModelSwitchError(undefined)
+    setModelSaving(true)
+    try {
+      if (targetConversationId) {
+        await agentRuntimeService.updateConversationModel(workspaceContext.projectId, targetConversationId, {
+          connectionId: model.connectionId,
+          providerId: model.providerId,
+          modelId: model.modelId
+        })
+      }
+      setSelectedModelKey(modelKey)
+      setModelSelectionRequired(false)
+    } catch (error) {
+      setModelSwitchError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setModelSaving(false)
+    }
+  }
+}
+
+function canvasAgentModelOption(model: AgentModelInfo): CanvasAgentModelOption | null {
+  if (!model.connectionId || !model.providerId || !model.modelId) return null
+  return {
+    key: model.key || `${model.connectionId}:${model.modelId}`,
+    displayName: model.displayName || model.display_name || model.modelId,
+    available: model.available !== false,
+    unavailableReason: model.unavailableReason
   }
 }
 
@@ -532,6 +617,41 @@ function readCanvasNodeSummaries(workspaceContext: AgentWorkspaceContext): Canva
       title: String(node.title || node.id),
       displayText: String(node.displayText || ''),
       userText: String(node.userText || '')
+    }]
+  })
+}
+
+function readCanvasTextPreviewNodes(workspaceContext: AgentWorkspaceContext): IFreeCanvasTextNode[] {
+  const nodes = Array.isArray(workspaceContext.snapshot.nodes) ? workspaceContext.snapshot.nodes : []
+  return nodes.flatMap(value => {
+    if (!value || typeof value !== 'object') return []
+    const node = value as Record<string, unknown>
+    if (node.kind !== 'text' || typeof node.id !== 'string' || !Array.isArray(node.segments)) return []
+    const segments: IFreeCanvasTextSegment[] = node.segments.flatMap(value => {
+      if (!value || typeof value !== 'object') return []
+      const segment = value as Record<string, unknown>
+      if (typeof segment.id !== 'string' || typeof segment.text !== 'string') return []
+      const source: IFreeCanvasTextSegment['source'] | null = segment.source === 'preset' ? 'preset' : segment.source === 'user' ? 'user' : null
+      if (!source) return []
+      return [{
+        id: segment.id,
+        source,
+        text: segment.text,
+        color: typeof segment.color === 'string' ? segment.color : source === 'preset' ? '#ef4423' : '#111827',
+        createdAt: 0,
+        updatedAt: 0
+      }]
+    })
+    return [{
+      id: node.id,
+      kind: 'text' as const,
+      title: String(node.title || node.id),
+      position: { x: 0, y: 0 },
+      width: 0,
+      height: 0,
+      fontSize: 'large' as const,
+      segments,
+      meta: {}
     }]
   })
 }
@@ -578,6 +698,36 @@ function CanvasTextProposalPreview({
   )
 }
 
+function CanvasTextInsertionsProposalPreview({
+  proposal,
+  node
+}: {
+  proposal: Extract<AgentWorkspaceProposal, { kind: 'free_canvas_text_insertions' }>
+  node?: IFreeCanvasTextNode
+}) {
+  if (!node) return <p className="mt-1 text-xs leading-5 text-amber-800">目标文字节点已不存在，无法预览。</p>
+  const preview = previewFreeCanvasTextInsertions(node, proposal.insertions)
+  if (!preview.segments) {
+    return <p className="mt-1 text-xs leading-5 text-amber-800">插入锚点无效：{preview.rejectionReason}</p>
+  }
+  return (
+    <div className="mt-2 space-y-2" data-canvas-text-insertions-preview>
+      <div className="rounded-md border border-amber-200 bg-white px-2 py-1.5 text-xs leading-5" aria-label="完整插入预览">
+        {preview.segments.map(segment => (
+          <span key={segment.id} style={{ color: segment.color }}>{segment.text}</span>
+        ))}
+      </div>
+      <ul className="space-y-1 text-[10px] leading-4 text-amber-800">
+        {proposal.insertions.map((insertion, index) => (
+          <li key={`${insertion.anchor.type}-${index}`}>
+            {insertion.anchor.position === 'before' ? '前插' : '后插'} · {insertion.reason}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function canvasProposalModeLabel(mode: Extract<AgentWorkspaceProposal, { kind: 'free_canvas_text_update' }>['editMode']) {
   if (mode === 'append') return '仅追加用户内容'
   if (mode === 'rewrite_selection') return '仅改写选区'
@@ -590,6 +740,7 @@ function isDirectWorkspaceProposal(proposal: AgentWorkspaceProposal) {
 
 function proposalTitle(proposal: AgentWorkspaceProposal) {
   if (proposal.kind === 'free_canvas_text_update') return 'Update selected text node'
+  if (proposal.kind === 'free_canvas_text_insertions') return 'Insert into selected text node'
   if (proposal.kind === 'free_canvas_text_create') return 'Create text node'
   if (proposal.kind === 'prompt_library_write_proposal') return 'Add Prompt Library preset'
   return 'Agent workspace proposal'
@@ -599,6 +750,7 @@ function proposalSummary(proposal: AgentWorkspaceProposal) {
   if (proposal.kind === 'free_canvas_text_update' || proposal.kind === 'free_canvas_text_create') {
     return proposal.userText
   }
+  if (proposal.kind === 'free_canvas_text_insertions') return proposal.insertions.map(insertion => insertion.text).join('\n')
   if (proposal.kind === 'prompt_library_write_proposal') {
     return `${proposal.presetDraft.label}: ${proposal.presetDraft.content}`
   }

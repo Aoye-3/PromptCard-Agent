@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentMessage, AgentWorkspaceContext } from '@/models/Agent.model'
+import type { AgentMessage, AgentWorkspaceContext, AgentWorkspaceProposal } from '@/models/Agent.model'
 
 const mocks = vi.hoisted(() => ({
   checkRuntime: vi.fn(),
@@ -9,7 +9,8 @@ const mocks = vi.hoisted(() => ({
   markProposalStatus: vi.fn(),
   init: vi.fn(),
   sessionError: undefined as string | undefined,
-  messages: [] as AgentMessage[]
+  messages: [] as AgentMessage[],
+  proposals: [] as AgentWorkspaceProposal[]
 }))
 
 vi.mock('@/stores/agent.store', () => ({
@@ -19,11 +20,20 @@ vi.mock('@/stores/agent.store', () => ({
     runtimeError: null,
     getAgentSession: () => ({
       messages: mocks.messages,
-      proposals: [],
+      proposals: mocks.proposals,
       running: false,
       runtimeError: mocks.sessionError
     }),
     skills: [{ id: 'SKL-tone', name: 'Tone Helper', source: 'external', trustState: 'trusted', toolDependencies: [] }],
+    models: [{
+      key: 'connection-chat:doubao-seed-2-0-lite-260215',
+      connectionId: 'connection-chat',
+      providerId: 'volcengine-ark',
+      modelId: 'doubao-seed-2-0-lite-260215',
+      displayName: 'Doubao Seed 2.0 Lite',
+      available: true,
+      isDefault: true
+    }],
     tools: [],
     checkRuntime: mocks.checkRuntime,
     sendMessage: mocks.sendMessage,
@@ -60,6 +70,7 @@ describe('AgentCollaborationPanel dense embedded mode', () => {
     vi.clearAllMocks()
     mocks.sessionError = undefined
     mocks.messages = []
+    mocks.proposals = []
   })
 
   it('uses a compact context strip and inline composer without the full-width send bar', () => {
@@ -82,6 +93,8 @@ describe('AgentCollaborationPanel dense embedded mode', () => {
     expect(markup).toContain('Canvas Prompt Editor')
     expect(markup).toContain('Skill')
     expect(markup).toContain('Prompt库调取')
+    expect(markup).toContain('aria-label="对话模型"')
+    expect(markup).toContain('Doubao Seed 2.0 Lite')
     expect(markup).not.toContain('>发送给 Agent</button>')
   })
 
@@ -167,6 +180,56 @@ describe('AgentCollaborationPanel dense embedded mode', () => {
     expect(markup).not.toContain('Secret full prompt')
     expect(renderer.root.findByProps({ 'aria-label': 'Canvas Agent 编辑模式' }).props.value).toBe('complete')
     expect(mocks.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('previews every interleaved canvas insertion with its anchor reason', () => {
+    mocks.proposals = [{
+      kind: 'free_canvas_text_insertions',
+      id: 'insert-1',
+      agentName: 'PromptCard Agent',
+      nodeId: 'text-1',
+      insertions: [{
+        text: 'Inserted detail',
+        reason: 'Clarifies the framing after the preset.',
+        anchor: { type: 'segment', segmentId: 'preset-1', position: 'after' }
+      }],
+      baseNodeRevision: 2,
+      templateDigest: 'sha256:template',
+      baseSegmentsDigest: 'sha256:segments',
+      rationale: 'Add a framing detail.',
+      status: 'pending',
+      createdAt: 1
+    } as AgentWorkspaceProposal]
+    const context: AgentWorkspaceContext = {
+      ...workspaceContext,
+      snapshot: {
+        nodes: [{
+          id: 'text-1', kind: 'text', title: 'TXT-ABC123', displayText: 'PresetUser', userText: 'User',
+          segments: [
+            { id: 'preset-1', source: 'preset', text: 'Preset', color: '#ef4423' },
+            { id: 'user-1', source: 'user', text: 'User', color: '#111827' }
+          ]
+        }]
+      }
+    }
+
+    const markup = renderToStaticMarkup(
+      <AgentCollaborationPanel
+        title="Free Canvas Agent"
+        mode="free-canvas-workspace"
+        workspaceContext={context}
+        onApplyWorkspaceProposal={vi.fn()}
+        embedded
+      />
+    )
+
+    expect(markup).toContain('data-canvas-text-insertions-preview="true"')
+    expect(markup).toContain('Preset')
+    expect(markup).toContain('Inserted detail')
+    expect(markup).toContain('User')
+    expect(markup).toContain('Clarifies the framing after the preset.')
+    expect(markup).toContain('#ef4423')
+    expect(markup).toContain('#111827')
   })
 
   it('renders a scrollable chat history with user messages aligned right and Agent messages left', () => {

@@ -289,6 +289,13 @@ export interface AgentConversationSummary {
   createdAt: number
   updatedAt: number
   deletedAt?: number | null
+  modelBinding?: AgentConversationModelBinding | null
+}
+
+export interface AgentConversationModelBinding {
+  connectionId: string
+  providerId: string
+  modelId: string
 }
 
 export interface AgentConversationDetail extends AgentConversationSummary {
@@ -667,6 +674,7 @@ export const storageServiceClient = {
       entrypoint: string
       mode: string
       title?: string
+      modelBinding?: AgentConversationModelBinding | null
     }): Promise<AgentConversationSummary> {
       return request('/storage-api/agent-conversations', {
         method: 'POST',
@@ -682,6 +690,12 @@ export const storageServiceClient = {
       return request(`/storage-api/agent-conversations/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify({ projectId, title })
+      })
+    },
+    updateModel(id: string, projectId: string, modelBinding: AgentConversationModelBinding | null): Promise<AgentConversationSummary> {
+      return request(`/storage-api/projects/${encodeURIComponent(projectId)}/agent-conversations/${encodeURIComponent(id)}/model`, {
+        method: 'PATCH',
+        body: JSON.stringify({ modelBinding })
       })
     },
     trash(id: string, projectId: string): Promise<AgentConversationSummary> {

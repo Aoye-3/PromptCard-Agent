@@ -43,9 +43,9 @@ The pi service does not hold model credentials and cannot write to Canvas, Stora
 3. For project chat, Gateway validates the conversation scope, loads bounded SQLite history, and resolves the feature plus one-shot Skill snapshots. Media chat instead forwards bounded temporary history from the current dialog.
 4. The Gateway forwards normalized history, current context, allowed tools, and bounded Skill snapshots to pi with an internal token.
 5. pi exposes Prompt Library search only for an explicit `prompt-library` request; other project chat receives an empty library and no search tool. It may otherwise emit one proposal allowed by the request policy.
-6. pi resolves `chat.primary` through the non-secret internal descriptor and its `Models` collection.
+6. Gateway resolves the persistent conversation's model binding against the current connection whitelist and readiness state. A previously unbound conversation adopts and persists `chat.primary` on first use. pi receives the non-secret, request-scoped descriptor and never resolves a browser-supplied arbitrary model ID.
 7. PI-native calls use PI's API implementation through the secure Gateway proxy; SDK-backed calls dispatch through the Gateway text adapter registry.
-8. The Gateway validates returned proposals again and persists the project turn, proposal status, tool summary, and exact Skill revision/digest. Media responses are not persisted.
+8. The Gateway validates returned proposals again and persists the project turn, proposal status, tool summary, exact Skill revision/digest, and actual model snapshot. Media responses are not persisted.
 9. The user explicitly applies or rejects each proposal.
 
 ## Prompt Library lookup boundary
@@ -89,3 +89,5 @@ Provider credentials are configured through Model Management and stored in the o
 - Image provider: implement the image-generation provider interface only. Do not route image requests through either text extension point.
 
 Provider connections are reusable account metadata. Assignments remain modality-specific as `chat.primary` and `image.primary`.
+
+For Ark chat, one inference API Key may serve multiple release-catalog models. A connection's `agentChatModelIds` is the project-Agent whitelist; the Runtime catalog exposes only those models together with connection/provider identity, capability metadata, availability reason, and default status. The pinned Ark Runtime SDK invokes the explicit `modelId`; it does not provide account model discovery for the same inference credential.

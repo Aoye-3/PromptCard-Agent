@@ -15,6 +15,7 @@ from app.gateway.internal_auth import (
 from app.gateway.model_management.connection_store import ModelManagementError
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.promptcard_runtime import (
+    PromptCardConversationModelRequest,
     PromptCardInternalChatRequest,
     PromptCardMediaAnalysisRequest,
     PromptCardModelConfigRequest,
@@ -87,6 +88,22 @@ async def messages(body: PromptCardRuntimeMessageRequest, request: Request) -> d
         raise _model_http_error(exc) from None
 
 
+@router.patch("/projects/{project_id}/conversations/{conversation_id}/model")
+async def update_conversation_model(
+    project_id: str,
+    conversation_id: str,
+    body: PromptCardConversationModelRequest,
+) -> dict[str, Any]:
+    try:
+        return await runtime_service.update_conversation_model(
+            project_id,
+            conversation_id,
+            body.model_binding,
+        )
+    except (ModelManagementError, CredentialStoreError, OSError) as exc:
+        raise _model_http_error(exc) from None
+
+
 @router.post("/media-analysis", response_model=PromptCardRuntimeMessageResponse)
 async def media_analysis(
     body: PromptCardMediaAnalysisRequest,
@@ -123,7 +140,6 @@ async def pi_native_proxy(
     request: Request,
 ) -> StreamingResponse:
     try:
-        target = resolve_pi_native_proxy(connection_id)
         normalized_path = upstream_path.strip("/")
         _require_internal_auth(request)
         if normalized_path != "chat/completions":
@@ -133,8 +149,9 @@ async def pi_native_proxy(
             payload = json.loads(body)
         except (json.JSONDecodeError, UnicodeDecodeError):
             raise HTTPException(status_code=422, detail="pi_proxy_payload_invalid") from None
-        if not isinstance(payload, dict) or payload.get("model") != target["modelId"]:
+        if not isinstance(payload, dict) or not isinstance(payload.get("model"), str):
             raise HTTPException(status_code=422, detail="pi_proxy_model_mismatch")
+        target = resolve_pi_native_proxy(connection_id, payload["model"])
         upstream_url = f'{target["apiBase"].rstrip("/")}/{normalized_path}'
         client = httpx.AsyncClient(timeout=httpx.Timeout(120, read=None))
         try:

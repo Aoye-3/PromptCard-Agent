@@ -3,8 +3,7 @@
 The pi text Agent has a deliberately small tool surface:
 
 - `search_prompt_library`: searches only the bounded snapshot supplied by the frontend.
-- `emit_canvas_text_update`: proposes an append, whole-user-part rewrite, or selection rewrite for the one explicit Canvas target node.
-- `emit_canvas_text_create`: remains available to legacy callers without explicit node context; an explicit Canvas node context without a target is discussion-only.
+- `emit_canvas_prompt_edit`: the only tool exposed to new Canvas edit requests. Gateway locks its schema to exact anchored insertions for `complete` or a complete derived-node draft for `rewrite`.
 - `emit_prompt_library_create`: proposes one additive Prompt Library preset.
 - `emit_media_prompt_preview`: creates or updates an editable Prompt candidate only for an explicit media `preview` action.
 
@@ -14,12 +13,12 @@ Every Canvas or Prompt Library `emit_*` tool creates a pending proposal. The fro
 
 ## Skill snapshots
 
-PromptCard Storage schema v8 is the canonical source for the minimal Skill registry. Each run receives a bounded snapshot rather than an editable package copy:
+PromptCard Storage schema v9 is the canonical source for the minimal Skill registry. Each run receives a bounded snapshot rather than an editable package copy:
 
 ```json
 {
   "skillId": "SKL-canvas-prompt-editor",
-  "revision": 2,
+  "revision": 3,
   "digest": "sha256:...",
   "instructions": "...",
   "references": []
@@ -28,7 +27,7 @@ PromptCard Storage schema v8 is the canonical source for the minimal Skill regis
 
 Built-in Skills are bound by capability:
 
-- Canvas text editing binds `canvas.prompt.edit` / `canvas-prompt-editor` revision 2. Revision 1 remains immutable for audit compatibility.
+- Canvas text editing binds `canvas.prompt.edit` / `canvas-prompt-editor` revision 3. Revisions 1 and 2 remain immutable for audit compatibility.
 - Media collaboration binds `media.prompt.reverse` / `media-prompt-reverse`.
 
 External Skills are explicitly selected by the user and apply only to the next project-Agent message. The Gateway resolves the current immutable revision and records `skillId`, revision, and digest with the turn. The selection is cleared after send.
@@ -41,10 +40,9 @@ The first implementation exposes instructions and bounded references only. Skill
 
 The attached-node list is the permission boundary. A request can attach up to ten unique text nodes: one target and zero or more read-only references. `@` mentions describe semantic relationships only and cannot promote a reference or select a different target. The Gateway reloads all node content from the current project snapshot instead of trusting browser-supplied node bodies.
 
-`canvas-prompt-editor` revision 2 defines three mutually exclusive result contracts:
+`canvas-prompt-editor` revision 3 defines two mutually exclusive result contracts:
 
-- `append`: valid only for the **补全** mode. The returned text is appended as a new user segment; existing template and user segments remain byte-for-byte unchanged.
-- `rewrite_all`: valid only for **改写** without a selection. It replaces the target's complete `userText` and never the template.
-- `rewrite_selection`: valid only for **改写** with a current selection wholly inside the target's user part. It replaces exactly that range.
+- `complete`: at most 16 exact `segment` or unique `text` anchors. Applying the proposal preserves all existing characters, segment order, sources, and colors and inserts only black user segments.
+- `rewrite`: one complete black user-text draft for a new node derived from the source. It never updates the source or a reference node.
 
-The Runtime tool does not accept a node ID or editing mode from the model. Gateway policy binds both from the validated request and records `baseNodeRevision`, `templateDigest`, and `baseContentDigest`. The apply path rechecks those values and, for a selection rewrite, the original selected text. Any mismatch rejects the stale proposal and asks the user to generate a new one.
+The Runtime tool does not accept a node ID or editing mode from the model. Gateway policy binds both from the validated request and records `baseNodeRevision`, `templateDigest`, and `baseSegmentsDigest`. The apply path rechecks those values and every anchor. Any mismatch rejects the whole stale proposal and asks the user to generate a new one. Old `emit_canvas_text_update` proposal records remain readable for compatibility but are not exposed to revision 3 Canvas runs.

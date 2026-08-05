@@ -200,11 +200,13 @@ class StorageAppContractTest(unittest.TestCase):
         created = self.client.post("/api/agent-conversations", json={
             "id": "conversation-1", "projectId": "project-agent",
             "entrypoint": "workspace-chatbot-agent", "mode": "free-canvas",
+            "modelBinding": {"connectionId": "connection-a", "providerId": "ark", "modelId": "model-a"},
         })
         turn = self.client.post("/api/agent-conversations/conversation-1/turns", json={
             "projectId": "project-agent", "requestId": "request-1",
             "userMessage": {"role": "user", "text": "Hello"},
             "assistantMessage": {"role": "assistant", "text": "Hi"},
+            "modelSnapshot": {"connectionId": "connection-a", "providerId": "ark", "modelId": "model-a"},
         })
         listed = self.client.get("/api/agent-conversations", params={"projectId": "project-agent"})
         detail = self.client.get("/api/agent-conversations/conversation-1", params={"projectId": "project-agent"})
@@ -213,8 +215,18 @@ class StorageAppContractTest(unittest.TestCase):
         self.assertEqual(created.status_code, 200)
         self.assertEqual(turn.status_code, 200)
         self.assertEqual(listed.json()["conversations"][0]["id"], "conversation-1")
+        self.assertEqual(listed.json()["conversations"][0]["modelBinding"]["modelId"], "model-a")
         self.assertEqual(len(detail.json()["messages"]), 2)
+        self.assertEqual(detail.json()["turns"][0]["modelSnapshot"]["connectionId"], "connection-a")
         self.assertEqual(len(skills.json()["skills"]), 2)
+
+        updated_model = self.client.patch(
+            "/api/projects/project-agent/agent-conversations/conversation-1/model",
+            json={"modelBinding": {"connectionId": "connection-b", "providerId": "openai", "modelId": "model-b"}},
+        )
+        self.assertEqual(updated_model.status_code, 200)
+        self.assertEqual(updated_model.json()["modelBinding"]["modelId"], "model-b")
+        self.assertNotIn("messages", updated_model.json())
 
         self.assertEqual(self.client.post(
             "/api/agent-conversations/conversation-1/trash", json={"projectId": "project-agent"}

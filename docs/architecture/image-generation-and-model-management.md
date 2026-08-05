@@ -10,6 +10,8 @@ The Agent panel separates `Text models` and `Image generation models`, but both 
 
 `GET /api/promptcard/runtime/model-connections/{connectionId}/models` returns the assignable catalog scoped to that connection's provider. For an Ark inference API Key this is the supported PromptCard provider catalog, marked `source: "provider-catalog"`; it is not an enumeration of private account endpoints. Ark account-management APIs require separately modeled AK/SK signing credentials, which are outside the current connection contract and must not be inferred from an inference API Key.
 
+For text connections, `agentChatModelIds` selects the catalog subset exposed to project Agent conversations. The primary chat assignment is inserted automatically, while clearing `chat.primary` leaves the whitelist intact. Each durable conversation stores its own validated `{connectionId, providerId, modelId}`; the Gateway resolves it per request and records a model snapshot per idempotent turn. Media's temporary analysis dialog intentionally continues to use the default chat assignment.
+
 The model catalog is the only source of frontend capability controls. Inspector code must not infer ratios, resolutions, region tools, formats, or reference limits from the Seedream model ID. [ADR-009](../decisions/ADR-009-capability-driven-image-model-readiness.md) records the readiness and diagnostics boundary.
 
 ## Readiness and diagnostics
@@ -86,7 +88,9 @@ Schema v6 adds asset lifecycle and deletion audit metadata. Original and derived
 
 Schema v7 adds project-scoped resource folders and subject/material records. The three image identities retained by a resource—original source, UI preview, and provider-ready input—are strong references. Only an explicit Subject Library action can append the provider-ready identity to an in-memory Composer draft; material organization and canvas placement never mutate or submit an image-generation request.
 
-Schema v8 adds durable text-Agent conversations and the minimal Skill registry. These tables are independent from image-generation conversations, runs, and placements and do not change their lifecycle rules.
+Schema v9 retains durable text-Agent conversations and the minimal Skill registry, and adds persistent conversation-level text-model bindings. These tables are independent from image-generation conversations, runs, and placements and do not change their lifecycle rules.
+
+Schema v9 adds nullable conversation-level `model_binding_json` and keeps all image-generation tables unchanged. Model connection state version 2 adds `agentChatModelIds`; version 1 state migrates in place by adding the existing `chat.primary` model to the owning connection whitelist.
 
 ## History capacity, backup, and restore
 
@@ -206,4 +210,4 @@ New generation requires both rollout gates:
 
 The Runtime itself treats an absent server flag as disabled and checks it before run creation, credential access, or provider invocation. The combined development launcher sets the server flag to `1` when no explicit override is present; production deployment must opt into its own rollout. The frontend flag defaults on in development and off in production unless a persisted setting overrides it. Run `npm.cmd run agent:check`, create and successfully test a Volcengine Ark connection, and assign it to `image.primary` before real-provider smoke testing. Disabling either gate stops new UI generations but leaves existing nodes, connection metadata, run history, Recent Captures, and assets readable.
 
-Never roll PromptCard Storage back below schema v8. A code rollback must preserve forward-compatible reading of image-generation conversations, text-Agent conversations, Skill revisions, runs, placements, originals, derivatives, lifecycle state, project resources, and tombstones or keep the current Storage service running until compatible code is restored.
+Never roll PromptCard Storage back below schema v9. A code rollback must preserve forward-compatible reading of image-generation conversations, text-Agent conversations and model bindings, Skill revisions, runs, placements, originals, derivatives, lifecycle state, project resources, and tombstones or keep the current Storage service running until compatible code is restored.

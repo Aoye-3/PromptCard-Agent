@@ -55,7 +55,7 @@ It delegates HTTP calls to `agent-runtime-service`. For project Agent surfaces, 
 Agent permission scope is enforced before proposals reach UI execution:
 
 - `prompt-library-agent` is reserved for Prompt Library decomposition and additive create proposals.
-- `workspace-chatbot-agent` is the Free Canvas text-writing surface. Explicit composer state identifies at most one writable target and up to nine read-only references. Completion is append-only; rewrite is selection-scoped when a valid user-text selection exists and otherwise replaces the complete user part. Updates carry node revision, template digest, and content digest and are rejected when any baseline becomes stale. No explicit target means discussion-only.
+- `workspace-chatbot-agent` is the Free Canvas text-writing surface. Explicit composer state identifies at most one writable target and up to nine read-only references. Completion inserts black user segments at validated exact anchors while preserving all original segments; rewrite creates a complete derived text node and leaves the source unchanged. Proposals carry node revision, template digest, and segment digest and are rejected when any baseline becomes stale. No explicit target means discussion-only.
 - `media-analysis-agent` discusses one explicitly selected image and may emit only a non-mutating Prompt preview candidate after an explicit preview request. Prompt registration remains a separate user action.
 - The Agent dashboard is diagnostic and model-management oriented; it does not own Prompt Library or Canvas approval.
 

@@ -23,6 +23,18 @@ MODELS: tuple[dict[str, Any], ...] = (
         "capabilities": {
             "input": ["text", "image"],
             "toolCalling": True,
+            "contextWindow": 256_000,
+        },
+    },
+    {
+        "id": "doubao-seed-2-0-pro-260215",
+        "providerId": "volcengine-ark",
+        "displayName": "Doubao Seed 2.0 Pro",
+        "modality": "chat",
+        "capabilities": {
+            "input": ["text", "image"],
+            "toolCalling": True,
+            "contextWindow": 256_000,
         },
     },
     {
@@ -106,11 +118,7 @@ def connection_models_response(connection_id: str, provider_id: str) -> dict[str
     return {
         "connectionId": connection_id,
         "providerId": provider_id,
-        "models": [
-            _model_response(model)
-            for model in MODELS
-            if model["providerId"] == provider_id
-        ],
+        "models": [_model_response(model) for model in MODELS if model["providerId"] == provider_id],
     }
 
 

@@ -212,6 +212,22 @@ const openImageGenerationPanel = (renderer: ReturnType<typeof create>) => {
   act(() => switcher.findAllByType('button')[1].props.onClick())
 }
 
+const canonicalJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(', ')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}: ${canonicalJson(child)}`)
+      .join(', ')}}`
+  }
+  return JSON.stringify(value)
+}
+
+const sha256 = async (value: unknown): Promise<string> => {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicalJson(value)))
+  return `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
 describe('project-level free canvas image generation entry', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -881,6 +897,72 @@ describe('project-level free canvas image generation entry', () => {
     }))
     expect(onChange).not.toHaveBeenCalled()
     expect(alert).toHaveBeenCalled()
+  })
+
+  it('approves a source-bound rewrite as a collision-free derived node', async () => {
+    const source = {
+      ...createFreeCanvasTextNode('Original', { x: 120, y: 160 }, 10),
+      id: 'source-text',
+      title: 'Shot prompt',
+      width: 560,
+      height: 220,
+      fontSize: 'huge' as const
+    }
+    const blocker = {
+      ...createFreeCanvasTextNode('Blocking', { x: 728, y: 160 }, 11),
+      id: 'blocking-text',
+      title: 'Shot prompt · 改写'
+    }
+    const canvas = createFreeCanvasProject(1, { nodes: [source, blocker], selectedNodeId: source.id })
+    const onChange = vi.fn()
+    let renderer!: ReturnType<typeof create>
+
+    await act(async () => {
+      renderer = create(
+        <FreeCanvasBuilderScreen
+          activeProject={{ id: 'project-a', title: 'Project A' } as IPromptProject}
+          freeCanvas={canvas}
+          imageGenerationNodeV1
+          onBack={vi.fn()}
+          onRenameProject={vi.fn()}
+          onSave={vi.fn()}
+          onChange={onChange}
+        />
+      )
+    })
+
+    const apply = renderer.root.findByProps({ 'data-agent-panel': true }).props['data-agent-apply']
+    const templateDigest = await sha256({ presetText: '', segments: [] })
+    const baseSegmentsDigest = await sha256(source.segments.map(segment => ({
+      id: segment.id,
+      source: segment.source,
+      text: segment.text,
+      color: segment.color
+    })))
+    await act(async () => apply({
+      kind: 'free_canvas_text_create',
+      sourceNodeId: source.id,
+      userText: 'Rewritten',
+      basis: { baseNodeRevision: 10, templateDigest, baseSegmentsDigest }
+    }))
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      selectedNodeId: expect.any(String),
+      nodes: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'text',
+          title: 'Shot prompt · 改写 (2)',
+          position: { x: 728, y: 404 },
+          width: 560,
+          height: 220,
+          fontSize: 'huge',
+          segments: [expect.objectContaining({ source: 'user', text: 'Rewritten', color: '#111827' })],
+          meta: expect.objectContaining({
+            provenance: expect.objectContaining({ kind: 'agent-rewrite', sourceNodeId: source.id })
+          })
+        })
+      ])
+    }))
   })
 
   it('persists a generated result node before marking its placement as placed', async () => {

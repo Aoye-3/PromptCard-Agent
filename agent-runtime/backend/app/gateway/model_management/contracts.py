@@ -18,6 +18,10 @@ class ConnectionRequest(CamelModel):
     api_base: str = Field(alias="apiBase")
     enabled: bool = True
     credential: str | None = None
+    agent_chat_model_ids: list[str] | None = Field(
+        default=None,
+        alias="agentChatModelIds",
+    )
 
 
 class AssignmentRequest(CamelModel):

@@ -31,7 +31,7 @@ describe('pi text-agent system boundary', () => {
     expect(prompt).toContain('"text":"cold"')
   })
 
-  it('describes canvas append-only and reference boundaries below runtime policy', () => {
+  it('describes anchored canvas completion and reference boundaries below runtime policy', () => {
     const prompt = buildAgentSystemPrompt(buildInvocation({
       content: 'Use reference B to complete target A',
       permissionScope: 'workspace-chatbot-agent',
@@ -42,35 +42,93 @@ describe('pi text-agent system boundary', () => {
       promptLibrary: []
     }))
 
-    expect(prompt).toContain('append-only')
+    expect(prompt).toContain('exact anchors inside the original target segments')
+    expect(prompt).toContain('Preserve every original character, segment order, source, and color')
     expect(prompt).toContain('Reference nodes are read-only')
     expect(prompt).toContain('text-a')
   })
 
-  it('keeps canvas target and edit mode out of model-controlled tool arguments', async () => {
+  it('describes canvas rewrite as creating a complete derived node', () => {
+    const prompt = buildAgentSystemPrompt(buildInvocation({
+      content: 'Rewrite target A',
+      permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: { snapshot: { nodes: [] } },
+      canvasNodeContext: {
+        mode: 'rewrite', targetNodeId: 'text-a', referenceNodeIds: [], mentions: []
+      },
+      promptLibrary: []
+    }))
+
+    expect(prompt).toContain('complete derived text node')
+    expect(prompt).toContain('original target and reference nodes are read-only')
+    expect(prompt).not.toContain('replace only the complete user-authored text')
+  })
+
+  it('keeps canvas target and proposal basis out of model-controlled tool arguments', async () => {
     const invocation = buildInvocation({
       content: 'Complete target A', permissionScope: 'workspace-chatbot-agent',
       workspaceContext: { snapshot: { nodes: [] } }, promptLibrary: [],
       canvasNodeContext: {
-        mode: 'complete', targetNodeId: 'text-a', referenceNodeIds: ['text-b'], mentions: []
+        mode: 'complete', targetNodeId: 'text-a', referenceNodeIds: ['text-b'], mentions: [],
+        targetNode: { segments: [{ id: 'user-1', text: 'Existing' }] }
       }
     })
     const proposals: Record<string, unknown>[] = []
     const tool = buildAgentTools(invocation.policy, [], proposals)
-      .find(candidate => candidate.name === 'emit_canvas_text_update')
+      .find(candidate => candidate.name === 'emit_canvas_prompt_edit')
 
     expect(tool).toBeDefined()
     expect(JSON.stringify(tool?.parameters)).not.toContain('nodeId')
-    expect(JSON.stringify(tool?.parameters)).not.toContain('editMode')
+    expect(JSON.stringify(tool?.parameters)).not.toContain('sourceNodeId')
+    expect(JSON.stringify(tool?.parameters)).toContain('segmentId')
     expect((tool?.parameters as { additionalProperties?: boolean }).additionalProperties).toBe(false)
     await tool?.execute('call-1', {
-      userText: 'Added text', rationale: 'Completion',
+      insertions: [{
+        text: 'Added text', reason: 'Completion',
+        anchor: { type: 'segment', segmentId: 'user-1', position: 'after' }
+      }], rationale: 'Completion',
       nodeId: 'text-b', editMode: 'rewrite_all'
     })
     expect(proposals[0]).toMatchObject({
-      kind: 'free_canvas_text_update', nodeId: 'text-a', editMode: 'append',
-      userText: 'Added text'
+      kind: 'free_canvas_text_insertions', nodeId: 'text-a',
+      insertions: [{ text: 'Added text', reason: 'Completion' }]
     })
+  })
+
+  it('rejects invalid Canvas anchors without recording a proposal', async () => {
+    const invocation = buildInvocation({
+      content: 'Complete target A', permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: { snapshot: { nodes: [] } }, promptLibrary: [],
+      canvasNodeContext: {
+        mode: 'complete', targetNodeId: 'text-a', referenceNodeIds: [], mentions: [],
+        targetNode: {
+          segments: [
+            { id: 'segment-1', text: 'Repeated anchor and Repeated anchor' },
+            { id: 'segment-2', text: 'Other text' }
+          ]
+        }
+      }
+    })
+    const proposals: Record<string, unknown>[] = []
+    const tool = buildAgentTools(invocation.policy, [], proposals)
+      .find(candidate => candidate.name === 'emit_canvas_prompt_edit')
+
+    const missing = await tool?.execute('call-missing', {
+      insertions: [{
+        text: 'Added text', reason: 'Completion',
+        anchor: { type: 'segment', segmentId: 'missing', position: 'after' }
+      }], rationale: 'Completion'
+    })
+    const ambiguous = await tool?.execute('call-ambiguous', {
+      insertions: [{
+        text: 'Added text', reason: 'Completion',
+        anchor: { type: 'text', segmentId: 'segment-1', text: 'Repeated anchor', position: 'after' }
+      }], rationale: 'Completion'
+    })
+
+    expect(proposals).toEqual([])
+    expect(JSON.stringify(missing)).toContain('not found')
+    expect(JSON.stringify(ambiguous)).toContain('exactly once')
   })
 
   it('does not construct a canvas update tool without an explicit target', () => {
@@ -83,7 +141,26 @@ describe('pi text-agent system boundary', () => {
     })
 
     expect(buildAgentTools(invocation.policy, [], []))
-      .not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'emit_canvas_text_update' })]))
+      .not.toEqual(expect.arrayContaining([expect.objectContaining({ name: 'emit_canvas_prompt_edit' })]))
+  })
+
+  it('uses the same edit tool to emit a rewrite as a derived text-create proposal', async () => {
+    const invocation = buildInvocation({
+      content: 'Rewrite target', permissionScope: 'workspace-chatbot-agent',
+      workspaceContext: { snapshot: { nodes: [] } }, promptLibrary: [],
+      canvasNodeContext: {
+        mode: 'rewrite', targetNodeId: 'text-a', referenceNodeIds: [], mentions: []
+      }
+    })
+    const proposals: Record<string, unknown>[] = []
+    const tool = buildAgentTools(invocation.policy, [], proposals)
+      .find(candidate => candidate.name === 'emit_canvas_prompt_edit')
+
+    await tool?.execute('call-1', { userText: 'Rewritten prompt', rationale: 'Clarity' })
+
+    expect(proposals[0]).toMatchObject({
+      kind: 'free_canvas_text_create', sourceNodeId: 'text-a', userText: 'Rewritten prompt'
+    })
   })
 
   it('does not expose Prompt Library search during ordinary Canvas editing', () => {

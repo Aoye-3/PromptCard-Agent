@@ -91,6 +91,11 @@ class AgentConversationTurnPayload(AgentConversationProjectPayload):
     assistantMessage: dict[str, Any]
     proposals: list[dict[str, Any]] = Field(default_factory=list)
     skillSnapshots: list[dict[str, Any]] = Field(default_factory=list)
+    modelSnapshot: dict[str, Any] | None = None
+
+
+class AgentConversationModelBindingPayload(BaseModel):
+    modelBinding: dict[str, Any] | None = None
 
 
 class AgentProposalStatusPayload(AgentConversationProjectPayload):
@@ -296,6 +301,16 @@ def create_app(storage: SqliteStore) -> FastAPI:
         payload: AgentConversationRenamePayload,
     ) -> dict[str, Any]:
         return _handle(lambda: storage.rename_agent_conversation(conversation_id, payload.projectId, payload.title))
+
+    @application.patch("/api/projects/{project_id}/agent-conversations/{conversation_id}/model")
+    def update_agent_conversation_model_binding(
+        project_id: str,
+        conversation_id: str,
+        payload: AgentConversationModelBindingPayload,
+    ) -> dict[str, Any]:
+        return _handle(lambda: storage.update_agent_conversation_model_binding(
+            conversation_id, project_id, payload.modelBinding
+        ))
 
     @application.post("/api/agent-conversations/{conversation_id}/turns")
     def append_agent_conversation_turn(

@@ -35,10 +35,24 @@ export interface AgentUser {
 }
 
 export interface AgentModelInfo {
-  name: string
+  name?: string
   display_name?: string
   supports_vision?: boolean
   supports_thinking?: boolean
+  key?: string
+  connectionId?: string
+  providerId?: string
+  modelId?: string
+  displayName?: string
+  capabilities?: {
+    input?: Array<'text' | 'image'>
+    toolCalling?: boolean
+    contextWindow?: number
+    [key: string]: unknown
+  }
+  available?: boolean
+  unavailableReason?: string | null
+  isDefault?: boolean
   [key: string]: unknown
 }
 
@@ -225,6 +239,49 @@ export interface AgentMediaPromptPreviewProposal {
   createdAt: number
 }
 
+export interface AgentFreeCanvasTextInsertion {
+  text: string
+  reason: string
+  anchor:
+    | { type: 'segment'; segmentId: string; position: 'before' | 'after' }
+    | { type: 'text'; segmentId: string; text: string; position: 'before' | 'after' }
+}
+
+export interface AgentFreeCanvasTextProposalBasis {
+  baseNodeRevision: number
+  templateDigest: string
+  baseSegmentsDigest: string
+}
+
+export interface AgentRunProvenance {
+  model: {
+    connectionId: string
+    providerId: string
+    modelId: string
+    displayName?: string
+    capabilities?: Record<string, unknown>
+  }
+  skills: Array<{ skillId: string; revision: number; digest: string }>
+}
+
+export interface AgentFreeCanvasTextInsertionsProposal {
+  kind: 'free_canvas_text_insertions'
+  contextId?: string
+  id: string
+  threadId?: string | null
+  runId?: string | null
+  agentName: string
+  nodeId: string
+  insertions: AgentFreeCanvasTextInsertion[]
+  baseNodeRevision: number
+  templateDigest: string
+  baseSegmentsDigest: string
+  rationale: string
+  provenance?: AgentRunProvenance
+  status: 'pending' | 'approved' | 'rejected'
+  createdAt: number
+}
+
 export interface AgentFreeCanvasTextCreateProposal {
   kind: 'free_canvas_text_create'
   contextId?: string
@@ -234,6 +291,9 @@ export interface AgentFreeCanvasTextCreateProposal {
   agentName: string
   title?: string
   userText: string
+  sourceNodeId?: string
+  basis?: AgentFreeCanvasTextProposalBasis
+  provenance?: AgentRunProvenance
   rationale: string
   status: 'pending' | 'approved' | 'rejected'
   createdAt: number
@@ -246,6 +306,7 @@ export type AgentWorkspaceProposal =
   | AgentStoryboardUpdateProposal
   | AgentThreeStageFieldUpdateProposal
   | AgentFreeCanvasTextUpdateProposal
+  | AgentFreeCanvasTextInsertionsProposal
   | AgentFreeCanvasTextCreateProposal
   | AgentMediaPromptPreviewProposal
 

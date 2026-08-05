@@ -11,6 +11,8 @@ Durable PromptCard data remains in PromptCard Storage:
 - project text-Agent conversations, ordered messages, proposal state, and idempotent completed turns;
 - canonical local Skills and immutable Skill revisions.
 
-PromptCard Storage schema v8 is the sole durable authority for project text-Agent history. Gateway loads that history and validates the owning project, entrypoint, mode, and permission scope before calling pi. Media analysis is intentionally temporary and never writes conversation rows.
+PromptCard Storage schema v9 is the sole durable authority for project text-Agent history. In addition to the v8 conversation rows, `agent_conversations.model_binding_json` stores the nullable `{connectionId, providerId, modelId}` selected for that conversation. Gateway loads that history and binding, validates the owning project, entrypoint, mode, permission scope, model whitelist, and current connection readiness before calling pi. Media analysis is intentionally temporary and never writes conversation rows.
+
+Each completed turn stores a `modelSnapshot` in its idempotent result envelope. Retrying the same `(conversationId, requestId)` returns the first result and its first model snapshot; it never silently reruns under a newly selected model.
 
 The Python Gateway stores only provider-neutral model connection metadata under `PROMPTCARD_RUNTIME_STATE_DIR`; credentials remain in the operating-system keyring.

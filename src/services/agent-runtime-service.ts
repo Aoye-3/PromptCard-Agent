@@ -1,5 +1,8 @@
 import type {
   AgentInfo,
+  AgentFreeCanvasTextInsertion,
+  AgentFreeCanvasTextProposalBasis,
+  AgentRunProvenance,
   AgentModelInfo,
   AgentPermissionScope,
   AgentSkillInfo,
@@ -30,6 +33,12 @@ export interface DeepSeekModelConfigUpdate {
   modelName?: string
   temperature?: number
   maxTokens?: number
+}
+
+export interface AgentConversationModelBinding {
+  connectionId: string
+  providerId: string
+  modelId: string
 }
 
 const jsonHeaders = () => {
@@ -162,6 +171,19 @@ export const agentRuntimeService = {
       proposals: filterProposalsForPermissionScope(response.proposals, body.permissionScope)
     })),
 
+  updateConversationModel: (
+    projectId: string,
+    conversationId: string,
+    modelBinding: AgentConversationModelBinding | null
+  ) => requestJson<Record<string, unknown>>(
+    `${PROMPTCARD_RUNTIME_BASE}/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/model`,
+    {
+      method: 'PATCH',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ modelBinding })
+    }
+  ),
+
   analyzeMedia: (body: {
     threadId?: string
     assetId: string
@@ -242,7 +264,7 @@ export function parseAgentWorkspaceProposals(
   const seenProposalIds = new Set<string>()
   const jsonCandidates = [
     ...text.matchAll(/```json\s*([\s\S]*?)```/gi),
-    ...text.matchAll(/(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|free_canvas_text_update|free_canvas_text_create|media_prompt_preview)"[\s\S]*\})/gi)
+    ...text.matchAll(/(\{[\s\S]*"(?:agent_workspace_proposals|prompt_library_write_proposal|workspace_card_update|workspace_card_create|storyboard_update|free_canvas_text_update|free_canvas_text_insertions|free_canvas_text_create|media_prompt_preview)"[\s\S]*\})/gi)
   ].map(match => match[1])
 
   for (const candidate of jsonCandidates) {
@@ -385,6 +407,21 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
     }
   }
 
+  if (kind === 'free_canvas_text_insertions' && proposal.nodeId) {
+    const basis = normalizeFreeCanvasTextProposalBasis(proposal)
+    const insertions = normalizeFreeCanvasTextInsertions(proposal.insertions)
+    const provenance = normalizeAgentRunProvenance(proposal.provenance)
+    if (!basis || !insertions) return null
+    return {
+      ...base,
+      kind: 'free_canvas_text_insertions',
+      nodeId: String(proposal.nodeId),
+      insertions,
+      ...basis,
+      ...(provenance ? { provenance } : {})
+    }
+  }
+
   if (kind === 'media_prompt_preview' && proposal.previewDraft?.label && proposal.previewDraft?.content) {
     return {
       ...base,
@@ -400,6 +437,21 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
   }
 
   if (kind === 'free_canvas_text_create' && typeof proposal.userText === 'string' && proposal.userText.trim()) {
+    const sourceNodeId = typeof proposal.sourceNodeId === 'string' && proposal.sourceNodeId.trim()
+      ? proposal.sourceNodeId
+      : undefined
+    const basis = sourceNodeId ? normalizeFreeCanvasTextProposalBasis(proposal.basis) : undefined
+    const provenance = normalizeAgentRunProvenance(proposal.provenance)
+    if (sourceNodeId && !basis) return null
+    if (sourceNodeId && basis) return {
+      ...base,
+      kind: 'free_canvas_text_create',
+      title: typeof proposal.title === 'string' ? proposal.title : 'Agent Prompt',
+      userText: proposal.userText,
+      sourceNodeId,
+      basis,
+      ...(provenance ? { provenance } : {})
+    }
     return {
       ...base,
       kind: 'free_canvas_text_create',
@@ -409,6 +461,76 @@ function normalizeProposal(value: unknown, index: number): AgentWorkspaceProposa
   }
 
   return null
+}
+
+function normalizeFreeCanvasTextProposalBasis(value: unknown): AgentFreeCanvasTextProposalBasis | null {
+  if (!value || typeof value !== 'object') return null
+  const source = value as Record<string, unknown>
+  const baseNodeRevision = Number(source.baseNodeRevision)
+  const templateDigest = typeof source.templateDigest === 'string' ? source.templateDigest : ''
+  const baseSegmentsDigest = typeof source.baseSegmentsDigest === 'string' ? source.baseSegmentsDigest : ''
+  if (!Number.isFinite(baseNodeRevision) || baseNodeRevision < 0 || !templateDigest || !baseSegmentsDigest) return null
+  return { baseNodeRevision, templateDigest, baseSegmentsDigest }
+}
+
+function normalizeAgentRunProvenance(value: unknown): AgentRunProvenance | null {
+  if (!value || typeof value !== 'object') return null
+  const source = value as Record<string, unknown>
+  const model = source.model as Record<string, unknown> | undefined
+  const skills = source.skills
+  if (
+    !model
+    || typeof model.connectionId !== 'string'
+    || typeof model.providerId !== 'string'
+    || typeof model.modelId !== 'string'
+    || !Array.isArray(skills)
+  ) return null
+  const normalizedSkills = skills.flatMap(skill => {
+    if (!skill || typeof skill !== 'object') return []
+    const item = skill as Record<string, unknown>
+    if (
+      typeof item.skillId !== 'string'
+      || !Number.isInteger(item.revision)
+      || typeof item.digest !== 'string'
+    ) return []
+    return [{ skillId: item.skillId, revision: Number(item.revision), digest: item.digest }]
+  })
+  if (normalizedSkills.length !== skills.length) return null
+  return {
+    model: {
+      connectionId: model.connectionId,
+      providerId: model.providerId,
+      modelId: model.modelId,
+      ...(typeof model.displayName === 'string' ? { displayName: model.displayName } : {}),
+      ...(model.capabilities && typeof model.capabilities === 'object'
+        ? { capabilities: model.capabilities as Record<string, unknown> }
+        : {})
+    },
+    skills: normalizedSkills
+  }
+}
+
+function normalizeFreeCanvasTextInsertions(value: unknown): AgentFreeCanvasTextInsertion[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 16) return null
+  const insertions: AgentFreeCanvasTextInsertion[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') return null
+    const source = item as Record<string, unknown>
+    const text = typeof source.text === 'string' ? source.text : ''
+    const reason = typeof source.reason === 'string' ? source.reason.trim() : ''
+    const anchor = source.anchor as Record<string, unknown> | undefined
+    if (!text || !reason || !anchor || (anchor.position !== 'before' && anchor.position !== 'after')) return null
+    if (anchor.type === 'segment' && typeof anchor.segmentId === 'string' && anchor.segmentId) {
+      insertions.push({ text, reason, anchor: { type: 'segment', segmentId: anchor.segmentId, position: anchor.position } })
+      continue
+    }
+    if (anchor.type === 'text' && typeof anchor.segmentId === 'string' && anchor.segmentId && typeof anchor.text === 'string' && anchor.text) {
+      insertions.push({ text, reason, anchor: { type: 'text', segmentId: anchor.segmentId, text: anchor.text, position: anchor.position } })
+      continue
+    }
+    return null
+  }
+  return insertions
 }
 
 function pickAllowed(value: unknown, keys: string[]) {

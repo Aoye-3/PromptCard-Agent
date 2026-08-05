@@ -12,3 +12,11 @@ describe.each(launchers)('%s', (launcher) => {
     expect(source).not.toContain('if %errorlevel% neq 0 (')
   })
 })
+
+test('agent runtime diagnostics verify schema v9, Ark SDK, and the chat whitelist catalog', async () => {
+  const source = await readFile(path.resolve(__dirname, 'check-agent-runtime.ps1'), 'utf8')
+
+  expect(source).toContain('SCHEMA_VERSION == 9')
+  expect(source).toContain('agent_chat_catalog')
+  expect(source).toContain('volcenginesdkarkruntime import Ark')
+})

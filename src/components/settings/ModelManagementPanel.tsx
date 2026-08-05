@@ -75,7 +75,8 @@ const EMPTY_DRAFT: ModelConnectionInput = {
   providerId: '',
   displayName: '',
   apiBase: '',
-  enabled: true
+  enabled: true,
+  agentChatModelIds: []
 }
 
 export function ModelManagementPanel({ modality, onAssignmentSaved, ready = true }: {
@@ -288,6 +289,10 @@ export function ModelManagementPanelContent({
     : false
   const provider = snapshot.catalog.providers.find(item => item.id === draft.providerId)
   const arkReadOnly = draft.providerId === 'volcengine-ark'
+  const chatModels = snapshot.catalog.models.filter(model => (
+    model.providerId === draft.providerId && model.modality === 'chat'
+  ))
+  const primaryChatAssignment = snapshot.assignments.find(assignment => assignment.slot === 'chat.primary')
 
   return (
     <section className="rounded-[24px] border border-gray-200 bg-white p-6 shadow-[0_18px_45px_rgba(15,23,42,0.05)]" data-model-management-panel>
@@ -366,7 +371,7 @@ export function ModelManagementPanelContent({
                 value={draft.providerId}
                 onChange={event => {
                   const nextProvider = providers.find(item => item.id === event.target.value)
-                  actions.onDraftChange({ providerId: event.target.value, apiBase: nextProvider?.defaultApiBase || '' })
+                  actions.onDraftChange({ providerId: event.target.value, apiBase: nextProvider?.defaultApiBase || '', agentChatModelIds: [] })
                 }}
                 className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:border-gray-400"
               >
@@ -405,6 +410,47 @@ export function ModelManagementPanelContent({
               />
             </Field>
           </div>
+          {modality === 'chat' && chatModels.length > 0 ? (
+            <fieldset className="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
+              <legend className="px-1 text-sm font-black text-gray-950">项目 Agent 可用模型</legend>
+              <p className="mt-1 text-xs font-semibold text-gray-400">共用当前连接的一个 API Key；只有勾选的对话模型会出现在项目 Agent 中。</p>
+              <div className="mt-3 grid gap-2">
+                {chatModels.map(model => {
+                  const checked = (draft.agentChatModelIds || []).includes(model.id)
+                  const isDefault = primaryChatAssignment?.connectionId === selectedConnectionId && primaryChatAssignment.modelId === model.id
+                  const capabilityLabels = [
+                    model.capabilities?.input?.includes('image') ? '视觉输入' : null,
+                    model.capabilities?.toolCalling ? '工具调用' : null,
+                    model.capabilities?.contextWindow
+                      ? `${Math.round(model.capabilities.contextWindow / 1000)}K 上下文`
+                      : null
+                  ].filter(Boolean)
+                  return (
+                    <label key={model.id} className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        aria-label={`项目 Agent 可用模型 ${model.displayName}`}
+                        checked={checked}
+                        onChange={() => actions.onDraftChange({
+                          agentChatModelIds: checked
+                            ? (draft.agentChatModelIds || []).filter(modelId => modelId !== model.id)
+                            : [...(draft.agentChatModelIds || []), model.id]
+                        })}
+                        className="mt-0.5"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex flex-wrap items-center gap-2 text-sm font-black text-gray-900">
+                          {model.displayName}
+                          {isDefault ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] text-amber-800">默认模型</span> : null}
+                        </span>
+                        {capabilityLabels.length ? <span className="mt-1 block text-[11px] font-semibold text-gray-500">{capabilityLabels.join(' · ')}</span> : null}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            </fieldset>
+          ) : null}
           <label className="mt-4 flex items-center gap-3 text-sm font-bold text-gray-700">
             <input type="checkbox" checked={draft.enabled} onChange={event => actions.onDraftChange({ enabled: event.target.checked })} />
             启用此连接
@@ -581,7 +627,8 @@ const connectionDraft = (connection: ModelConnection): ModelConnectionInput => (
   providerId: connection.providerId,
   displayName: connection.displayName,
   apiBase: connection.apiBase,
-  enabled: connection.enabled
+  enabled: connection.enabled,
+  agentChatModelIds: connection.agentChatModelIds || []
 })
 
 const modelsForConnection = (
@@ -613,7 +660,7 @@ const groupProviders = (providers: ModelProvider[], modality: ModelModality) => 
 const newConnectionDraft = (catalog: ModelCatalog, modality: ModelModality): ModelConnectionInput => {
   const providerIds = new Set(catalog.models.filter(model => model.modality === modality).map(model => model.providerId))
   const provider = catalog.providers.find(item => providerIds.has(item.id))
-  return { providerId: provider?.id || '', displayName: '', apiBase: provider?.defaultApiBase || '', enabled: true }
+  return { providerId: provider?.id || '', displayName: '', apiBase: provider?.defaultApiBase || '', enabled: true, agentChatModelIds: [] }
 }
 
 const sdkStatusLabel = (status: ProviderStatus | undefined, imageStatus: ImageGenerationStatus | null) => {

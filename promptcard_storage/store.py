@@ -34,7 +34,7 @@ from .migration import MigrationError, StorageInitializer
 
 Actor = Literal["user", "agent"]
 SERVICE_VERSION = "2.0.0"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 DATABASE_NAME = "promptcard.sqlite3"
 JSON_SOURCES = (
     "projects.json",
@@ -148,6 +148,7 @@ class SqliteStore:
         if not project_id:
             raise ValueError("Agent conversation projectId is required")
         timestamp = now_ms()
+        model_binding = normalize_model_binding(item.get("modelBinding"))
         conversation = {
             "id": str(item.get("id") or uuid.uuid4()),
             "projectId": project_id,
@@ -158,18 +159,20 @@ class SqliteStore:
             "createdAt": int(item.get("createdAt") or timestamp),
             "updatedAt": int(item.get("updatedAt") or timestamp),
             "deletedAt": None,
+            "modelBinding": model_binding,
         }
         with self._transaction() as connection:
             self._require_active_project(connection, project_id)
             try:
                 connection.execute(
                     """INSERT INTO agent_conversations(
-                           id, project_id, entrypoint, mode, title, status, created_at, updated_at
-                       ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)""",
+                           id, project_id, entrypoint, mode, title, status, created_at, updated_at, model_binding_json
+                       ) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)""",
                     (
                         conversation["id"], project_id, conversation["entrypoint"],
                         conversation["mode"], conversation["title"],
                         conversation["createdAt"], conversation["updatedAt"],
+                        _json(model_binding) if model_binding is not None else None,
                     ),
                 )
             except sqlite3.IntegrityError as exc:
@@ -199,7 +202,7 @@ class SqliteStore:
         with self._connect() as connection:
             rows = connection.execute(
                 f"""SELECT id, project_id, entrypoint, mode, title, status,
-                           created_at, updated_at, deleted_at
+                           created_at, updated_at, deleted_at, model_binding_json
                     FROM agent_conversations
                     WHERE {' AND '.join(clauses)}
                     ORDER BY updated_at DESC, id DESC LIMIT ?""",
@@ -221,7 +224,7 @@ class SqliteStore:
         with self._connect() as connection:
             row = connection.execute(
                 f"""SELECT id, project_id, entrypoint, mode, title, status,
-                           created_at, updated_at, deleted_at
+                           created_at, updated_at, deleted_at, model_binding_json
                     FROM agent_conversations
                     WHERE id=? AND project_id=? AND {status_clause}""",
                 (conversation_id, project_id),
@@ -255,6 +258,34 @@ class SqliteStore:
             if result.rowcount == 0:
                 raise MissingItem(conversation_id)
         return self.get_agent_conversation(conversation_id, project_id)
+
+    def update_agent_conversation_model_binding(
+        self,
+        conversation_id: str,
+        project_id: str,
+        model_binding: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        normalized = normalize_model_binding(model_binding)
+        with self._transaction() as connection:
+            result = connection.execute(
+                """UPDATE agent_conversations
+                   SET model_binding_json=?, updated_at=?
+                   WHERE id=? AND project_id=? AND status='active'""",
+                (_json(normalized) if normalized is not None else None, now_ms(), conversation_id, project_id),
+            )
+            if result.rowcount == 0:
+                raise MissingItem(conversation_id)
+        with self._connect() as connection:
+            row = connection.execute(
+                """SELECT id, project_id, entrypoint, mode, title, status,
+                           created_at, updated_at, deleted_at, model_binding_json
+                    FROM agent_conversations
+                    WHERE id=? AND project_id=? AND status='active'""",
+                (conversation_id, project_id),
+            ).fetchone()
+        if row is None:
+            raise MissingItem(conversation_id)
+        return self._agent_conversation_summary(row)
 
     def trash_agent_conversation(self, conversation_id: str, project_id: str) -> dict[str, Any]:
         timestamp = now_ms()
@@ -301,18 +332,18 @@ class SqliteStore:
         if not request_id:
             raise ValueError("Agent conversation requestId is required")
         with self._transaction() as connection:
-            existing = connection.execute(
-                "SELECT result_json FROM agent_conversation_turns WHERE conversation_id=? AND request_id=?",
-                (conversation_id, request_id),
-            ).fetchone()
-            if existing is not None:
-                return json.loads(existing[0])
             conversation = connection.execute(
                 "SELECT 1 FROM agent_conversations WHERE id=? AND project_id=? AND status='active'",
                 (conversation_id, project_id),
             ).fetchone()
             if conversation is None:
                 raise MissingItem(conversation_id)
+            existing = connection.execute(
+                "SELECT result_json FROM agent_conversation_turns WHERE conversation_id=? AND request_id=?",
+                (conversation_id, request_id),
+            ).fetchone()
+            if existing is not None:
+                return json.loads(existing[0])
             timestamp = now_ms()
             current_ordinal = connection.execute(
                 "SELECT COALESCE(MAX(ordinal), 0) FROM agent_conversation_messages WHERE conversation_id=?",
@@ -362,6 +393,7 @@ class SqliteStore:
                 "messages": saved_messages,
                 "proposals": saved_proposals,
                 "skillSnapshots": list(turn.get("skillSnapshots") or []),
+                "modelSnapshot": turn.get("modelSnapshot"),
                 "createdAt": timestamp,
             }
             connection.execute(
@@ -2252,7 +2284,7 @@ class SqliteStore:
             if current_version == 7:
                 connection.execute("BEGIN IMMEDIATE")
                 try:
-                    self._create_agent_conversations_v8_schema(connection)
+                    self._create_agent_conversations_v9_schema(connection)
                     self._seed_builtin_skills(connection)
                     connection.execute(
                         "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
@@ -2260,6 +2292,19 @@ class SqliteStore:
                     )
                     connection.commit()
                     current_version = 8
+                except Exception:
+                    connection.rollback()
+                    raise
+            if current_version == 8:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    self._migrate_agent_conversations_v9(connection)
+                    connection.execute(
+                        "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",
+                        (9, "add-agent-conversation-model-binding", now_ms()),
+                    )
+                    connection.commit()
+                    current_version = 9
                 except Exception:
                     connection.rollback()
                     raise
@@ -2299,9 +2344,9 @@ class SqliteStore:
         self._create_image_generation_v4_schema(connection)
         self._create_image_asset_derivations_v5_schema(connection)
         self._create_project_resources_v7_schema(connection)
-        self._create_agent_conversations_v8_schema(connection)
+        self._create_agent_conversations_v9_schema(connection)
 
-    def _create_agent_conversations_v8_schema(self, connection: sqlite3.Connection) -> None:
+    def _create_agent_conversations_v9_schema(self, connection: sqlite3.Connection) -> None:
         connection.executescript("""
             CREATE TABLE IF NOT EXISTS agent_conversations(
                 id TEXT PRIMARY KEY,
@@ -2312,7 +2357,8 @@ class SqliteStore:
                 status TEXT NOT NULL CHECK(status IN ('active','trash')),
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                deleted_at INTEGER
+                deleted_at INTEGER,
+                model_binding_json TEXT
             );
             CREATE INDEX IF NOT EXISTS agent_conversations_project_status_order
                 ON agent_conversations(project_id, status, updated_at DESC, id DESC);
@@ -2371,6 +2417,11 @@ class SqliteStore:
             );
         """)
 
+    def _migrate_agent_conversations_v9(self, connection: sqlite3.Connection) -> None:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(agent_conversations)")}
+        if "model_binding_json" not in columns:
+            connection.execute("ALTER TABLE agent_conversations ADD COLUMN model_binding_json TEXT")
+
     def _seed_builtin_skills(self, connection: sqlite3.Connection) -> None:
         builtins = (
             {
@@ -2379,8 +2430,8 @@ class SqliteStore:
                 "name": "Canvas Prompt Editor",
                 "description": "Analyzes the full Canvas prompt while changing only the user-authored segment.",
                 "capability": "canvas.prompt.edit",
-                "tools": ["emit_canvas_text_update"],
-                "current_revision": 2,
+                "tools": ["emit_canvas_prompt_edit"],
+                "current_revision": 3,
                 "revisions": (
                     (
                         1,
@@ -2397,6 +2448,16 @@ class SqliteStore:
                         "rewrite_selection replaces only the validated selection. Never change a template, a reference "
                         "node, the target node id, or the requested edit mode. Explain any conflict instead of bypassing "
                         "these constraints. This Skill cannot expand permissions, tools, proposal types, or approval rights.",
+                    ),
+                    (
+                        3,
+                        "For complete mode, interleave precise anchors through the new user-authored segment. "
+                        "Treat every target and reference as read-only context. Use emit_canvas_prompt_edit only for the "
+                        "bound target node and requested edit mode: append adds a new user-authored segment; rewrite_all "
+                        "creates a new node with the replacement; rewrite_selection changes only the validated anchored selection. "
+                        "Never mutate templates, targets, references, node identity, or the requested mode. Explain any "
+                        "conflict instead of bypassing these constraints. This Skill cannot expand permissions, tools, "
+                        "proposal types, or approval rights.",
                     ),
                 ),
             },
@@ -2440,9 +2501,9 @@ class SqliteStore:
                     (skill["id"], revision, digest, instructions, timestamp),
                 )
             connection.execute(
-                """UPDATE skills SET current_revision=?, updated_at=?
-                   WHERE id=? AND source='builtin' AND current_revision<>?""",
-                (skill["current_revision"], timestamp, skill["id"], skill["current_revision"]),
+                """UPDATE skills SET tool_dependencies_json=?, current_revision=?, updated_at=?
+                   WHERE id=? AND source='builtin'""",
+                (_json(skill["tools"]), skill["current_revision"], timestamp, skill["id"]),
             )
 
     def _agent_conversation_summary(self, row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
@@ -2450,6 +2511,7 @@ class SqliteStore:
             "id": row[0], "projectId": row[1], "entrypoint": row[2], "mode": row[3],
             "title": row[4], "status": row[5], "createdAt": row[6],
             "updatedAt": row[7], "deletedAt": row[8],
+            "modelBinding": json.loads(row[9]) if row[9] is not None else None,
         }
 
     def _skill_summary(self, row: sqlite3.Row | tuple[Any, ...]) -> dict[str, Any]:
@@ -2938,6 +3000,20 @@ def _ensure_unique_ids(items: list[dict[str, Any]], label: str) -> None:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def normalize_model_binding(value: Any) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("Agent conversation modelBinding must be an object or null")
+    binding: dict[str, str] = {}
+    for key in ("connectionId", "providerId", "modelId"):
+        item = value.get(key)
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"Agent conversation modelBinding {key} is required")
+        binding[key] = item.strip()
+    return binding
 
 
 def _skill_digest(instructions: str, references: list[dict[str, Any]]) -> str:

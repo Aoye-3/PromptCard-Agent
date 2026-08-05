@@ -36,7 +36,7 @@ def test_prompt_library_search_tool_is_only_available_in_explicit_retrieval_mode
         },
     })
 
-    assert _allowed_tool_names(completion) == {"emit_canvas_text_update"}
+    assert _allowed_tool_names(completion) == {"emit_canvas_prompt_edit"}
     assert _allowed_tool_names(retrieval) == {"search_prompt_library"}
 
 
@@ -70,6 +70,22 @@ def test_ark_multimodal_text_model_is_in_catalog():
     assert model["providerId"] == "volcengine-ark"
     assert model["modality"] == "chat"
     assert model["capabilities"]["input"] == ["text", "image"]
+
+
+def test_ark_pro_text_model_is_in_catalog():
+    model = model_by_id("doubao-seed-2-0-pro-260215")
+
+    assert model == {
+        "id": "doubao-seed-2-0-pro-260215",
+        "providerId": "volcengine-ark",
+        "displayName": "Doubao Seed 2.0 Pro",
+        "modality": "chat",
+        "capabilities": {
+            "input": ["text", "image"],
+            "toolCalling": True,
+            "contextWindow": 256_000,
+        },
+    }
 
 
 def test_connection_store_uses_promptcard_runtime_state_dir(monkeypatch):
@@ -126,8 +142,8 @@ def test_explicit_canvas_context_forces_append_and_rejects_reference_updates():
     context = {
         "snapshot": {
             "nodes": [
-                {"id": "text-1", "kind": "text", "revision": 3, "presetText": "Template", "userText": "Target"},
-                {"id": "text-2", "kind": "text", "revision": 4, "presetText": "", "userText": "Reference"},
+                {"id": "text-1", "kind": "text", "revision": 3, "presetText": "Template", "userText": "Target prompt", "segments": [{"id": "target", "source": "user", "text": "Target prompt", "color": "#1"}]},
+                {"id": "text-2", "kind": "text", "revision": 4, "presetText": "", "userText": "Reference", "segments": [{"id": "reference", "source": "user", "text": "Reference", "color": "#2"}]},
             ]
         }
     }
@@ -135,8 +151,17 @@ def test_explicit_canvas_context_forces_append_and_rejects_reference_updates():
         "mode": "complete", "targetNodeId": "text-1", "referenceNodeIds": ["text-2"], "mentions": []
     }
     proposals = [
-        {"kind": "free_canvas_text_update", "id": "keep", "nodeId": "text-1", "userText": "Added"},
-        {"kind": "free_canvas_text_update", "id": "drop", "nodeId": "text-2", "userText": "Changed"},
+        {"kind": "free_canvas_text_insertions", "id": "keep", "rationale": "Add", "insertions": [{"text": "Added", "reason": "Complete", "anchor": {"type": "text", "segmentId": "target", "text": "Target", "position": "after"}}]},
+        {
+            "kind": "free_canvas_text_insertions", "id": "drop", "rationale": "Change",
+            "insertions": [{
+                "text": "Changed", "reason": "Wrong node",
+                "anchor": {
+                    "type": "text", "segmentId": "reference",
+                    "text": "Reference", "position": "after",
+                },
+            }],
+        },
     ]
 
     validated = validate_agent_proposals(
@@ -147,14 +172,33 @@ def test_explicit_canvas_context_forces_append_and_rejects_reference_updates():
     )
 
     assert [proposal["id"] for proposal in validated] == ["keep"]
-    assert validated[0]["editMode"] == "append"
-    assert validated[0]["baseContentDigest"].startswith("sha256:")
+    assert validated[0]["baseSegmentsDigest"].startswith("sha256:")
+
+
+def test_canvas_complete_rejects_missing_and_ambiguous_anchors():
+    context = {"snapshot": {"nodes": [{
+        "id": "text-1", "kind": "text", "revision": 1,
+        "segments": [
+            {"id": "one", "source": "user", "text": "repeat repeat", "color": "#1"},
+            {"id": "two", "source": "user", "text": "other", "color": "#2"},
+        ],
+    }]}}
+    proposals = [
+        {"kind": "free_canvas_text_insertions", "id": "missing", "rationale": "x", "insertions": [{"text": "a", "reason": "x", "anchor": {"type": "segment", "segmentId": "gone", "position": "after"}}]},
+        {"kind": "free_canvas_text_insertions", "id": "ambiguous", "rationale": "x", "insertions": [{"text": "a", "reason": "x", "anchor": {"type": "text", "segmentId": "one", "text": "repeat", "position": "after"}}]},
+    ]
+
+    assert validate_agent_proposals(
+        proposals, workspace_context=context, permission_scope="workspace-chatbot-agent",
+        canvas_node_context={"mode": "complete", "targetNodeId": "text-1", "referenceNodeIds": [], "mentions": []},
+    ) == []
 
 
 def test_explicit_canvas_context_discards_model_controlled_edit_fields():
     context = {"snapshot": {"nodes": [{
         "id": "text-1", "kind": "text", "revision": 3,
         "presetText": "Template", "userText": "Target",
+        "segments": [{"id": "target", "source": "user", "text": "Target", "color": "#1"}],
     }]}}
     canvas_context = {
         "mode": "complete", "targetNodeId": "text-1",
@@ -164,25 +208,15 @@ def test_explicit_canvas_context_discards_model_controlled_edit_fields():
     }
 
     validated = validate_agent_proposals(
-        [{
-            "kind": "free_canvas_text_update", "id": "keep", "nodeId": "text-1",
-            "editMode": "rewrite_selection", "mode": "replace",
-            "selection": {"start": 0, "end": 6, "selectedText": "Target"},
-            "baseNodeRevision": 999, "templateDigest": "sha256:forged",
-            "baseContentDigest": "sha256:forged", "userText": "Added",
-        }],
+        [{"kind": "free_canvas_text_insertions", "id": "keep", "rationale": "Add", "insertions": [{"text": "Added", "reason": "Complete", "anchor": {"type": "text", "segmentId": "target", "text": "Target", "position": "after"}}]}],
         workspace_context=context,
         permission_scope="workspace-chatbot-agent",
         canvas_node_context=canvas_context,
     )
 
     assert validated[0]["nodeId"] == "text-1"
-    assert validated[0]["editMode"] == "append"
-    assert "mode" not in validated[0]
-    assert "selection" not in validated[0]
     assert validated[0]["baseNodeRevision"] == 3
-    assert validated[0]["templateDigest"] != "sha256:forged"
-    assert validated[0]["baseContentDigest"] != "sha256:forged"
+    assert validated[0]["baseSegmentsDigest"].startswith("sha256:")
 
 
 def test_explicit_canvas_rewrite_selection_preserves_the_requested_range():
@@ -201,14 +235,14 @@ def test_explicit_canvas_rewrite_selection_preserves_the_requested_range():
     }
 
     validated = validate_agent_proposals(
-        [{"kind": "free_canvas_text_update", "id": "rewrite", "nodeId": "text-1", "userText": "warm"}],
+        [{"kind": "free_canvas_text_create", "id": "rewrite", "userText": "warm", "rationale": "Rewrite"}],
         workspace_context=context,
         permission_scope="workspace-chatbot-agent",
         canvas_node_context=canvas_context,
     )
 
-    assert validated[0]["editMode"] == "rewrite_selection"
-    assert validated[0]["selection"] == {"start": 0, "end": 4, "selectedText": "cold"}
+    assert validated[0]["sourceNodeId"] == "text-1"
+    assert validated[0]["basis"]["baseNodeRevision"] == 3
 
 
 def test_explicit_canvas_context_without_target_rejects_all_canvas_mutations():
@@ -382,6 +416,61 @@ def test_canvas_without_selected_text_node_only_accepts_text_create():
     assert [proposal["id"] for proposal in validated] == ["keep-create"]
 
 
+def test_canvas_complete_only_accepts_anchored_insertions_with_reasons():
+    context = {
+        "projectId": "project-1",
+        "snapshot": {"nodes": [{
+            "id": "text-1", "kind": "text", "revision": 3,
+            "presetText": "Template",
+            "segments": [
+                {"id": "preset-1", "source": "preset", "text": "Template", "color": "#111"},
+                {"id": "user-1", "source": "user", "text": "Existing", "color": "#222"},
+            ],
+        }]},
+    }
+    proposals = [{
+        "kind": "free_canvas_text_insertions", "id": "keep", "rationale": "Add atmosphere",
+        "insertions": [{
+            "text": "Warm rim light", "reason": "matches the request",
+            "anchor": {"type": "segment", "segmentId": "user-1", "position": "after"},
+        }],
+    }, {
+        "kind": "free_canvas_text_insertions", "id": "drop", "rationale": "Missing reason",
+        "insertions": [{
+            "text": "Drop", "reason": "", "anchor": {"type": "segment", "segmentId": "user-1", "position": "after"},
+        }],
+    }]
+
+    validated = validate_agent_proposals(
+        proposals,
+        workspace_context=context,
+        permission_scope="workspace-chatbot-agent",
+        canvas_node_context={"mode": "complete", "targetNodeId": "text-1", "referenceNodeIds": [], "mentions": []},
+    )
+
+    assert [proposal["id"] for proposal in validated] == ["keep"]
+    assert validated[0]["nodeId"] == "text-1"
+    assert validated[0]["baseSegmentsDigest"].startswith("sha256:")
+
+
+def test_canvas_rewrite_converts_new_edit_tool_output_to_derived_text_create():
+    context = {
+        "snapshot": {"nodes": [{
+            "id": "text-1", "kind": "text", "revision": 3,
+            "segments": [{"id": "user-1", "source": "user", "text": "Old", "color": "#222"}],
+        }]},
+    }
+    validated = validate_agent_proposals(
+        [{"kind": "free_canvas_text_create", "id": "keep", "userText": "New", "rationale": "Clearer"}],
+        workspace_context=context,
+        permission_scope="workspace-chatbot-agent",
+        canvas_node_context={"mode": "rewrite", "targetNodeId": "text-1", "referenceNodeIds": [], "mentions": []},
+    )
+
+    assert validated[0]["sourceNodeId"] == "text-1"
+    assert validated[0]["basis"]["baseSegmentsDigest"].startswith("sha256:")
+
+
 def test_prompt_library_scope_only_accepts_additive_create():
     proposals = [
         {
@@ -512,12 +601,54 @@ def test_internal_text_model_endpoint_rejects_local_session_only(monkeypatch):
     assert response.json()["detail"] == "internal_auth_required"
 
 
+def test_conversation_model_endpoint_uses_gateway_validation_boundary(monkeypatch):
+    captured = {}
+
+    async def fake_update(project_id, conversation_id, model_binding):
+        captured.update(
+            project_id=project_id,
+            conversation_id=conversation_id,
+            model_binding=model_binding,
+        )
+        return {"id": conversation_id, "modelBinding": model_binding}
+
+    monkeypatch.setattr(
+        promptcard_runtime.runtime_service,
+        "update_conversation_model",
+        fake_update,
+    )
+    app = FastAPI()
+    app.include_router(promptcard_runtime.router)
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/api/promptcard/runtime/projects/project-1/conversations/conversation-1/model",
+            json={"modelBinding": {
+                "connectionId": "connection-1",
+                "providerId": "deepseek",
+                "modelId": "deepseek-chat",
+            }},
+        )
+
+    assert response.status_code == 200
+    assert captured == {
+        "project_id": "project-1",
+        "conversation_id": "conversation-1",
+        "model_binding": {
+            "connectionId": "connection-1",
+            "providerId": "deepseek",
+            "modelId": "deepseek-chat",
+        },
+    }
+
+
 def test_pi_native_proxy_injects_stored_credential_and_streams(monkeypatch):
     captured = {}
     monkeypatch.setenv("PROMPTCARD_INTERNAL_TOKEN", "internal-test-token")
 
-    def fake_resolve(connection_id):
+    def fake_resolve(connection_id, model_id):
         assert connection_id == "connection-1"
+        assert model_id == "deepseek-chat"
         return {
             "providerId": "deepseek",
             "apiBase": "https://api.deepseek.com",
@@ -618,6 +749,7 @@ async def test_persistent_message_loads_history_skills_and_saves_turn(monkeypatc
             return {
                 "id": "conversation-1", "projectId": "project-1",
                 "entrypoint": "workspace-chatbot-agent", "mode": "free-canvas",
+                "modelBinding": {"connectionId": "connection-1", "providerId": "deepseek", "modelId": "deepseek-chat"},
                 "messages": [
                     {"role": "user", "text": "Earlier question"},
                     {"role": "assistant", "text": "Earlier answer"},
@@ -627,7 +759,7 @@ async def test_persistent_message_loads_history_skills_and_saves_turn(monkeypatc
             return {"skills": [{
                 "id": "SKL-canvas-prompt-editor", "slug": "canvas-prompt-editor",
                 "source": "builtin", "capabilityId": "canvas.prompt.edit",
-                "toolDependencies": ["emit_canvas_text_update"], "revision": 1,
+                    "toolDependencies": ["emit_canvas_prompt_edit"], "revision": 1,
             }]}
         if method == "GET" and path == "/api/skills/SKL-canvas-prompt-editor":
             return {
@@ -645,6 +777,16 @@ async def test_persistent_message_loads_history_skills_and_saves_turn(monkeypatc
 
     monkeypatch.setattr("app.gateway.promptcard_runtime._storage_request", fake_storage)
     monkeypatch.setattr("app.gateway.promptcard_runtime._invoke_text_agent", fake_invoke)
+    monkeypatch.setattr(
+        "app.gateway.promptcard_runtime.resolve_text_model",
+        lambda _: {
+            "connectionId": "connection-1", "providerId": "deepseek",
+            "model": {
+                "id": "deepseek-chat", "displayName": "DeepSeek Chat",
+                "capabilities": {"input": ["text"], "toolCalling": True},
+            },
+        },
+    )
     body = PromptCardRuntimeMessageRequest.model_validate({
         "conversationId": "conversation-1", "requestId": "request-1",
         "content": "New question", "projectId": "project-1", "mode": "free-canvas",
@@ -675,6 +817,10 @@ async def test_persistent_message_loads_history_skills_and_saves_turn(monkeypatc
     saved = next(call for call in calls if call[0] == "POST" and call[1].endswith("/turns"))
     assert saved[2]["json"]["requestId"] == "request-1"
     assert saved[2]["json"]["skillSnapshots"][0]["digest"] == "sha256:canvas"
+    assert saved[2]["json"]["modelSnapshot"] == {
+        "connectionId": "connection-1", "providerId": "deepseek", "modelId": "deepseek-chat",
+        "displayName": "DeepSeek Chat", "capabilities": {"input": ["text"], "toolCalling": True},
+    }
     assert saved[2]["json"]["userMessage"]["canvasNodeContext"] == {
         "mode": "complete",
         "target": {"nodeId": "text-1", "name": "Target"},
@@ -682,6 +828,51 @@ async def test_persistent_message_loads_history_skills_and_saves_turn(monkeypatc
         "mentions": [{"nodeId": "text-2", "label": "Reference"}],
     }
     assert "targetNode" not in saved[2]["json"]["userMessage"]["canvasNodeContext"]
+
+
+@pytest.mark.anyio
+async def test_persistent_message_reuses_saved_turn_before_model_resolution(monkeypatch):
+    saved_snapshot = {
+        "connectionId": "connection-previous", "providerId": "deepseek", "modelId": "deepseek-chat",
+        "displayName": "DeepSeek Chat", "capabilities": {"input": ["text"]},
+    }
+
+    async def fake_storage(method, path, **kwargs):
+        assert method == "GET"
+        assert path == "/api/agent-conversations/conversation-1"
+        return {
+            "id": "conversation-1", "projectId": "project-1",
+            "entrypoint": "workspace-chatbot-agent", "mode": "free-canvas",
+            "modelBinding": {"connectionId": "connection-new", "providerId": "deepseek", "modelId": "deepseek-reasoner"},
+            "turns": [{
+                "requestId": "request-1",
+                "messages": [{"role": "assistant", "text": "Saved answer"}],
+                "proposals": [{"id": "proposal-1"}],
+                "modelSnapshot": saved_snapshot,
+            }],
+        }
+
+    monkeypatch.setattr("app.gateway.promptcard_runtime._storage_request", fake_storage)
+    monkeypatch.setattr(
+        "app.gateway.promptcard_runtime.resolve_text_model",
+        lambda _: (_ for _ in ()).throw(AssertionError("model resolution must be skipped")),
+    )
+    monkeypatch.setattr(
+        "app.gateway.promptcard_runtime._invoke_text_agent",
+        lambda _: (_ for _ in ()).throw(AssertionError("agent invocation must be skipped")),
+    )
+    body = PromptCardRuntimeMessageRequest.model_validate({
+        "conversationId": "conversation-1", "requestId": "request-1",
+        "content": "Question", "projectId": "project-1", "mode": "free-canvas",
+    })
+
+    result = await promptcard_runtime.runtime_service.send_message(body, None)
+
+    assert result == {
+        "threadId": "conversation-1", "conversationId": "conversation-1", "requestId": "request-1",
+        "text": "Saved answer", "proposals": [{"id": "proposal-1"}],
+        "diagnostics": {"idempotent": True, "modelSnapshot": saved_snapshot},
+    }
 
 
 @pytest.mark.anyio
@@ -706,6 +897,87 @@ async def test_persistent_message_rejects_conversation_entrypoint_mismatch(monke
 
     assert error.value.status_code == 409
     assert error.value.detail == "agent_conversation_entrypoint_mismatch"
+
+
+@pytest.mark.anyio
+async def test_persistent_message_resolves_its_saved_model_binding(monkeypatch):
+    binding = {
+        "connectionId": "connection-ark",
+        "providerId": "volcengine-ark",
+        "modelId": "doubao-seed-2-0-lite-260215",
+    }
+
+    async def fake_storage(method, path, **kwargs):
+        if method == "GET":
+            return {
+                "id": "conversation-1", "projectId": "project-1",
+                "entrypoint": "workspace-chatbot-agent", "mode": "free-canvas",
+                "modelBinding": binding, "messages": [],
+            }
+        if method == "POST":
+            return kwargs["json"]
+        raise AssertionError((method, path))
+
+    async def fake_invoke(payload):
+        assert payload["modelDescriptor"]["connectionId"] == "connection-ark"
+        assert payload["modelDescriptor"]["model"]["id"] == binding["modelId"]
+        return {"threadId": "thread-1", "text": "Answer", "proposals": [], "diagnostics": {}}
+
+    monkeypatch.setattr("app.gateway.promptcard_runtime._storage_request", fake_storage)
+    monkeypatch.setattr("app.gateway.promptcard_runtime._invoke_text_agent", fake_invoke)
+    monkeypatch.setattr(
+        "app.gateway.promptcard_runtime.resolve_text_model",
+        lambda value: {
+            "connectionId": value["connectionId"], "providerId": value["providerId"],
+            "model": {"id": value["modelId"], "displayName": "Ark", "modality": "chat", "integrationGroup": {"id": "volcengine-ark-sdk", "displayName": "Ark SDK", "kind": "sdk"}},
+        },
+    )
+    body = PromptCardRuntimeMessageRequest.model_validate({
+        "conversationId": "conversation-1", "content": "Question", "projectId": "project-1", "mode": "free-canvas",
+    })
+
+    await promptcard_runtime.runtime_service.send_message(body, None)
+
+
+@pytest.mark.anyio
+async def test_persistent_message_persists_the_default_model_binding_once(monkeypatch):
+    calls = []
+
+    async def fake_storage(method, path, **kwargs):
+        calls.append((method, path, kwargs))
+        if method == "GET":
+            return {
+                "id": "conversation-1", "projectId": "project-1",
+                "entrypoint": "workspace-chatbot-agent", "mode": "free-canvas",
+                "modelBinding": None, "messages": [],
+            }
+        if method == "PATCH":
+            return {"id": "conversation-1", "modelBinding": kwargs["json"]["modelBinding"]}
+        if method == "POST":
+            return kwargs["json"]
+        raise AssertionError((method, path))
+
+    descriptor = {
+        "connectionId": "connection-deepseek", "providerId": "deepseek",
+        "model": {"id": "deepseek-chat", "displayName": "DeepSeek", "modality": "chat", "integrationGroup": {"id": "pi-native", "displayName": "PI", "kind": "pi-native"}},
+    }
+    monkeypatch.setattr("app.gateway.promptcard_runtime._storage_request", fake_storage)
+    monkeypatch.setattr("app.gateway.promptcard_runtime.resolve_text_model", lambda _: descriptor)
+    monkeypatch.setattr(
+        "app.gateway.promptcard_runtime._invoke_text_agent",
+        lambda payload: __import__("asyncio").sleep(0, result={"threadId": "thread-1", "text": "Answer", "proposals": [], "diagnostics": {}}),
+    )
+    body = PromptCardRuntimeMessageRequest.model_validate({
+        "conversationId": "conversation-1", "content": "Question", "projectId": "project-1", "mode": "free-canvas",
+    })
+
+    await promptcard_runtime.runtime_service.send_message(body, None)
+
+    patch = next(call for call in calls if call[0] == "PATCH")
+    assert patch[1] == "/api/projects/project-1/agent-conversations/conversation-1/model"
+    assert patch[2]["json"] == {"modelBinding": {
+        "connectionId": "connection-deepseek", "providerId": "deepseek", "modelId": "deepseek-chat",
+    }}
 
 
 @pytest.mark.anyio

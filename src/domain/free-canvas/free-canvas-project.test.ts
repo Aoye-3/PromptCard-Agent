@@ -24,11 +24,206 @@ import {
   updateFreeCanvasTextNodeStyle,
   updateFreeCanvasTextNodeUserText,
   renameFreeCanvasTextNode,
-  replaceFreeCanvasUserTextRange
+  replaceFreeCanvasUserTextRange,
+  applyFreeCanvasTextInsertions,
+  createFreeCanvasAgentRewriteNode,
+  freeCanvasTextNodeRevision,
+  matchesFreeCanvasTextProposalBasis,
+  previewFreeCanvasTextInsertions
 } from './free-canvas-project'
 import type { IPromptProject } from '@/models/PromptHistory.model'
 
 describe('free canvas project domain', () => {
+  test('previews interleaved insertions without changing the anchored segments', () => {
+    const node = {
+      ...createFreeCanvasTextNode('', { x: 80, y: 100 }, 100),
+      id: 'source-text',
+      segments: [
+        { id: 'preset-1', source: 'preset' as const, text: 'Preset', color: '#ef4423', createdAt: 1, updatedAt: 1 },
+        { id: 'user-1', source: 'user' as const, text: 'User', color: '#123456', createdAt: 2, updatedAt: 2 }
+      ]
+    }
+
+    const preview = previewFreeCanvasTextInsertions(node, [
+      { text: 'Before preset', anchor: { type: 'segment', segmentId: 'preset-1', position: 'before' } },
+      { text: 'After user', anchor: { type: 'text', segmentId: 'user-1', text: 'User', position: 'after' } }
+    ], 500)
+
+    expect(preview.rejectionReason).toBeNull()
+    expect(preview.segments?.map(segment => [segment.id, segment.source, segment.text, segment.color])).toEqual([
+      [expect.stringMatching(/^segment-500-user-/), 'user', 'Before preset', '#111827'],
+      ['preset-1', 'preset', 'Preset', '#ef4423'],
+      ['user-1', 'user', 'User', '#123456'],
+      [expect.stringMatching(/^segment-501-user-/), 'user', 'After user', '#111827']
+    ])
+  })
+
+  test('rejects all text insertions when an anchor is ambiguous or too many are proposed', () => {
+    const node = {
+      ...createFreeCanvasTextNode('', { x: 80, y: 100 }, 100),
+      id: 'source-text',
+      segments: [
+        { id: 'user-1', source: 'user' as const, text: 'repeat repeat', color: '#111827', createdAt: 1, updatedAt: 1 },
+        { id: 'user-2', source: 'user' as const, text: 'another segment', color: '#111827', createdAt: 2, updatedAt: 2 }
+      ]
+    }
+    const project = createFreeCanvasProject(100, { nodes: [node] })
+
+    const ambiguous = applyFreeCanvasTextInsertions(project, node.id, [
+      { text: 'cannot apply', anchor: { type: 'text', segmentId: 'user-1', text: 'repeat', position: 'after' } }
+    ], 500)
+    const excessive = applyFreeCanvasTextInsertions(project, node.id, Array.from({ length: 17 }, (_, index) => ({
+      text: `extra ${index}`,
+      anchor: { type: 'segment' as const, segmentId: 'user-1', position: 'after' as const }
+    })), 500)
+    const overlappingNode = {
+      ...node,
+      segments: [{ ...node.segments[0], text: 'aaa' }]
+    }
+    const overlappingProject = createFreeCanvasProject(100, { nodes: [overlappingNode] })
+    const overlapping = applyFreeCanvasTextInsertions(overlappingProject, overlappingNode.id, [
+      { text: 'cannot apply', anchor: { type: 'text', segmentId: 'user-1', text: 'aa', position: 'after' } }
+    ], 500)
+
+    expect(ambiguous).toEqual({ project, rejectionReason: 'text_anchor_not_unique' })
+    expect(excessive).toEqual({ project, rejectionReason: 'too_many_insertions' })
+    expect(overlapping).toEqual({ project: overlappingProject, rejectionReason: 'text_anchor_not_unique' })
+  })
+
+  test('inserts at a unique Unicode text anchor without altering source characters or colors', () => {
+    const node = {
+      ...createFreeCanvasTextNode('', { x: 80, y: 100 }, 100),
+      id: 'source-text',
+      segments: [
+        { id: 'preset-1', source: 'preset' as const, text: '开场🎬\n夜景', color: '#ef4423', createdAt: 1, updatedAt: 1 },
+        { id: 'user-1', source: 'user' as const, text: '保持原文', color: '#123456', createdAt: 2, updatedAt: 2 }
+      ]
+    }
+
+    const preview = previewFreeCanvasTextInsertions(node, [{
+      text: '补充镜头',
+      anchor: { type: 'text', segmentId: 'preset-1', text: '🎬\n', position: 'after' }
+    }], 500)
+
+    expect(preview.rejectionReason).toBeNull()
+    expect(preview.segments?.map(segment => [segment.source, segment.text, segment.color])).toEqual([
+      ['preset', '开场🎬\n', '#ef4423'],
+      ['user', '补充镜头', '#111827'],
+      ['preset', '夜景', '#ef4423'],
+      ['user', '保持原文', '#123456']
+    ])
+    expect(preview.segments?.[0].id).toBe('preset-1')
+    expect(preview.segments?.filter(segment => segment.source === 'preset').map(segment => segment.text).join('')).toBe('开场🎬\n夜景')
+  })
+
+  test('creates a collision-free rewrite node that retains the source presentation and provenance', () => {
+    const source = {
+      ...createFreeCanvasTextNode('Original text', { x: 80, y: 100 }, 100),
+      id: 'source-text',
+      title: 'Shot prompt',
+      width: 560,
+      height: 220,
+      fontSize: 'huge' as const
+    }
+    const blockingNode = {
+      ...createFreeCanvasTextNode('Blocking', { x: 688, y: 100 }, 101),
+      id: 'blocking-text',
+      title: 'Shot prompt · 改写'
+    }
+    const project = createFreeCanvasProject(100, { nodes: [source, blockingNode] })
+
+    const rewrite = createFreeCanvasAgentRewriteNode(project, source, 'Rewritten text', {
+      baseNodeRevision: 100,
+      templateDigest: 'sha256:template',
+      baseSegmentsDigest: 'sha256:segments'
+    }, 500, {
+      model: {
+        connectionId: 'connection-1',
+        providerId: 'volcengine-ark',
+        modelId: 'doubao-seed-2-0-lite-260215',
+        displayName: 'Doubao Seed 2.0 Lite'
+      },
+      skills: [{ skillId: 'SKL-canvas-prompt-editor', revision: 3, digest: 'sha256:skill' }]
+    })
+
+    expect(rewrite).toMatchObject({
+      kind: 'text',
+      title: 'Shot prompt · 改写 (2)',
+      position: { x: 688, y: 344 },
+      width: 560,
+      height: 220,
+      fontSize: 'huge',
+      segments: [expect.objectContaining({ source: 'user', text: 'Rewritten text', color: '#111827' })],
+      meta: {
+        provenance: {
+          kind: 'agent-rewrite',
+          sourceNodeId: 'source-text',
+          basis: {
+            baseNodeRevision: 100,
+            templateDigest: 'sha256:template',
+            baseSegmentsDigest: 'sha256:segments'
+          },
+          model: {
+            connectionId: 'connection-1',
+            providerId: 'volcengine-ark',
+            modelId: 'doubao-seed-2-0-lite-260215',
+            displayName: 'Doubao Seed 2.0 Lite'
+          },
+          skills: [{ skillId: 'SKL-canvas-prompt-editor', revision: 3, digest: 'sha256:skill' }]
+        }
+      }
+    })
+  })
+
+  test('keeps derived rewrite titles within the text-node naming limit', () => {
+    const source = {
+      ...createFreeCanvasTextNode('Original text', { x: 80, y: 100 }, 100),
+      id: 'source-text',
+      title: 'A'.repeat(32)
+    }
+    const first = createFreeCanvasAgentRewriteNode(
+      createFreeCanvasProject(100, { nodes: [source] }),
+      source,
+      'Rewrite',
+      { baseNodeRevision: 100, templateDigest: 'sha256:t', baseSegmentsDigest: 'sha256:s' },
+      500
+    )
+    const second = createFreeCanvasAgentRewriteNode(
+      createFreeCanvasProject(100, { nodes: [source, first] }),
+      source,
+      'Rewrite again',
+      { baseNodeRevision: 100, templateDigest: 'sha256:t', baseSegmentsDigest: 'sha256:s' },
+      501
+    )
+
+    expect(first.title).toHaveLength(32)
+    expect(first.title.endsWith(' · 改写')).toBe(true)
+    expect(second.title).toHaveLength(32)
+    expect(second.title.endsWith(' (2)')).toBe(true)
+  })
+
+  test('requires every rewrite basis value to match the source text node', () => {
+    const node = {
+      ...createFreeCanvasTextNode('Original', { x: 0, y: 0 }, 100),
+      segments: [{ id: 'segment-1', source: 'user' as const, text: 'Original', color: '#111827', createdAt: 1, updatedAt: 9 }]
+    }
+    const basis = { baseNodeRevision: 9, templateDigest: 'sha256:template', baseSegmentsDigest: 'sha256:segments' }
+
+    expect(freeCanvasTextNodeRevision(node)).toBe(9)
+    expect(matchesFreeCanvasTextProposalBasis(node, basis, {
+      templateDigest: 'sha256:template',
+      baseSegmentsDigest: 'sha256:segments'
+    })).toBe(true)
+    expect(matchesFreeCanvasTextProposalBasis(node, basis, {
+      templateDigest: 'sha256:changed-template',
+      baseSegmentsDigest: 'sha256:segments'
+    })).toBe(false)
+    expect(matchesFreeCanvasTextProposalBasis(node, basis, {
+      templateDigest: 'sha256:template',
+      baseSegmentsDigest: 'sha256:changed-segments'
+    })).toBe(false)
+  })
+
   test('creates an empty standalone free canvas project payload', () => {
     const project = createFreeCanvasProject(100)
 

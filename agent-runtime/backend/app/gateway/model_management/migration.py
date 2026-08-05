@@ -30,6 +30,8 @@ def migrate_legacy_connection_state(
         return False
     if not isinstance(legacy, dict):
         return False
+    if legacy.get("version", 1) == 1:
+        legacy = _migrate_v1_state(legacy)
     try:
         store.validate_state(legacy)
         destination = store.read_state()
@@ -64,6 +66,28 @@ def migrate_legacy_connection_state(
     except ModelManagementError:
         raise ModelManagementError("migration_failed") from None
     return True
+
+
+def _migrate_v1_state(state: dict[str, object]) -> dict[str, object]:
+    migrated = deepcopy(state)
+    migrated["version"] = 2
+    connections = migrated.get("connections")
+    assignments = migrated.get("assignments")
+    if not isinstance(connections, list):
+        return migrated
+    for connection in connections:
+        if isinstance(connection, dict):
+            connection["agentChatModelIds"] = []
+    assignment = assignments.get("chat.primary") if isinstance(assignments, dict) else None
+    if not isinstance(assignment, dict):
+        return migrated
+    connection_id = assignment.get("connectionId")
+    model_id = assignment.get("modelId")
+    for connection in connections:
+        if isinstance(connection, dict) and connection.get("id") == connection_id:
+            connection["agentChatModelIds"] = [model_id]
+            break
+    return migrated
 
 
 def migrate_legacy_model_config(
@@ -122,6 +146,8 @@ def migrate_legacy_model_config(
         "modelId": str(legacy.get("modelName") or "deepseek-chat"),
     }
     state["assignments"]["chat.primary"] = assignment
+    if assignment["modelId"] not in connection["agentChatModelIds"]:
+        connection["agentChatModelIds"].append(assignment["modelId"])
     _validate_assignment(state, assignment)
 
     try:

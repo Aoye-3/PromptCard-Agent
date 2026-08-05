@@ -35,9 +35,21 @@ Returns the focused text-Agent catalog. The current tool surface contains Prompt
 
 ```json
 {
-  "models": [],
+  "models": [
+    {
+      "key": "connection-id:doubao-seed-2-0-lite-260215",
+      "connectionId": "connection-id",
+      "providerId": "volcengine-ark",
+      "modelId": "doubao-seed-2-0-lite-260215",
+      "displayName": "Doubao Seed 2.0 Lite",
+      "capabilities": { "input": ["text", "image"], "toolCalling": true },
+      "available": true,
+      "unavailableReason": null,
+      "isDefault": true
+    }
+  ],
   "skills": [
-    { "id": "SKL-canvas-prompt-editor", "revision": 2, "source": "builtin", "trustState": "first-party" }
+    { "id": "SKL-canvas-prompt-editor", "revision": 3, "source": "builtin", "trustState": "first-party" }
   ],
   "tools": [
     { "name": "search_prompt_library" },
@@ -127,6 +139,7 @@ Returns `{ "connections": [...] }`. A connection response contains:
   "displayName": "Seedream production",
   "apiBase": "https://ark.cn-beijing.volces.com/api/v3",
   "enabled": true,
+  "agentChatModelIds": ["doubao-seed-2-0-lite-260215", "doubao-seed-2-0-pro-260215"],
   "credentialConfigured": true,
   "credentialMask": "<masked>",
   "createdAt": 1784000000000,
@@ -151,9 +164,12 @@ Creates a connection and returns the masked response above:
   "displayName": "Seedream production",
   "apiBase": "https://ark.cn-beijing.volces.com/api/v3",
   "enabled": true,
+  "agentChatModelIds": ["doubao-seed-2-0-lite-260215", "doubao-seed-2-0-pro-260215"],
   "credential": "user-entered-secret"
 }
 ```
+
+`agentChatModelIds` is optional for compatibility and is validated as a unique same-provider chat-model whitelist from the maintained catalog. Saving `chat.primary` automatically adds that model to the corresponding connection whitelist. Clearing the assignment does not clear the whitelist.
 
 The endpoint is exact-provider-endpoint only. It rejects alternate schemes, hosts, ports, query strings, fragments, and embedded credentials. If keyring storage is unavailable, creation fails; there is no plaintext fallback.
 
@@ -343,13 +359,7 @@ Request:
     "mentions": [
       { "nodeId": "text-node-1", "label": "TXT-A1B2C3" },
       { "nodeId": "text-node-2", "label": "构图参考" }
-    ],
-    "selection": {
-      "start": 0,
-      "end": 4,
-      "selectedText": "cold",
-      "baseContentDigest": "sha256:..."
-    }
+    ]
   },
   "workspaceContext": {
     "contextId": "canvas:project",
@@ -384,14 +394,14 @@ Response:
   "text": "assistant text",
   "proposals": [
     {
-      "kind": "free_canvas_text_update",
-      "nodeId": "text-node-1",
-      "editMode": "rewrite_selection",
-      "userText": "warm",
-      "selection": { "start": 0, "end": 4, "selectedText": "cold" },
-      "baseNodeRevision": 1770000000000,
-      "templateDigest": "sha256:...",
-      "baseContentDigest": "sha256:...",
+      "kind": "free_canvas_text_create",
+      "sourceNodeId": "text-node-1",
+      "userText": "complete rewritten prompt",
+      "basis": {
+        "baseNodeRevision": 1770000000000,
+        "templateDigest": "sha256:...",
+        "baseSegmentsDigest": "sha256:..."
+      },
       "status": "pending"
     }
   ],
@@ -402,20 +412,36 @@ Response:
 Current proposal behavior:
 
 - `canvasNodeContext` may attach at most ten unique text nodes. It has at most one writable target; every `referenceNodeId` is read-only. Mention IDs must be part of that attached set.
-- With `mode: complete`, the Gateway accepts only `editMode: append`; `userText` is new content appended as a separate user segment and cannot replace existing content.
-- With `mode: rewrite`, a valid selection accepts only `rewrite_selection`; without a selection it accepts only `rewrite_all` for the target's complete `userText`.
+  - With `mode: complete`, Gateway exposes only `emit_canvas_prompt_edit` with at most 16 exact segment/text insertion anchors. A text anchor includes both `segmentId` and `text`; its text must occur exactly once inside that named segment, then the insertion is made immediately before or after that substring. Validated output becomes `free_canvas_text_insertions`; approval preserves every existing segment's characters, order, source, and color while adding black user segments at the anchors.
+- With `mode: rewrite`, the same tool accepts only a complete `userText`. Validated output becomes `free_canvas_text_create`; approval creates a derived node while leaving the source unchanged.
 - With `mode: prompt-library`, `targetNodeId` must be `null`. The Gateway exposes only `search_prompt_library` for this Canvas mode and rejects every Canvas creation or update proposal.
 - Without an explicit target, ordinary discussion remains available but all Canvas mutation proposals are rejected.
 - `prompt-library-agent` may return only additive `prompt_library_write_proposal` records.
 - All proposals remain pending until the frontend user selects Apply or Reject.
-- A Canvas update can change only the explicit target's user-authored content; preset/template content and reference nodes are never writable through the tool schema.
-- The Gateway resolves node bodies from the current project snapshot and attaches the current node revision, template digest, and user-content digest. The frontend rechecks all three plus selected source text before applying a proposal.
+- Preset/template segments, every existing target segment, and all reference nodes are read-only through the revision 3 tool schema.
+- Gateway resolves node bodies from the current project snapshot and attaches the current node revision, template digest, and canonical segment digest. The frontend rechecks all three and every anchor before applying a proposal.
 
-Persistent project calls use `conversationId + requestId`. The Gateway loads up to 40 normalized messages from PromptCard Storage, validates the conversation's project, entrypoint, and mode, invokes the stateless Node runtime, and stores the new turn. Retrying the same `requestId` for the same conversation returns the stored turn instead of appending duplicates.
+Persistent project calls use `conversationId + requestId`. Gateway loads up to 40 normalized messages from PromptCard Storage, validates the conversation's project, entrypoint, mode, and saved model binding, invokes the stateless Node runtime, and stores the new turn plus its model snapshot. Retrying the same `requestId` returns the first stored result and model snapshot instead of appending duplicates or switching models.
 
 `selectedSkillIds` accepts at most eight external Skill IDs. These selections affect only this request. The Gateway also binds the built-in Canvas Skill by capability, resolves immutable revisions, records `skillId + revision + digest`, and rejects any selected Skill whose declared tool dependencies exceed the request's allowed tool set.
 
-The Python Gateway validates the browser request and returned proposals. The pi runtime owns prompt orchestration, the PI provider collection, and proposal tools. At Agent construction time it resolves the non-secret `chat.primary` descriptor. PI-native models use PI's API implementation through the credential-injecting Gateway proxy; SDK-backed models use the Gateway text-SDK registry. Provider credentials never enter the Node process.
+The Python Gateway validates the browser request and returned proposals. The pi runtime owns prompt orchestration, the PI provider collection, and proposal tools. Gateway resolves the conversation's non-secret model descriptor for each request; PI-native models use PI's API implementation through the credential-injecting Gateway proxy, and SDK-backed models use the Gateway text-SDK registry. Provider credentials never enter the Node process.
+
+### `PATCH /agent-api/promptcard/runtime/projects/{projectId}/conversations/{conversationId}/model`
+
+Persists a conversation model selection immediately:
+
+```json
+{
+  "modelBinding": {
+    "connectionId": "connection-id",
+    "providerId": "volcengine-ark",
+    "modelId": "doubao-seed-2-0-pro-260215"
+  }
+}
+```
+
+Gateway—not the browser—checks that the conversation belongs to the project and is active, the model belongs to the connection's current `agentChatModelIds`, and the connection is enabled, credentialed, and most recently tested successfully. The route then forwards the validated binding to Storage. Passing `null` is supported by the storage contract, while the project UI normally selects another available model instead.
 
 #### Explicit Prompt Library lookup
 

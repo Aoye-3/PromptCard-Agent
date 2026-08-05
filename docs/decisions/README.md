@@ -18,3 +18,4 @@ Architecture Decision Records capture durable product and engineering decisions 
 - [ADR-014: Keep Subject And Material Libraries Project-Scoped](./ADR-014-project-scoped-resource-library.md)
 - [ADR-015: Treat Multi-View As An Explicit Group Of Independent Image Requests](./ADR-015-explicit-multi-view-request-groups.md)
 - [ADR-016: Persist Project Text-Agent Conversations And Inject Bounded Skill Snapshots](./ADR-016-durable-text-agent-conversations-and-bounded-skills.md)
+- [ADR-017: Bind Agent Models Per Conversation And Preserve Canvas Source Segments](./ADR-017-session-model-binding-and-anchored-canvas-edits.md)

@@ -11,7 +11,7 @@ import { sdkGatewayApi } from './sdk-gateway-stream.ts'
 
 const SDK_CHAT_API = 'promptcard-sdk-chat'
 
-interface TextModelDescriptor {
+export interface TextModelDescriptor {
   connectionId: string
   providerId: string
   model: {
@@ -37,17 +37,11 @@ export interface TextProviderRuntime {
 }
 
 export async function createTextProviderRuntime(
-  fetchImpl: typeof fetch = fetch
+  descriptorValue: unknown
 ): Promise<TextProviderRuntime> {
   const gatewayUrl = requiredUrl('PROMPTCARD_GATEWAY_INTERNAL_URL')
   const internalToken = requiredEnv('PROMPTCARD_INTERNAL_TOKEN')
-  const response = await fetchImpl(`${gatewayUrl}/internal/text-model`, {
-    headers: { 'X-PromptCard-Internal-Token': internalToken }
-  })
-  if (!response.ok) {
-    throw new Error(`Text model discovery returned ${response.status}`)
-  }
-  const descriptor = validateDescriptor(await response.json())
+  const descriptor = validateDescriptor(descriptorValue)
   const group = descriptor.model.integrationGroup
   const runtimeProviderId = `${group.kind}:${descriptor.providerId}`
   const api = group.kind === 'pi-native' ? 'openai-completions' : SDK_CHAT_API
@@ -65,6 +59,7 @@ export async function createTextProviderRuntime(
     contextWindow: 128000,
     maxTokens: 8192
   }
+  ;(model as Model<Api> & { promptcardConnectionId?: string }).promptcardConnectionId = descriptor.connectionId
   const provider = createProvider({
     id: runtimeProviderId,
     name: group.displayName,

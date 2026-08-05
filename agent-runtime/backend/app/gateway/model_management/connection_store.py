@@ -70,7 +70,7 @@ class ModelConnectionStore:
 
     def read_state(self) -> dict[str, Any]:
         if not self.path.exists():
-            return {"version": 1, "connections": [], "assignments": {}}
+            return {"version": 2, "connections": [], "assignments": {}}
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
         except OSError as exc:
@@ -79,11 +79,22 @@ class ModelConnectionStore:
             raise ModelManagementError("invalid_connection_store") from exc
         if not isinstance(payload, dict):
             raise ModelManagementError("invalid_connection_store")
+        version = payload.get("version", 1)
         connections = payload.get("connections", [])
         assignments = payload.get("assignments", {})
-        if not isinstance(connections, list) or not isinstance(assignments, dict):
+        if version not in {1, 2} or not isinstance(connections, list) or not isinstance(assignments, dict):
             raise ModelManagementError("invalid_connection_store")
-        return {"version": 1, "connections": connections, "assignments": assignments}
+        if version == 1:
+            connections = deepcopy(connections)
+            _migrate_v1_agent_chat_models(connections, assignments)
+        state = {"version": 2, "connections": connections, "assignments": assignments}
+        _validate_state(state)
+        if version == 1:
+            try:
+                _atomic_write_json(self.path, state)
+            except OSError:
+                raise ModelManagementError("connection_store_unavailable") from None
+        return state
 
     def replace_state(self, state: dict[str, Any]) -> None:
         _validate_state(state)
@@ -180,6 +191,13 @@ class ModelConnectionStore:
             )
         )
         connection = self.prepare_connection(connection_id, request, existing=existing)
+        chat_assignment = state["assignments"].get("chat.primary")
+        if (
+            isinstance(chat_assignment, dict)
+            and chat_assignment.get("connectionId") == connection_id
+            and chat_assignment.get("modelId") not in connection["agentChatModelIds"]
+        ):
+            connection["agentChatModelIds"].append(chat_assignment["modelId"])
         if material_change:
             connection.pop("lastTest", None)
         if credential_changed:
@@ -260,6 +278,14 @@ class ModelConnectionStore:
         if require_ready:
             self._validate_assignment_readiness(state, assignment)
         state["assignments"][slot] = assignment
+        if slot == "chat.primary":
+            connection = next(
+                item for item in state["connections"]
+                if item["id"] == request.connection_id
+            )
+            agent_model_ids = connection.setdefault("agentChatModelIds", [])
+            if request.model_id not in agent_model_ids:
+                agent_model_ids.append(request.model_id)
         self.replace_state(state)
         return deepcopy(assignment)
 
@@ -297,6 +323,9 @@ class ModelConnectionStore:
             "modelId": model_id,
         }
         state["assignments"]["chat.primary"] = next_assignment
+        agent_model_ids = connection.setdefault("agentChatModelIds", [])
+        if model_id not in agent_model_ids:
+            agent_model_ids.append(model_id)
         _validate_assignment(state, next_assignment)
         previous_secret = self.credential_store.get(connection_id)
         credential_changed = request.credential is not None
@@ -381,6 +410,12 @@ class ModelConnectionStore:
         now = _now_ms()
         created_at = existing.get("createdAt", now) if existing else now
         updated_at = _next_ms(existing.get("updatedAt")) if existing else now
+        agent_chat_model_ids = (
+            list(request.agent_chat_model_ids)
+            if request.agent_chat_model_ids is not None
+            else list(existing.get("agentChatModelIds", [])) if existing else []
+        )
+        _validate_agent_chat_model_ids(request.provider_id, agent_chat_model_ids)
         connection = {
             "id": connection_id,
             "providerId": request.provider_id,
@@ -390,6 +425,7 @@ class ModelConnectionStore:
             "credentialRef": f"connection:{connection_id}",
             "createdAt": created_at,
             "updatedAt": updated_at,
+            "agentChatModelIds": agent_chat_model_ids,
         }
         if existing and "lastTest" in existing:
             connection["lastTest"] = deepcopy(existing["lastTest"])
@@ -400,7 +436,7 @@ class ModelConnectionStore:
         return {
             **{
                 key: deepcopy(connection[key])
-                for key in ["id", "providerId", "displayName", "apiBase", "enabled", "createdAt", "updatedAt", "lastTest"]
+                for key in ["id", "providerId", "displayName", "apiBase", "enabled", "agentChatModelIds", "createdAt", "updatedAt", "lastTest"]
                 if key in connection
             },
             "credentialConfigured": configured,
@@ -430,6 +466,8 @@ class ModelConnectionStore:
 
 
 def _validate_state(state: dict[str, Any]) -> None:
+    if state.get("version") != 2:
+        raise ModelManagementError("invalid_connection_store")
     ids: set[str] = set()
     for connection in state.get("connections", []):
         connection_id = str(connection.get("id", ""))
@@ -440,6 +478,10 @@ def _validate_state(state: dict[str, Any]) -> None:
         _validate_provider_and_url(
             str(connection.get("providerId", "")),
             str(connection.get("apiBase", "")),
+        )
+        _validate_agent_chat_model_ids(
+            str(connection.get("providerId", "")),
+            connection.get("agentChatModelIds"),
         )
     for assignment in state.get("assignments", {}).values():
         _validate_assignment(state, assignment)
@@ -510,6 +552,40 @@ def _validate_assignment(state: dict[str, Any], assignment: dict[str, Any]) -> N
         raise ModelManagementError("model_provider_mismatch")
     if model["modality"] != modality:
         raise ModelManagementError("incompatible_model_slot")
+
+
+def _validate_agent_chat_model_ids(provider_id: str, model_ids: Any) -> None:
+    if not isinstance(model_ids, list) or any(not isinstance(item, str) for item in model_ids):
+        raise ModelManagementError("invalid_agent_chat_model_ids")
+    if len(set(model_ids)) != len(model_ids):
+        raise ModelManagementError("invalid_agent_chat_model_ids")
+    for model_id in model_ids:
+        model = model_by_id(model_id)
+        if (
+            model is None
+            or model["providerId"] != provider_id
+            or model["modality"] != "chat"
+        ):
+            raise ModelManagementError("invalid_agent_chat_model_ids")
+
+
+def _migrate_v1_agent_chat_models(
+    connections: list[dict[str, Any]],
+    assignments: dict[str, Any],
+) -> None:
+    assignment = assignments.get("chat.primary")
+    for connection in connections:
+        connection["agentChatModelIds"] = []
+    if not isinstance(assignment, dict):
+        return
+    connection_id = assignment.get("connectionId")
+    model_id = assignment.get("modelId")
+    if not isinstance(connection_id, str) or not isinstance(model_id, str):
+        return
+    for connection in connections:
+        if connection.get("id") == connection_id:
+            connection["agentChatModelIds"] = [model_id]
+            return
 
 
 def _now_ms() -> int:

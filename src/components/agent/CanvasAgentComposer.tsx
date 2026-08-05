@@ -14,6 +14,13 @@ export interface CanvasAgentNodeSummary {
   userText: string
 }
 
+export interface CanvasAgentModelOption {
+  key: string
+  displayName: string
+  available: boolean
+  unavailableReason?: string | null
+}
+
 interface CanvasAgentComposerProps {
   nodes: CanvasAgentNodeSummary[]
   attachments: CanvasAgentAttachment[]
@@ -23,7 +30,11 @@ interface CanvasAgentComposerProps {
   disabled: boolean
   externalDraft?: { id: string; content: string }
   resetKey: number
+  modelOptions?: CanvasAgentModelOption[]
+  selectedModelKey?: string
+  modelSaving?: boolean
   onEditModeChange: (mode: CanvasAgentEditMode) => void
+  onModelChange?: (modelKey: string) => void
   onRemoveNode: (nodeId: string) => void
   onSetTarget: (nodeId: string) => void
   onClearTarget: () => void
@@ -34,12 +45,15 @@ export function CanvasAgentComposer({
   nodes,
   attachments,
   editMode,
-  selection,
   running,
   disabled,
   externalDraft,
   resetKey,
+  modelOptions = [],
+  selectedModelKey = '',
+  modelSaving = false,
   onEditModeChange,
+  onModelChange,
   onRemoveNode,
   onSetTarget,
   onClearTarget,
@@ -61,6 +75,9 @@ export function CanvasAgentComposer({
   const referenceNodes = attachedNodes.filter(({ attachment }) => attachment.role === 'reference')
   const mentionCandidates = attachedNodes.filter(({ node }) => (
     mentionQuery !== null && node.title.toLocaleLowerCase().includes(mentionQuery.toLocaleLowerCase())
+  ))
+  const selectedModelAvailable = modelOptions.length === 0 || modelOptions.some(model => (
+    model.key === selectedModelKey && model.available
   ))
 
   useEffect(() => {
@@ -303,12 +320,31 @@ export function CanvasAgentComposer({
             </select>
             <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3" aria-hidden="true" />
           </label>
+          {modelOptions.length ? (
+            <label className="relative inline-flex h-7 min-w-0 max-w-[160px] items-center rounded-lg border border-[#e5e7eb] bg-[#f9fafb] text-[10px] font-bold text-[#4d4c48]">
+              <select
+                aria-label="对话模型"
+                value={selectedModelKey}
+                disabled={running || modelSaving}
+                onChange={event => onModelChange?.(event.target.value)}
+                className="h-full min-w-0 w-full appearance-none truncate bg-transparent pl-2 pr-7 outline-none disabled:opacity-50"
+              >
+                <option value="" disabled>选择对话模型</option>
+                {modelOptions.map(model => (
+                  <option key={model.key} value={model.key} disabled={!model.available}>
+                    {model.displayName}{!model.available && model.unavailableReason ? ` · ${model.unavailableReason}` : ''}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3" aria-hidden="true" />
+            </label>
+          ) : null}
           <span className="min-w-0 truncate text-[10px] font-medium text-[#87867f]">
             {editMode === 'complete'
-              ? '仅追加新内容'
+              ? '分析原文并穿插补充'
               : editMode === 'prompt-library'
                 ? '只读搜索 Prompt 与关联媒体'
-                : selection ? `仅改写选区：${selection.selectedText}` : '改写整个用户部分'}
+                : '生成新文本节点，原节点不变'}
           </span>
           <button
             type="button"
@@ -316,7 +352,7 @@ export function CanvasAgentComposer({
             title="发送给 Agent"
             className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#141413] text-white transition hover:bg-[#30302e] disabled:bg-[#d1cfc5]"
             onClick={() => onSubmit(serialized.content, serialized.mentions)}
-            disabled={disabled || !serialized.content}
+            disabled={disabled || modelSaving || !selectedModelAvailable || !serialized.content}
           >
             {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
           </button>

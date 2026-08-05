@@ -27,7 +27,12 @@ from app.gateway.model_management.connection_store import (
 )
 from app.gateway.model_management.contracts import ConnectionRequest
 from app.gateway.model_management.service import ConnectionProbeError, probe_connection
-from app.gateway.text_generation.service import assigned_text_model, complete_sdk_text
+from app.gateway.text_generation.service import (
+    agent_chat_model_catalog,
+    assigned_text_model,
+    complete_sdk_text,
+    resolve_text_model,
+)
 
 
 class PromptCardRuntimeMessageRequest(BaseModel):
@@ -91,11 +96,18 @@ class PromptCardModelConfigRequest(BaseModel):
 
 class PromptCardInternalChatRequest(BaseModel):
     model: str
+    connection_id: str = Field(alias="connectionId")
     system_prompt: str = Field(default="", alias="systemPrompt")
     messages: list[dict[str, Any]] = Field(default_factory=list)
     tools: list[dict[str, Any]] = Field(default_factory=list)
     temperature: float | None = None
     max_tokens: int | None = Field(default=None, alias="maxTokens")
+
+
+class PromptCardConversationModelRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    model_binding: dict[str, Any] | None = Field(alias="modelBinding")
 
 
 class PromptCardRuntimeService:
@@ -143,18 +155,7 @@ class PromptCardRuntimeService:
         }
 
     async def catalog(self, request: Request) -> dict[str, Any]:
-        chat_models = [
-            {
-                "name": model["id"],
-                "display_name": model["displayName"],
-                "supports_vision": "image"
-                in model.get("capabilities", {}).get("input", []),
-                "supports_thinking": False,
-                "provider": model["providerId"],
-            }
-            for model in MODELS
-            if model["modality"] == "chat"
-        ]
+        chat_models = agent_chat_model_catalog()
         try:
             skill_catalog = await _storage_request("GET", "/api/skills")
             skills = skill_catalog.get("skills", [])
@@ -164,8 +165,7 @@ class PromptCardRuntimeService:
             "models": chat_models,
             "tools": [
                 {"name": "search_prompt_library", "group": "prompt-library"},
-                {"name": "emit_canvas_text_update", "group": "proposal"},
-                {"name": "emit_canvas_text_create", "group": "proposal"},
+                {"name": "emit_canvas_prompt_edit", "group": "proposal"},
                 {"name": "emit_prompt_library_create", "group": "proposal"},
                 {"name": "emit_media_prompt_preview", "group": "preview"},
             ],
@@ -190,6 +190,7 @@ class PromptCardRuntimeService:
         resolved_canvas_context = _resolve_canvas_node_context(body)
         payload["canvasNodeContext"] = resolved_canvas_context
         conversation_id = body.conversation_id
+        model_binding: dict[str, Any] | None = None
         request_id = body.request_id or str(uuid.uuid4())
         skill_snapshots: list[dict[str, Any]] = []
         if body.permission_scope == "workspace-chatbot-agent" and body.project_id:
@@ -212,11 +213,30 @@ class PromptCardRuntimeService:
                 raise HTTPException(status_code=409, detail="agent_conversation_entrypoint_mismatch")
             if body.mode and conversation.get("mode") != body.mode:
                 raise HTTPException(status_code=409, detail="agent_conversation_mode_mismatch")
+            existing_turn = next(
+                (
+                    turn for turn in conversation.get("turns", [])
+                    if isinstance(turn, dict) and turn.get("requestId") == request_id
+                ),
+                None,
+            )
+            if existing_turn is not None:
+                return _saved_turn_response(conversation_id, request_id, existing_turn)
+            model_binding = conversation.get("modelBinding")
             payload["history"] = _agent_history(conversation.get("messages") or [])
             skill_snapshots = await _resolve_skill_snapshots(body)
             payload["skillSnapshots"] = skill_snapshots
+        descriptor = resolve_text_model(model_binding)
+        normalized_binding = _model_binding_from_descriptor(descriptor)
+        if conversation_id and body.project_id and model_binding is None:
+            await _storage_request(
+                "PATCH",
+                _conversation_model_path(body.project_id, conversation_id),
+                json={"modelBinding": normalized_binding},
+            )
         payload["threadId"] = conversation_id or body.thread_id
         payload["requestId"] = request_id
+        payload["modelDescriptor"] = descriptor
         response = await _invoke_text_agent(payload)
         response["proposals"] = validate_agent_proposals(
             response.get("proposals") or [],
@@ -224,6 +244,20 @@ class PromptCardRuntimeService:
             permission_scope=body.permission_scope,
             canvas_node_context=resolved_canvas_context,
         )
+        model_snapshot = _model_snapshot(descriptor)
+        skill_audit = [
+            {key: skill[key] for key in ("skillId", "revision", "digest")}
+            for skill in skill_snapshots
+        ]
+        response["proposals"] = [
+            {
+                **proposal,
+                "provenance": {"model": model_snapshot, "skills": skill_audit},
+            }
+            if proposal.get("kind") in {"free_canvas_text_insertions", "free_canvas_text_create"}
+            else proposal
+            for proposal in response["proposals"]
+        ]
         if conversation_id and body.project_id:
             saved = await _storage_request(
                 "POST",
@@ -242,10 +276,8 @@ class PromptCardRuntimeService:
                     },
                     "assistantMessage": {"role": "assistant", "text": response.get("text", "")},
                     "proposals": response["proposals"],
-                    "skillSnapshots": [
-                        {key: skill[key] for key in ("skillId", "revision", "digest")}
-                        for skill in skill_snapshots
-                    ],
+                    "modelSnapshot": model_snapshot,
+                    "skillSnapshots": skill_audit,
                 },
             )
             response["conversationId"] = conversation_id
@@ -285,6 +317,7 @@ class PromptCardRuntimeService:
                 "history": _agent_history(body.history),
                 "mediaAction": body.media_action,
                 "mediaPreview": body.media_preview,
+                "modelDescriptor": resolve_text_model(None),
                 "selection": body.selection,
                 "skillSnapshots": await _builtin_skill_snapshot("media.prompt.reverse", {"emit_media_prompt_preview"}),
                 "attachment": {
@@ -307,10 +340,38 @@ class PromptCardRuntimeService:
         return await run_in_threadpool(
             complete_sdk_text,
             body.model_dump(by_alias=True),
+            connection_id=body.connection_id,
+            model_id=body.model,
         )
 
     async def internal_text_model(self) -> dict[str, Any]:
         return await run_in_threadpool(assigned_text_model)
+
+    async def update_conversation_model(
+        self,
+        project_id: str,
+        conversation_id: str,
+        model_binding: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        normalized = None
+        if model_binding is not None:
+            descriptor = resolve_text_model(model_binding)
+            normalized = _model_binding_from_descriptor(descriptor)
+            catalog_item = next(
+                (
+                    item for item in agent_chat_model_catalog()
+                    if item["connectionId"] == normalized["connectionId"]
+                    and item["modelId"] == normalized["modelId"]
+                ),
+                None,
+            )
+            if catalog_item is None or not catalog_item["available"]:
+                raise ModelManagementError("agent_chat_model_unavailable")
+        return await _storage_request(
+            "PATCH",
+            _conversation_model_path(project_id, conversation_id),
+            json={"modelBinding": normalized},
+        )
 
     async def get_model_config(self, request: Request) -> dict[str, Any]:
         store = get_connection_store()
@@ -426,7 +487,38 @@ def validate_agent_proposals(
         if (
             permission_scope == "workspace-chatbot-agent"
             and selected_text_id
+            and canvas_node_context is not None
+            and canvas_node_context.get("mode") == "complete"
+            and kind == "free_canvas_text_insertions"
+            and _valid_canvas_insertions(proposal.get("insertions"), selected_node)
+            and str(proposal.get("rationale") or "").strip()
+        ):
+            validated.append({
+                **_canvas_proposal_base(proposal, index),
+                "nodeId": str(selected_text_id),
+                "insertions": proposal["insertions"],
+                **_canvas_protection(selected_node),
+            })
+        elif (
+            permission_scope == "workspace-chatbot-agent"
+            and selected_text_id
+            and canvas_node_context is not None
+            and canvas_node_context.get("mode") == "rewrite"
+            and kind == "free_canvas_text_create"
+            and isinstance(proposal.get("userText"), str)
+            and proposal["userText"].strip()
+        ):
+            validated.append({
+                **_canvas_proposal_base(proposal, index),
+                "kind": "free_canvas_text_create",
+                "sourceNodeId": str(selected_text_id),
+                "basis": _canvas_protection(selected_node),
+            })
+        elif (
+            permission_scope == "workspace-chatbot-agent"
+            and selected_text_id
             and kind == "free_canvas_text_update"
+            and canvas_node_context is None
             and str(proposal.get("nodeId")) == selected_text_id
             and isinstance(proposal.get("userText"), str)
             and proposal["userText"].strip()
@@ -520,8 +612,72 @@ def _canvas_protection(selected: dict[str, Any] | None) -> dict[str, Any]:
     return {
         "baseNodeRevision": revision,
         "templateDigest": f"sha256:{digest}",
+        "baseSegmentsDigest": "sha256:" + hashlib.sha256(
+            json.dumps(
+                [
+                    {
+                        key: segment.get(key)
+                        for key in ("id", "source", "text", "color")
+                    }
+                    for segment in selected.get("segments", [])
+                    if isinstance(segment, dict)
+                ],
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest(),
         "baseContentDigest": _text_digest(str(selected.get("userText") or "")),
     }
+
+
+def _valid_canvas_insertions(value: Any, selected: dict[str, Any] | None) -> bool:
+    if not isinstance(value, list) or not 0 < len(value) <= 16:
+        return False
+    for insertion in value:
+        if not isinstance(insertion, dict):
+            return False
+        if not str(insertion.get("text") or "").strip() or not str(insertion.get("reason") or "").strip():
+            return False
+        anchor = insertion.get("anchor")
+        if not isinstance(anchor, dict) or anchor.get("position") not in {"before", "after"}:
+            return False
+        segments = selected.get("segments", []) if isinstance(selected, dict) else []
+        if anchor.get("type") == "segment" and any(
+            isinstance(segment, dict) and segment.get("id") == anchor.get("segmentId")
+            for segment in segments
+        ):
+            continue
+        if anchor.get("type") == "text":
+            segment_id = anchor.get("segmentId")
+            anchor_text = anchor.get("text")
+            target_segment = next(
+                (
+                    segment for segment in segments
+                    if isinstance(segment, dict) and segment.get("id") == segment_id
+                ),
+                None,
+            )
+            if (
+                isinstance(anchor_text, str)
+                and anchor_text
+                and isinstance(target_segment, dict)
+                and _substring_occurrences(str(target_segment.get("text") or ""), anchor_text) == 1
+            ):
+                continue
+        return False
+    return True
+
+
+def _substring_occurrences(value: str, substring: str) -> int:
+    count = 0
+    start = 0
+    while start < len(value):
+        position = value.find(substring, start)
+        if position < 0:
+            return count
+        count += 1
+        start = position + 1
+    return count
 
 
 def _text_digest(value: str) -> str:
@@ -692,14 +848,12 @@ def _allowed_tool_names(body: PromptCardRuntimeMessageRequest) -> set[str]:
         if body.canvas_node_context.get("mode") == "prompt-library":
             tools.add("search_prompt_library")
         elif body.canvas_node_context.get("targetNodeId"):
-            tools.add("emit_canvas_text_update")
+            tools.add("emit_canvas_prompt_edit")
         return tools
     snapshot = (body.workspace_context or {}).get("snapshot") or {}
     selected = snapshot.get("selectedNode")
     if isinstance(selected, dict) and selected.get("kind") == "text":
-        tools.add("emit_canvas_text_update")
-    else:
-        tools.add("emit_canvas_text_create")
+        tools.add("emit_canvas_prompt_edit")
     return tools
 
 
@@ -814,6 +968,62 @@ async def _invoke_text_agent(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _text_agent_url() -> str:
     return os.getenv("PROMPTCARD_TEXT_AGENT_URL", "http://127.0.0.1:8011").rstrip("/")
+
+
+def _conversation_model_path(project_id: str, conversation_id: str) -> str:
+    return (
+        f"/api/projects/{quote(project_id, safe='')}/agent-conversations/"
+        f"{quote(conversation_id, safe='')}/model"
+    )
+
+
+def _model_binding_from_descriptor(descriptor: dict[str, Any]) -> dict[str, str]:
+    model = descriptor.get("model")
+    if not isinstance(model, dict):
+        raise ModelManagementError("invalid_model_binding")
+    connection_id = descriptor.get("connectionId")
+    provider_id = descriptor.get("providerId")
+    model_id = model.get("id")
+    if not all(isinstance(value, str) and value for value in (connection_id, provider_id, model_id)):
+        raise ModelManagementError("invalid_model_binding")
+    return {
+        "connectionId": connection_id,
+        "providerId": provider_id,
+        "modelId": model_id,
+    }
+
+
+def _model_snapshot(descriptor: dict[str, Any]) -> dict[str, Any]:
+    binding = _model_binding_from_descriptor(descriptor)
+    model = descriptor["model"]
+    return {
+        **binding,
+        "displayName": model.get("displayName"),
+        "capabilities": model.get("capabilities", {}),
+    }
+
+
+def _saved_turn_response(
+    conversation_id: str,
+    request_id: str,
+    turn: dict[str, Any],
+) -> dict[str, Any]:
+    messages = turn.get("messages") or []
+    assistant = next(
+        (
+            message for message in reversed(messages)
+            if isinstance(message, dict) and message.get("role") == "assistant"
+        ),
+        {},
+    )
+    return {
+        "threadId": conversation_id,
+        "conversationId": conversation_id,
+        "requestId": request_id,
+        "text": str(assistant.get("text") or ""),
+        "proposals": turn.get("proposals") or [],
+        "diagnostics": {"idempotent": True, "modelSnapshot": turn.get("modelSnapshot")},
+    }
 
 
 async def _storage_health() -> dict[str, Any]:

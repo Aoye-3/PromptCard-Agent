@@ -63,6 +63,7 @@ export interface ModelIntegrationGroup {
 export interface ModelCapabilities {
   input?: Array<'text' | 'image'>
   toolCalling?: boolean
+  contextWindow?: number
   modes?: ImageModelMode[]
   resolutions?: Array<'1K' | '2K'>
   aspectRatios?: string[]
@@ -141,6 +142,7 @@ export interface ModelConnection {
   displayName: string
   apiBase: string
   enabled: boolean
+  agentChatModelIds?: string[]
   credentialConfigured: boolean
   credentialMask?: string | null
   createdAt: number
@@ -164,6 +166,7 @@ export interface ModelConnectionInput {
   displayName: string
   apiBase: string
   enabled: boolean
+  agentChatModelIds?: string[]
   credential?: string
   clearCredential?: boolean
 }

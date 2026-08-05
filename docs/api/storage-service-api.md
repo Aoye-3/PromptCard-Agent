@@ -167,13 +167,14 @@ Registration returns `400` for invalid modes, empty/blank Prompt fields, or alre
 - `GET /api/agent-conversations?projectId=...&status=active|trash&cursor=...&limit=50`
 - `GET /api/agent-conversations/{id}?projectId=...&includeTrash=false`
 - `PATCH /api/agent-conversations/{id}`
+- `PATCH /api/projects/{projectId}/agent-conversations/{id}/model`
 - `POST /api/agent-conversations/{id}/turns`
 - `PATCH /api/agent-conversations/{id}/proposals/{proposalId}`
 - `POST /api/agent-conversations/{id}/trash`
 - `POST /api/agent-conversations/{id}/restore`
 - `DELETE /api/agent-conversations/{id}`
 
-Conversations are always owned by one active project and record `entrypoint`, `mode`, title, lifecycle status, and timestamps. Active and Trash lists are separate, ordered by `updatedAt DESC, id DESC`, and return `{ "conversations": [...], "nextCursor": "..." }`. The detail projection adds ordered `messages`, durable `proposals`, and stored turn results.
+Conversations are always owned by one active project and record `entrypoint`, `mode`, title, lifecycle status, timestamps, and an optional `modelBinding` containing `connectionId`, `providerId`, and `modelId`. The project-scoped model route updates or clears that binding. Active and Trash lists are separate, ordered by `updatedAt DESC, id DESC`, and return `{ "conversations": [...], "nextCursor": "..." }`. The detail projection adds ordered `messages`, durable `proposals`, and stored turn results.
 
 Creating a turn requires:
 
@@ -184,8 +185,15 @@ Creating a turn requires:
   "userMessage": { "role": "user", "text": "Complete the selected prompt." },
   "assistantMessage": { "role": "assistant", "text": "A proposal is ready." },
   "proposals": [],
+  "modelSnapshot": {
+    "connectionId": "connection-1",
+    "providerId": "volcengine-ark",
+    "modelId": "doubao-seed-2-0-lite-260215",
+    "displayName": "Doubao Seed 2.0 Lite",
+    "capabilities": { "input": ["text", "image"], "toolCalling": true }
+  },
   "skillSnapshots": [
-    { "skillId": "SKL-canvas-prompt-editor", "revision": 1, "digest": "sha256:..." }
+    { "skillId": "SKL-canvas-prompt-editor", "revision": 3, "digest": "sha256:..." }
   ]
 }
 ```
@@ -201,7 +209,7 @@ Moving a conversation to Trash preserves all child records. Restore returns it t
 - `POST /api/skills`
 - `POST /api/skills/{skillId}/revisions`
 
-Schema v8 seeds two first-party Skills:
+Schema v9 retains the two first-party Skills and adds the immutable revision 3 of `canvas-prompt-editor`:
 
 - `SKL-canvas-prompt-editor`, capability `canvas.prompt.edit`
 - `SKL-media-prompt-reverse`, capability `media.prompt.reverse`

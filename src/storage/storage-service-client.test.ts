@@ -109,13 +109,20 @@ describe('storageServiceClient', () => {
     })
     await storageServiceClient.agentConversations.trash('conversation/1', 'project/1')
     await storageServiceClient.agentConversations.restore('conversation/1', 'project/1')
+    await storageServiceClient.agentConversations.updateModel('conversation/1', 'project/1', {
+      connectionId: 'connection-1', providerId: 'volcengine-ark', modelId: 'ark-chat'
+    })
     await storageServiceClient.agentConversations.deleteForever('conversation/1', 'project/1')
     await storageServiceClient.skills.list()
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/storage-api/agent-conversations?projectId=project%2F1&status=trash&limit=50', expect.any(Object))
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/storage-api/agent-conversations/conversation%2F1/trash', expect.objectContaining({ method: 'POST' }))
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/storage-api/agent-conversations/conversation%2F1', expect.objectContaining({ method: 'DELETE' }))
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/storage-api/skills', expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(5, '/storage-api/projects/project%2F1/agent-conversations/conversation%2F1/model', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ modelBinding: { connectionId: 'connection-1', providerId: 'volcengine-ark', modelId: 'ark-chat' } })
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/storage-api/agent-conversations/conversation%2F1', expect.objectContaining({ method: 'DELETE' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/storage-api/skills', expect.any(Object))
   })
 
   test('reports request timeouts', async () => {

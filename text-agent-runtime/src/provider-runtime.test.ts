@@ -13,9 +13,9 @@ describe('PI text provider runtime', () => {
   })
 
   it('registers PI-native chat models through the PI provider collection', async () => {
-    const fetchImpl = async () => Response.json(descriptor('pi-native', 'deepseek', 'deepseek-chat'))
-
-    const runtime = await createTextProviderRuntime(fetchImpl as typeof fetch)
+    const runtime = await createTextProviderRuntime(
+      descriptor('pi-native', 'deepseek', 'deepseek-chat')
+    )
 
     expect(runtime.model.provider).toBe('pi-native:deepseek')
     expect(runtime.model.api).toBe('openai-completions')
@@ -24,23 +24,29 @@ describe('PI text provider runtime', () => {
   })
 
   it('registers SDK chat models separately from PI-native providers', async () => {
-    const fetchImpl = async () => Response.json(
+    const runtime = await createTextProviderRuntime(
       descriptor('sdk', 'volcengine-ark', 'doubao-seed-2-0-lite-260215')
     )
-
-    const runtime = await createTextProviderRuntime(fetchImpl as typeof fetch)
 
     expect(runtime.model.provider).toBe('sdk:volcengine-ark')
     expect(runtime.model.api).toBe('promptcard-sdk-chat')
     expect(runtime.integrationGroup.id).toBe('volcengine-ark-sdk')
   })
 
+  it('uses the descriptor resolved by Gateway without model discovery', async () => {
+    const runtime = await createTextProviderRuntime(
+      descriptor('sdk', 'volcengine-ark', 'doubao-seed-2-0-lite-260215')
+    )
+
+    expect(runtime.model.id).toBe('doubao-seed-2-0-lite-260215')
+    expect((runtime.model as typeof runtime.model & { promptcardConnectionId?: string }).promptcardConnectionId)
+      .toBe('connection-1')
+  })
+
   it('rejects image model descriptors at the text boundary', async () => {
     const value = descriptor('sdk', 'volcengine-ark', 'seedream')
     value.model.modality = 'image'
-    const fetchImpl = async () => Response.json(value)
-
-    await expect(createTextProviderRuntime(fetchImpl as typeof fetch))
+    await expect(createTextProviderRuntime(value))
       .rejects.toThrow('Text model descriptor is invalid')
   })
 })

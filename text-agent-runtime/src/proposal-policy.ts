@@ -67,9 +67,10 @@ export interface InvocationInput {
 export interface InvocationPolicy {
   allowedProposalKinds: string[]
   selectedTextNodeId: string | null
-  canvasEditMode: 'append' | 'rewrite_all' | 'rewrite_selection' | null
+  canvasEditMode: 'insertions' | 'derived_node' | null
   canvasSelection: { start: number; end: number; selectedText: string } | null
   canSearchPromptLibrary: boolean
+  canvasSegments: Array<{ id: string; text: string }>
 }
 
 export function buildInvocation(input: InvocationInput) {
@@ -92,17 +93,30 @@ export function buildInvocation(input: InvocationInput) {
     : null
   const canvasEditMode = selectedTextNodeId && input.canvasNodeContext
     ? input.canvasNodeContext.mode === 'complete'
-      ? 'append'
-      : canvasSelection ? 'rewrite_selection' : 'rewrite_all'
+      ? 'insertions'
+      : input.canvasNodeContext.mode === 'rewrite' ? 'derived_node' : null
     : null
+  const target = input.canvasNodeContext?.targetNode
+    || (snapshot?.nodes as Array<Record<string, unknown>> | undefined)?.find(node => node.id === selectedTextNodeId)
+  const canvasSegments = Array.isArray((target as Record<string, unknown> | undefined)?.segments)
+    ? ((target as Record<string, unknown>).segments as Array<Record<string, unknown>>)
+      .filter(segment => typeof segment.id === 'string' && typeof segment.text === 'string')
+      .map(segment => ({ id: String(segment.id), text: String(segment.text) }))
+    : []
 
   let allowedProposalKinds: string[] = []
   if (input.permissionScope === 'prompt-library-agent') {
     allowedProposalKinds = ['prompt_library_write_proposal']
   } else if (input.permissionScope === 'workspace-chatbot-agent') {
     allowedProposalKinds = hasExplicitCanvasContext
-      ? selectedTextNodeId ? ['free_canvas_text_update'] : []
-      : selectedTextNodeId ? ['free_canvas_text_update'] : ['free_canvas_text_create']
+      ? selectedTextNodeId
+        ? input.canvasNodeContext?.mode === 'complete'
+          ? ['free_canvas_text_insertions']
+          : input.canvasNodeContext?.mode === 'rewrite'
+            ? ['free_canvas_text_create']
+            : []
+        : []
+      : []
   } else if (
     input.permissionScope === 'media-analysis-agent' &&
     input.mediaAction === 'preview'
@@ -132,7 +146,8 @@ export function buildInvocation(input: InvocationInput) {
       selectedTextNodeId,
       canvasEditMode,
       canvasSelection,
-      canSearchPromptLibrary
+      canSearchPromptLibrary,
+      canvasSegments
     } satisfies InvocationPolicy
   }
 }

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted; Canvas edit semantics and conversation model binding are superseded by [ADR-017](./ADR-017-session-model-binding-and-anchored-canvas-edits.md).
 
 ## Date
 

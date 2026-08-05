@@ -42,6 +42,7 @@ def configured_store(tmp_path, provider_id: str, model_id: str):
         "chat.primary",
         AssignmentRequest(connectionId=connection["id"], modelId=model_id),
     )
+    store.record_test(connection["id"], success=True)
     return store
 
 
@@ -89,3 +90,69 @@ def test_pi_native_model_cannot_enter_sdk_dispatch(tmp_path, monkeypatch):
 
     with pytest.raises(ModelManagementError, match="text_provider_unsupported"):
         service.complete_sdk_text({"messages": []})
+
+
+def test_bound_text_model_requires_the_connection_whitelist(tmp_path, monkeypatch):
+    store = configured_store(tmp_path, "deepseek", "deepseek-chat")
+    state = store.read_state()
+    connection = state["connections"][0]
+    connection["agentChatModelIds"] = []
+    store.replace_state(state)
+    monkeypatch.setattr(service, "get_connection_store", lambda: store)
+
+    with pytest.raises(ModelManagementError, match="agent_chat_model_not_configured"):
+        service.resolve_text_model({
+            "connectionId": connection["id"],
+            "providerId": "deepseek",
+            "modelId": "deepseek-chat",
+        })
+
+
+@pytest.mark.parametrize(
+    ("unavailable_state", "error"),
+    [
+        ("credential_missing", "credential_missing"),
+        ("not_tested", "connection_not_tested"),
+        ("test_failed", "connection_test_failed"),
+    ],
+)
+def test_text_model_resolution_rejects_unavailable_connections(
+    tmp_path, monkeypatch, unavailable_state, error,
+):
+    store = configured_store(tmp_path, "deepseek", "deepseek-chat")
+    connection_id = store.read_state()["connections"][0]["id"]
+    if unavailable_state == "credential_missing":
+        store.credential_store.delete(connection_id)
+    elif unavailable_state == "not_tested":
+        state = store.read_state()
+        state["connections"][0].pop("lastTest", None)
+        store.replace_state(state)
+    else:
+        store.record_test(connection_id, success=False)
+    monkeypatch.setattr(service, "get_connection_store", lambda: store)
+
+    with pytest.raises(ModelManagementError, match=error):
+        service.resolve_text_model({
+            "connectionId": connection_id,
+            "providerId": "deepseek",
+            "modelId": "deepseek-chat",
+        })
+
+
+def test_agent_catalog_contains_only_connection_whitelisted_models_with_availability(tmp_path, monkeypatch):
+    store = configured_store(tmp_path, "deepseek", "deepseek-chat")
+    connection = store.read_state()["connections"][0]
+    store.record_test(connection["id"], success=True)
+    monkeypatch.setattr(service, "get_connection_store", lambda: store)
+
+    assert service.agent_chat_model_catalog() == [{
+        "key": f'{connection["id"]}:deepseek-chat',
+        "connectionId": connection["id"],
+        "providerId": "deepseek",
+        "modelId": "deepseek-chat",
+        "displayName": "DeepSeek Chat",
+        "capabilities": {},
+        "available": True,
+        "unavailableReason": None,
+        "isDefault": True,
+    }]

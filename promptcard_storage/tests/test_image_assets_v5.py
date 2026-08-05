@@ -63,7 +63,7 @@ class ImageAssetV5StoreTest(unittest.TestCase):
         finally:
             connection.close()
 
-        self.assertEqual(version, 8)
+        self.assertEqual(version, 9)
         self.assertEqual(
             columns,
             {

@@ -77,7 +77,7 @@ The local storage service owns durable project data:
 
 Schema v7 stores project resource metadata independently from project JSON. Every resource query is scoped by an active `project_id`; project Trash preserves rows read-only, permanent project deletion cascades metadata, and source/preview/provider asset IDs remain strong references.
 
-Schema v8 stores project text-Agent conversations, messages, proposal state, idempotent completed turns, and the minimal Skill registry independently from project JSON. The Agent conversation Trash is a separate lifecycle surface. Media analysis history is intentionally not stored.
+Schema v9 stores project text-Agent conversations, per-conversation model bindings, messages, proposal state, idempotent completed turns with model snapshots, and the minimal Skill registry independently from project JSON. The Agent conversation Trash is a separate lifecycle surface. Media analysis history is intentionally not stored.
 
 Frontend code must use `src/utils/storage.ts`, `storageServiceClient.projectResources`, and `/storage-api/*`. It must not write project, resource, preset, Recent Capture, or asset data directly to files.
 

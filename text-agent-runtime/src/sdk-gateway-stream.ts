@@ -28,8 +28,10 @@ export function createSdkGatewayStream(
   options: SimpleStreamOptions | undefined
 ) {
   const stream = createAssistantMessageEventStream()
+  const connectionId = (model as Model<any> & { promptcardConnectionId?: string }).promptcardConnectionId
   queueMicrotask(async () => {
     try {
+      if (!connectionId) throw new Error('PromptCard model connection is missing')
       const response = await fetch(`${requiredUrl('PROMPTCARD_GATEWAY_INTERNAL_URL')}/internal/chat`, {
         method: 'POST',
         headers: {
@@ -37,6 +39,7 @@ export function createSdkGatewayStream(
           'X-PromptCard-Internal-Token': requiredEnv('PROMPTCARD_INTERNAL_TOKEN')
         },
         body: JSON.stringify({
+          connectionId,
           model: model.id,
           systemPrompt: context.systemPrompt || '',
           messages: context.messages,

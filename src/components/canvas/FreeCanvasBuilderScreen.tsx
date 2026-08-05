@@ -58,7 +58,9 @@ import {
   createFreeCanvasImageGenerationPlaceholder,
   createFreeCanvasImageAnnotation,
   createFreeCanvasTextNode,
+  createFreeCanvasAgentRewriteNode,
   createQuickTextNode,
+  applyFreeCanvasTextInsertions,
   appendFreeCanvasUserText,
   freeCanvasPresetText,
   freeCanvasTextSegmentsToPlainText,
@@ -66,6 +68,7 @@ import {
   completeFreeCanvasImageGeneration,
   failFreeCanvasImageGeneration,
   isRunningFreeCanvasImageGeneration,
+  matchesFreeCanvasTextProposalBasis,
   renameFreeCanvasTextNode,
   replaceFreeCanvasUserTextRange,
   replaceFreeCanvasTextRange,
@@ -2466,6 +2469,31 @@ const FreeCanvasBuilderInner = ({
   }
 
   const handleApplyAgentProposal = async (proposal: AgentWorkspaceProposal) => {
+    if (proposal.kind === 'free_canvas_text_insertions') {
+      const currentCanvas = freeCanvasRef.current
+      const target = currentCanvas.nodes.find((node): node is IFreeCanvasTextNode => (
+        node.id === proposal.nodeId && node.kind === 'text'
+      ))
+      if (!target) {
+        window.alert('目标文字节点已不存在，请让 Agent 重新生成提案。')
+        return false
+      }
+      const basisMatches = matchesFreeCanvasTextProposalBasis(target, proposal, {
+        templateDigest: await freeCanvasTemplateDigest(target),
+        baseSegmentsDigest: await freeCanvasSegmentsDigest(target)
+      })
+      if (!basisMatches) {
+        window.alert('提示词节点已发生变化，请让 Agent 重新生成提案。')
+        return false
+      }
+      const applied = applyFreeCanvasTextInsertions(currentCanvas, target.id, proposal.insertions)
+      if (applied.rejectionReason) {
+        window.alert('插入锚点已失效，请让 Agent 重新生成提案。')
+        return false
+      }
+      onChange(applied.project)
+      return true
+    }
     if (proposal.kind === 'free_canvas_text_update') {
       const target = freeCanvas.nodes.find(node => node.id === proposal.nodeId)
       if (!target || target.kind !== 'text') {
@@ -2515,6 +2543,37 @@ const FreeCanvasBuilderInner = ({
       return true
     }
     if (proposal.kind === 'free_canvas_text_create') {
+      const currentCanvas = freeCanvasRef.current
+      if (proposal.sourceNodeId) {
+        const source = currentCanvas.nodes.find((node): node is IFreeCanvasTextNode => (
+          node.id === proposal.sourceNodeId && node.kind === 'text'
+        ))
+        if (!source || !proposal.basis) {
+          window.alert('改写来源节点已不存在，请让 Agent 重新生成提案。')
+          return false
+        }
+        const basisMatches = matchesFreeCanvasTextProposalBasis(source, proposal.basis, {
+          templateDigest: await freeCanvasTemplateDigest(source),
+          baseSegmentsDigest: await freeCanvasSegmentsDigest(source)
+        })
+        if (!basisMatches) {
+          window.alert('改写来源已发生变化，请让 Agent 重新生成提案。')
+          return false
+        }
+        const rewrite = createFreeCanvasAgentRewriteNode(
+          currentCanvas,
+          source,
+          proposal.userText,
+          proposal.basis,
+          Date.now(),
+          proposal.provenance
+        )
+        commitCanvasSelection({
+          ...currentCanvas,
+          nodes: [...currentCanvas.nodes, rewrite]
+        }, rewrite.id)
+        return true
+      }
       const node = createFreeCanvasTextNode(
         proposal.userText,
         nextNodePosition(reactFlow, freeCanvas.nodes.length)
@@ -5387,6 +5446,15 @@ const freeCanvasTemplateDigest = (node: IFreeCanvasTextNode): Promise<string> =>
     color: segment.color
   }))
 }))
+
+const freeCanvasSegmentsDigest = (node: IFreeCanvasTextNode): Promise<string> => sha256Text(pythonCanonicalJson(
+  node.segments.map(segment => ({
+    id: segment.id,
+    source: segment.source,
+    text: segment.text,
+    color: segment.color
+  }))
+))
 
 const nodeTypes = {
   freeCanvasNode: FreeCanvasNode,

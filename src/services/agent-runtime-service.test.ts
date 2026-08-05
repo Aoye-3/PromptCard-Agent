@@ -2,6 +2,62 @@ import { describe, expect, it } from 'vitest'
 import { parseAgentWorkspaceProposals } from './agent-runtime-service'
 
 describe('agent runtime proposal parsing', () => {
+  it('parses bounded interleaved text insertions and a rewrite basis', () => {
+    const proposals = parseAgentWorkspaceProposals(JSON.stringify({
+      kind: 'agent_workspace_proposals',
+      proposals: [
+        {
+          kind: 'free_canvas_text_insertions', id: 'insert-1', nodeId: 'text-1',
+          baseNodeRevision: 9, templateDigest: 'sha256:template', baseSegmentsDigest: 'sha256:segments',
+          insertions: [{
+            text: 'new clause',
+            reason: 'Adds the missing visual detail.',
+            anchor: { type: 'segment', segmentId: 'segment-1', position: 'after' }
+          }]
+        },
+        {
+          kind: 'free_canvas_text_create', id: 'rewrite-1', sourceNodeId: 'text-1', userText: 'rewritten',
+          basis: { baseNodeRevision: 9, templateDigest: 'sha256:template', baseSegmentsDigest: 'sha256:segments' }
+        }
+      ]
+    }))
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        kind: 'free_canvas_text_insertions',
+        baseSegmentsDigest: 'sha256:segments',
+        insertions: [{
+          text: 'new clause',
+          reason: 'Adds the missing visual detail.',
+          anchor: { type: 'segment', segmentId: 'segment-1', position: 'after' }
+        }]
+      }),
+      expect.objectContaining({
+        kind: 'free_canvas_text_create',
+        sourceNodeId: 'text-1',
+        basis: { baseNodeRevision: 9, templateDigest: 'sha256:template', baseSegmentsDigest: 'sha256:segments' }
+      })
+    ])
+  })
+
+  it('requires a segment id for a text insertion anchor', () => {
+    const proposals = parseAgentWorkspaceProposals(JSON.stringify({
+      kind: 'free_canvas_text_insertions', id: 'insert-text-1', nodeId: 'text-1',
+      baseNodeRevision: 9, templateDigest: 'sha256:template', baseSegmentsDigest: 'sha256:segments',
+      insertions: [{
+        text: 'inserted', reason: 'Adds a detail.',
+        anchor: { type: 'text', segmentId: 'segment-1', text: '🎬\n', position: 'after' }
+      }]
+    }))
+
+    expect(proposals).toEqual([expect.objectContaining({
+      insertions: [{
+        text: 'inserted', reason: 'Adds a detail.',
+        anchor: { type: 'text', segmentId: 'segment-1', text: '🎬\n', position: 'after' }
+      }]
+    })])
+  })
+
   it('parses a free canvas text creation proposal', () => {
     const proposals = parseAgentWorkspaceProposals(JSON.stringify({
       kind: 'free_canvas_text_create',

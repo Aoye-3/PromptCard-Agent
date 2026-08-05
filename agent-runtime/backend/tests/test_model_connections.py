@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 import app.gateway.promptcard_runtime as promptcard_runtime_module
 from app.gateway.model_management.connection_store import ModelConnectionStore, ModelManagementError
-from app.gateway.model_management.contracts import ConnectionRequest
+from app.gateway.model_management.contracts import AssignmentRequest, ConnectionRequest
 from app.gateway.model_management.credential_store import CredentialStoreError
 from app.gateway.model_management.migration import migrate_legacy_connection_state
 from app.gateway.routers import model_management
@@ -94,6 +94,58 @@ def test_legacy_connection_state_is_recovered_once_without_moving_credentials(tm
     assert "saved-secret" not in store.path.read_text(encoding="utf-8")
 
 
+def test_v1_connection_state_migrates_chat_default_into_connection_agent_whitelist(tmp_path):
+    credentials = MemoryCredentialStore()
+    connection_id = "575822c5-7569-44d5-8712-db8d4782ab17"
+    path = tmp_path / "promptcard-model-connections.json"
+    path.write_text(
+        json.dumps({
+            "version": 1,
+            "connections": [{
+                "id": connection_id,
+                "providerId": "deepseek",
+                "displayName": "DeepSeek",
+                "apiBase": "https://api.deepseek.com",
+                "enabled": True,
+                "credentialRef": f"connection:{connection_id}",
+                "createdAt": 1,
+                "updatedAt": 1,
+            }],
+            "assignments": {"chat.primary": {
+                "slot": "chat.primary",
+                "connectionId": connection_id,
+                "modelId": "deepseek-chat",
+            }},
+        }),
+        encoding="utf-8",
+    )
+
+    state = ModelConnectionStore(path, credentials).read_state()
+
+    assert state["version"] == 2
+    assert state["connections"][0]["agentChatModelIds"] == ["deepseek-chat"]
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+
+
+def test_chat_assignment_adds_its_model_to_the_connection_agent_whitelist(tmp_path):
+    credentials = MemoryCredentialStore()
+    store = ModelConnectionStore(tmp_path / "connections.json", credentials)
+    connection = store.create_connection(ConnectionRequest(
+        providerId="deepseek",
+        displayName="DeepSeek",
+        apiBase="https://api.deepseek.com",
+        credential="secret",
+        agentChatModelIds=[],
+    ))
+
+    store.set_assignment(
+        "chat.primary",
+        AssignmentRequest(connectionId=connection["id"], modelId="deepseek-chat"),
+    )
+
+    assert store.read_state()["connections"][0]["agentChatModelIds"] == ["deepseek-chat"]
+
+
 def test_catalog_contains_chat_and_image_manifests(model_api):
     client, _, _ = model_api
 
@@ -111,9 +163,10 @@ def test_catalog_contains_chat_and_image_manifests(model_api):
         (model["id"], model["providerId"], model["modality"])
         for model in payload["models"]
     } == {
-        ("deepseek-chat", "deepseek", "chat"),
-        ("doubao-seed-2-0-lite-260215", "volcengine-ark", "chat"),
-        ("doubao-seedream-5-0-pro-260628", "volcengine-ark", "image"),
+            ("deepseek-chat", "deepseek", "chat"),
+            ("doubao-seed-2-0-lite-260215", "volcengine-ark", "chat"),
+            ("doubao-seed-2-0-pro-260215", "volcengine-ark", "chat"),
+            ("doubao-seedream-5-0-pro-260628", "volcengine-ark", "image"),
     }
     seedream = next(model for model in payload["models"] if model["modality"] == "image")
     assert seedream["integrationGroup"] == {
@@ -199,8 +252,9 @@ def test_connection_model_discovery_is_scoped_to_its_provider(model_api):
         (model["id"], model["modality"], model["integrationGroup"]["displayName"])
         for model in payload["models"]
     } == {
-        ("doubao-seed-2-0-lite-260215", "chat", "方舟 SDK"),
-        ("doubao-seedream-5-0-pro-260628", "image", "方舟 SDK"),
+            ("doubao-seed-2-0-lite-260215", "chat", "方舟 SDK"),
+            ("doubao-seed-2-0-pro-260215", "chat", "方舟 SDK"),
+            ("doubao-seedream-5-0-pro-260628", "image", "方舟 SDK"),
     }
     assert all(model["providerId"] == "volcengine-ark" for model in payload["models"])
 
@@ -236,7 +290,7 @@ def test_connection_crud_never_serializes_or_logs_credentials(model_api, caplog)
     assert type(persisted["updatedAt"]) is int
     assert set(persisted) == {
         "id", "providerId", "displayName", "apiBase", "enabled",
-        "credentialRef", "createdAt", "updatedAt",
+        "credentialRef", "agentChatModelIds", "createdAt", "updatedAt",
     }
     created_at = persisted["createdAt"]
     updated_at = persisted["updatedAt"]

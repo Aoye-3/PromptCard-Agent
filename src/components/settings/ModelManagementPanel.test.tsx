@@ -47,7 +47,17 @@ const snapshot = {
         displayName: 'Ark Chat',
         modality: 'chat' as const,
         integrationGroup: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' as const },
-        assignable: true
+        assignable: true,
+        capabilities: { input: ['text', 'image'] as Array<'text' | 'image'>, toolCalling: true }
+      },
+      {
+        id: 'ark-chat-fast',
+        providerId: 'volcengine-ark',
+        displayName: 'Ark Chat Fast',
+        modality: 'chat' as const,
+        integrationGroup: { id: 'volcengine-ark-sdk', displayName: '方舟 SDK', kind: 'sdk' as const },
+        assignable: true,
+        capabilities: { input: ['text'] as Array<'text' | 'image'>, toolCalling: true }
       },
       {
         id: 'seedream',
@@ -86,6 +96,7 @@ const snapshot = {
       displayName: '图片生成连接',
       apiBase: 'https://ark.cn-beijing.volces.com/api/v3',
       enabled: true,
+      agentChatModelIds: ['ark-chat'],
       credentialConfigured: true,
       credentialMask: '********',
       lastTest: { ok: true, checkedAt: 1_720_000_000, message: '连接正常' },
@@ -196,6 +207,36 @@ describe('ModelManagementPanel', () => {
     expect(markup).toContain('DeepSeek Chat')
     expect(markup).toContain('Ark Chat')
     expect(markup).not.toContain('Seedream 5.0 Pro')
+  })
+
+  it('renders the project Agent chat-model whitelist for an Ark connection', () => {
+    const markup = renderToStaticMarkup(
+      <ModelManagementPanelContent
+        modality="chat"
+        snapshot={snapshot}
+        imageStatus={imageStatus}
+        selectedConnectionId="connection-image"
+        draft={{
+          providerId: 'volcengine-ark',
+          displayName: '方舟连接',
+          apiBase: 'https://ark.cn-beijing.volces.com/api/v3',
+          enabled: true,
+          agentChatModelIds: ['ark-chat']
+        }}
+        credentialDraft=""
+        busyAction={null}
+        testResults={{}}
+        error={null}
+        actions={actions}
+      />
+    )
+
+    expect(markup).toContain('项目 Agent 可用模型')
+    expect(markup).toContain('Ark Chat')
+    expect(markup).toContain('Ark Chat Fast')
+    expect(markup).toContain('视觉输入')
+    expect(markup).toContain('工具调用')
+    expect(markup).toMatch(/aria-label="项目 Agent 可用模型 Ark Chat"[^>]*checked=""/)
   })
 
   it('renders the official Ark API address as read-only and exposes all edit actions', () => {

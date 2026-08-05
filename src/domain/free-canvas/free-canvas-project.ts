@@ -23,9 +23,41 @@ import type {
   IPromptProject
 } from '@/models/PromptHistory.model'
 import type { ImageRegion } from '@/domain/image-generation/image-generation'
+import type { AgentRunProvenance } from '@/models/Agent.model'
 
 const DEFAULT_USER_COLOR = '#111827'
 const DEFAULT_PRESET_COLOR = '#ef4423'
+export const MAX_FREE_CANVAS_TEXT_INSERTIONS = 16
+
+export type FreeCanvasTextInsertionAnchor =
+  | { type: 'segment'; segmentId: string; position: 'before' | 'after' }
+  | { type: 'text'; segmentId: string; text: string; position: 'before' | 'after' }
+
+export interface FreeCanvasTextInsertion {
+  text: string
+  anchor: FreeCanvasTextInsertionAnchor
+}
+
+export interface FreeCanvasTextProposalBasis {
+  baseNodeRevision: number
+  templateDigest: string
+  baseSegmentsDigest: string
+}
+
+export type FreeCanvasTextInsertionRejectionReason =
+  | 'target_not_found'
+  | 'too_many_insertions'
+  | 'insertion_text_invalid'
+  | 'anchor_invalid'
+  | 'segment_anchor_not_found'
+  | 'segment_anchor_not_unique'
+  | 'text_anchor_not_found'
+  | 'text_anchor_not_unique'
+
+export interface FreeCanvasTextInsertionsPreview {
+  segments?: IFreeCanvasTextSegment[]
+  rejectionReason: FreeCanvasTextInsertionRejectionReason | null
+}
 
 export type FreeCanvasImageGenerationState = 'running' | 'succeeded' | 'failed'
 
@@ -283,6 +315,110 @@ export const replaceFreeCanvasUserTextRange = (
     timestamp
   )
 }
+
+export const previewFreeCanvasTextInsertions = (
+  node: IFreeCanvasTextNode,
+  insertions: FreeCanvasTextInsertion[],
+  timestamp = Date.now()
+): FreeCanvasTextInsertionsPreview => {
+  if (insertions.length > MAX_FREE_CANVAS_TEXT_INSERTIONS) {
+    return { rejectionReason: 'too_many_insertions' }
+  }
+
+  const resolved = insertions.map(insertion => resolveFreeCanvasTextInsertionAnchor(node.segments, insertion))
+  const rejected = resolved.find((result): result is { rejectionReason: Exclude<FreeCanvasTextInsertionRejectionReason, 'target_not_found' | 'too_many_insertions'> } => (
+    'rejectionReason' in result
+  ))
+  if (rejected) return { rejectionReason: rejected.rejectionReason }
+
+  const insertionsBySegment = new Map<string, Array<{ offset: number; index: number }>>()
+  resolved.forEach((result, index) => {
+    if ('rejectionReason' in result) return
+    insertionsBySegment.set(result.segmentId, [
+      ...(insertionsBySegment.get(result.segmentId) || []),
+      { offset: result.offset, index }
+    ])
+  })
+
+  return {
+    rejectionReason: null,
+    segments: node.segments.flatMap(segment => previewSegmentInsertions(
+      segment,
+      insertionsBySegment.get(segment.id) || [],
+      insertions,
+      timestamp
+    ))
+  }
+}
+
+export const applyFreeCanvasTextInsertions = (
+  project: IFreeCanvasProject,
+  nodeId: string,
+  insertions: FreeCanvasTextInsertion[],
+  timestamp = Date.now()
+): { project: IFreeCanvasProject; rejectionReason: FreeCanvasTextInsertionRejectionReason | null } => {
+  const node = project.nodes.find((candidate): candidate is IFreeCanvasTextNode => (
+    candidate.id === nodeId && candidate.kind === 'text'
+  ))
+  if (!node) return { project, rejectionReason: 'target_not_found' }
+
+  const preview = previewFreeCanvasTextInsertions(node, insertions, timestamp)
+  if (!preview.segments) return { project, rejectionReason: preview.rejectionReason }
+
+  return {
+    project: {
+      ...project,
+      nodes: project.nodes.map(candidate => candidate.id === nodeId
+        ? { ...candidate, segments: preview.segments as IFreeCanvasTextSegment[] }
+        : candidate)
+    },
+    rejectionReason: null
+  }
+}
+
+export const createFreeCanvasAgentRewriteNode = (
+  project: IFreeCanvasProject,
+  source: IFreeCanvasTextNode,
+  text: string,
+  basis: FreeCanvasTextProposalBasis,
+  timestamp = Date.now(),
+  runProvenance?: AgentRunProvenance
+): IFreeCanvasTextNode => {
+  const position = nextFreeCanvasRewritePosition(project.nodes, source)
+  const node = createFreeCanvasTextNode(text, position, timestamp, 'user')
+  return {
+    ...node,
+    title: uniqueFreeCanvasRewriteTitle(project.nodes, source.title),
+    width: source.width,
+    height: source.height,
+    fontSize: source.fontSize,
+    meta: {
+      ...node.meta,
+      provenance: {
+        kind: 'agent-rewrite',
+        sourceNodeId: source.id,
+        basis: { ...basis },
+        ...(runProvenance
+          ? { model: { ...runProvenance.model }, skills: runProvenance.skills.map(skill => ({ ...skill })) }
+          : {})
+      }
+    }
+  }
+}
+
+export const freeCanvasTextNodeRevision = (node: IFreeCanvasTextNode): number => (
+  Math.max(0, ...node.segments.map(segment => segment.updatedAt))
+)
+
+export const matchesFreeCanvasTextProposalBasis = (
+  node: IFreeCanvasTextNode,
+  basis: FreeCanvasTextProposalBasis,
+  digests: Pick<FreeCanvasTextProposalBasis, 'templateDigest' | 'baseSegmentsDigest'>
+): boolean => (
+  freeCanvasTextNodeRevision(node) === basis.baseNodeRevision
+  && digests.templateDigest === basis.templateDigest
+  && digests.baseSegmentsDigest === basis.baseSegmentsDigest
+)
 
 export const renameFreeCanvasTextNode = (
   project: IFreeCanvasProject,
@@ -668,6 +804,117 @@ const mergeAdjacentTextSegments = (segments: IFreeCanvasTextSegment[]): IFreeCan
     }
     return [...merged, segment]
   }, [])
+
+const resolveFreeCanvasTextInsertionAnchor = (
+  segments: IFreeCanvasTextSegment[],
+  insertion: FreeCanvasTextInsertion
+): { segmentId: string; offset: number } | { rejectionReason: Exclude<FreeCanvasTextInsertionRejectionReason, 'target_not_found' | 'too_many_insertions'> } => {
+  if (!insertion || typeof insertion.text !== 'string' || !insertion.text) {
+    return { rejectionReason: 'insertion_text_invalid' }
+  }
+  const anchor = insertion.anchor
+  if (!anchor || (anchor.position !== 'before' && anchor.position !== 'after')) {
+    return { rejectionReason: 'anchor_invalid' }
+  }
+  if (anchor.type !== 'segment' && anchor.type !== 'text') return { rejectionReason: 'anchor_invalid' }
+  const matchingSegments = segments.filter(segment => segment.id === anchor.segmentId)
+  if (matchingSegments.length === 0) {
+    return { rejectionReason: 'segment_anchor_not_found' }
+  }
+  if (matchingSegments.length > 1) {
+    return { rejectionReason: 'segment_anchor_not_unique' }
+  }
+  const segment = matchingSegments[0]
+  if (anchor.type === 'segment') {
+    return { segmentId: segment.id, offset: anchor.position === 'before' ? 0 : segment.text.length }
+  }
+  if (typeof anchor.text !== 'string' || !anchor.text) return { rejectionReason: 'anchor_invalid' }
+  const firstIndex = segment.text.indexOf(anchor.text)
+  if (firstIndex < 0) return { rejectionReason: 'text_anchor_not_found' }
+  if (segment.text.indexOf(anchor.text, firstIndex + 1) >= 0) {
+    return { rejectionReason: 'text_anchor_not_unique' }
+  }
+  return {
+    segmentId: segment.id,
+    offset: anchor.position === 'before' ? firstIndex : firstIndex + anchor.text.length
+  }
+}
+
+const previewSegmentInsertions = (
+  segment: IFreeCanvasTextSegment,
+  events: Array<{ offset: number; index: number }>,
+  insertions: FreeCanvasTextInsertion[],
+  timestamp: number
+): IFreeCanvasTextSegment[] => {
+  if (events.length === 0) return [segment]
+  const sortedEvents = [...events].sort((left, right) => left.offset - right.offset || left.index - right.index)
+  const parts: Array<{ text: string; isOriginal: boolean; insertionIndex?: number }> = []
+  let cursor = 0
+  for (const event of sortedEvents) {
+    if (event.offset > cursor) parts.push({ text: segment.text.slice(cursor, event.offset), isOriginal: true })
+    parts.push({ text: insertions[event.index].text, isOriginal: false, insertionIndex: event.index })
+    cursor = event.offset
+  }
+  if (cursor < segment.text.length) parts.push({ text: segment.text.slice(cursor), isOriginal: true })
+
+  let originalPartIndex = 0
+  return parts.flatMap(part => {
+    if (!part.text) return []
+    if (!part.isOriginal) {
+      return [createTextSegmentWithColor(part.text, 'user', DEFAULT_USER_COLOR, timestamp + (part.insertionIndex || 0))]
+    }
+    const result = originalPartIndex === 0
+      ? segment
+      : { ...segment, id: `${segment.id}:slice:${timestamp}:${originalPartIndex}` }
+    originalPartIndex += 1
+    return [{ ...result, text: part.text }]
+  })
+}
+
+const nextFreeCanvasRewritePosition = (
+  nodes: IFreeCanvasNode[],
+  source: IFreeCanvasTextNode
+): IFreeCanvasPosition => {
+  const candidate = { x: source.position.x + source.width + 48, y: source.position.y }
+  const verticalStep = source.height + 24
+  while (nodes.some(node => freeCanvasFramesOverlap(candidate, source.width, source.height, node))) {
+    candidate.y += verticalStep
+  }
+  return candidate
+}
+
+const freeCanvasFramesOverlap = (
+  position: IFreeCanvasPosition,
+  width: number,
+  height: number,
+  node: IFreeCanvasNode
+): boolean => (
+  position.x < node.position.x + node.width
+  && position.x + width > node.position.x
+  && position.y < node.position.y + node.height
+  && position.y + height > node.position.y
+)
+
+const uniqueFreeCanvasRewriteTitle = (nodes: IFreeCanvasNode[], sourceTitle: string): string => {
+  const maxLength = 32
+  const marker = ' · 改写'
+  const sourceBase = (sourceTitle || 'Text').trim()
+  const titleWithSuffix = (suffix: string) => (
+    `${sourceBase.slice(0, maxLength - marker.length - suffix.length)}${marker}${suffix}`
+  )
+  const base = titleWithSuffix('')
+  const existingTitles = new Set(nodes
+    .filter((node): node is IFreeCanvasTextNode => node.kind === 'text')
+    .map(node => node.title.trim().toLocaleLowerCase()))
+  if (!existingTitles.has(base.toLocaleLowerCase())) return base
+  let suffix = 2
+  while (true) {
+    const numericSuffix = ` (${suffix})`
+    const candidate = titleWithSuffix(numericSuffix)
+    if (!existingTitles.has(candidate.toLocaleLowerCase())) return candidate
+    suffix += 1
+  }
+}
 
 const clampNumber = (value: number, min: number, max: number): number =>
   Math.min(Math.max(Number.isFinite(value) ? value : min, min), max)

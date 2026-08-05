@@ -20,7 +20,7 @@ describe('pi text-agent invocation boundary', () => {
       promptLibrary: []
     })
 
-    expect(invocation.policy.allowedProposalKinds).toEqual(['free_canvas_text_update'])
+    expect(invocation.policy.allowedProposalKinds).toEqual([])
     expect(invocation.policy.selectedTextNodeId).toBe('text-1')
   })
 
@@ -42,7 +42,7 @@ describe('pi text-agent invocation boundary', () => {
       promptLibrary: [{ id: 'preset-1', label: '电影光', content: 'cinematic light' }]
     })
 
-    expect(invocation.policy.allowedProposalKinds).toEqual(['free_canvas_text_create'])
+    expect(invocation.policy.allowedProposalKinds).toEqual([])
     expect(invocation.policy.selectedTextNodeId).toBeNull()
   })
 
@@ -91,9 +91,9 @@ describe('pi text-agent invocation boundary', () => {
       promptLibrary: []
     })
 
-    expect(invocation.policy.allowedProposalKinds).toEqual(['free_canvas_text_update'])
+    expect(invocation.policy.allowedProposalKinds).toEqual(['free_canvas_text_insertions'])
     expect(invocation.policy.selectedTextNodeId).toBe('text-1')
-    expect(invocation.policy.canvasEditMode).toBe('append')
+    expect(invocation.policy.canvasEditMode).toBe('insertions')
   })
 
   it('does not expose canvas mutation tools when the explicit pool has no target', () => {
@@ -111,7 +111,7 @@ describe('pi text-agent invocation boundary', () => {
     expect(invocation.policy.selectedTextNodeId).toBeNull()
   })
 
-  it('derives rewrite mode exclusively from the gateway supplied selection', () => {
+  it('keeps rewrite as a derived-node operation regardless of legacy selection metadata', () => {
     const whole = buildInvocation({
       content: 'Rewrite target', permissionScope: 'workspace-chatbot-agent',
       workspaceContext: { snapshot: { nodes: [] } }, promptLibrary: [],
@@ -140,11 +140,11 @@ describe('pi text-agent invocation boundary', () => {
       }
     })
 
-    expect(whole.policy.canvasEditMode).toBe('rewrite_all')
+    expect(whole.policy.canvasEditMode).toBe('derived_node')
     expect(whole.policy.canvasSelection).toBeNull()
-    expect(selection.policy.canvasEditMode).toBe('rewrite_selection')
+    expect(selection.policy.canvasEditMode).toBe('derived_node')
     expect(selection.policy.canvasSelection).toEqual({ start: 0, end: 4, selectedText: 'cold' })
-    expect(forgedCompleteSelection.policy.canvasEditMode).toBe('append')
+    expect(forgedCompleteSelection.policy.canvasEditMode).toBe('insertions')
     expect(forgedCompleteSelection.policy.canvasSelection).toBeNull()
   })
 

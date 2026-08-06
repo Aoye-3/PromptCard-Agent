@@ -236,7 +236,7 @@ PromptCard Storage release gate (use the existing workspace virtual environment 
 
 ## 规划中功能
 
-### 本地 MCP 与 Codex 创作桥接
+### 本地 MCP、Prompt 库 RAG 与 Codex 创作桥接
 
 计划分别为项目、Prompt 库 Prompt、Prompt 库媒体、画布文本节点、画布媒体和画布选区提供稳定、可复制的引用编码。用户既可以复制精确编码，也可以先给出项目编码，让 Codex 在项目画布与 Prompt 库两个独立索引中查找候选内容，再生成提示词或图片并通过本地受控接口交付回指定画布。
 
@@ -249,9 +249,7 @@ PromptCard Storage release gate (use the existing workspace virtual environment 
 - Skill 使用独立 `SKL` 编码体系；同一固定版本可分别发布给 Codex、启用给本地 Agent，两端权限和启用状态互不联动。
 - 导入只读取与校验 Skill 包，不执行其中的脚本、安装器或依赖；本地 Agent 首版只读取受限的指令与参考资料。
 
-详细设计与分阶段验收见 [Plan 008：本地 MCP Prompt-媒体 Codex 桥接](./docs/Plan/008-local-mcp-prompt-media-codex-bridge.md)。
-
-后续将把本地 Agent 的 Prompt 库手动搜索升级为有界、可引用、可审计的 RAG 检索，详见 [Plan 009：本地 Agent Prompt 库 RAG](./docs/Plan/009-local-agent-prompt-library-rag.md)。
+本地 Agent 的 Prompt 库手动搜索也将随这次改造升级为有界、可引用、可审计的 RAG 检索；详细设计与分阶段验收见 [Plan 008：本地 MCP、Prompt 库 RAG 与 Codex 桥接](./docs/Plan/008-local-mcp-prompt-media-codex-bridge.md)。
 
 ## 当前状态
 

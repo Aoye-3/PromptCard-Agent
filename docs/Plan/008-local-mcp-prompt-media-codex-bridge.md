@@ -1,4 +1,4 @@
-# Plan 008: Local MCP Prompt-Media Codex Bridge
+# Plan 008: Local MCP, Prompt Library RAG, and Codex Bridge
 
 ## Status
 
@@ -16,7 +16,7 @@ Europe/London
 
 Codex is an external creative workbench for PromptCard, not an embedded chat surface inside PMAgent-Canvas.
 
-The user talks to Codex in the Codex desktop app, CLI, or IDE extension. PromptCard exposes two precise, local, permission-scoped content indexes through a repository-owned STDIO MCP server: a Prompt Library index and a project-scoped Canvas index. A separate Skill Hub manages reusable Agent Skill packages and publishes approved, pinned revisions to Codex and the local Agent through host-specific adapters. Codex may return additive Prompt nodes and generated image assets through the same local boundary. PMAgent-Canvas remains the authority for projects, revisions, assets, Canvas placement, Skill packages, and approval-sensitive writes.
+The user talks to Codex in the Codex desktop app, CLI, or IDE extension. PromptCard exposes two precise, local, permission-scoped content indexes through a repository-owned STDIO MCP server: a Prompt Library index and a project-scoped Canvas index. The Prompt Library index is also upgraded into a bounded RAG retrieval core for the local text Agent. MCP/Codex and the local Agent reuse canonical retrieval records and ranking primitives through separate host adapters; the local Agent does not connect through MCP, and neither host inherits the other's permissions. A separate Skill Hub manages reusable Agent Skill packages and publishes approved, pinned revisions to Codex and the local Agent through host-specific adapters. Codex may return additive Prompt nodes and generated image assets through the same local boundary. PMAgent-Canvas remains the authority for projects, revisions, assets, Canvas placement, Skill packages, and approval-sensitive writes.
 
 This plan does not replace the existing pi text Agent or the provider-neutral image-generation runtime.
 
@@ -112,6 +112,9 @@ Natural-language search is a discovery aid, not an exact target contract. Every 
 - The left sidebar exposes one global **Skill Hub** for importing, reviewing, versioning, enabling, disabling, and archiving Skills.
 - Codex and the local Agent resolve the same canonical Skill revision, while enablement and execution permissions remain independent for each host.
 - Importing or reading a Skill never executes its scripts, hooks, or declared tool dependencies.
+- Prompt Library discovery uses bounded, cited retrieval evidence instead of sending a browser-selected or full-library snapshot to the local Agent or Codex.
+- Exact `PLP`/`PLM` codes resolve before ranked retrieval; RAG discovery never substitutes for an exact write or delivery target.
+- The local Agent receives Prompt evidence only in explicit Prompt Library RAG mode. Canvas `complete`, `rewrite`, ordinary discussion, and media analysis remain isolated from library retrieval.
 - PromptCard continues to start and manage local data when Codex or the MCP server is unavailable.
 - The integration does not require an OpenAI or image-provider API key to be stored in PromptCard. Codex-hosted generation still depends on the user's Codex environment and entitlements.
 
@@ -131,7 +134,66 @@ The current left navigation now includes a minimal SkillHub inspection surface. 
 
 This is a local-Agent vertical slice, not completion of the broader Phase 3 design. Folder/archive package import and validation, `SKL-*` public reference codes, lifecycle management, host enablement and pins, Codex native projection, MCP Skill resources, and script handling remain unimplemented. The existing repository `.agents/skills` directory remains a development-time Codex discovery location rather than the canonical product store.
 
+The current Canvas Agent `prompt-library` mode is still request-snapshot based: the browser may serialize up to 200 Prompt records, the pi Runtime keeps at most 100, and `search_prompt_library` searches only that array. This avoids ambient library access but scales request and context size with the library, cannot provide maintained semantic retrieval, and cannot durably explain why a Prompt was selected. The shared RAG track below replaces this transport while keeping Agent and MCP permissions separate.
+
 Codex-generated images must not be represented as successful Seedream or other provider generation runs. Their provenance is `codex-harness`, and delivery uses a separate additive asset path.
+
+## Shared Prompt Library Retrieval and Local-Agent RAG
+
+### Shared core, separate host adapters
+
+Gateway and Storage own one canonical Prompt retrieval core. It serves two explicit product paths:
+
+- the local text Agent's **Prompt Library RAG** mode, which grounds a persistent conversation with a small Prompt evidence set; and
+- the read-only local MCP search/resolve surface, which helps Codex discover typed Prompt and media references before generation or delivery.
+
+The shared core covers normalized retrieval documents, index lifecycle, exact-code resolution, lexical and optional semantic candidate generation, deterministic ranking, evidence budgets, and provenance. The Agent Runtime adapter and MCP adapter have different request/response schemas, permission scopes, audit records, and available tools. Sharing retrieval infrastructure does not route Agent traffic through MCP or grant Codex access to Agent conversations.
+
+### User experience
+
+- Rename the Canvas Agent's manual/snapshot-style Prompt Library mode to **Prompt 库 RAG** when the new backend is active.
+- The user asks naturally in the persistent project conversation and may provide type/category filters or exact Prompt codes.
+- Exact codes resolve directly. Natural-language requests run bounded discovery.
+- The Agent answer identifies the Prompt records and associated media it used; every citation opens the current library record.
+- A visible degraded state explains when semantic retrieval is unavailable and lexical retrieval was used instead.
+- RAG mode remains read-only for Canvas and cannot produce a completion or rewrite proposal.
+
+### Retrieval contract
+
+The frontend sends only the user query, conversation identity, explicit filters, and typed references; it never sends the full Prompt Library. Gateway then:
+
+1. Builds a bounded query from the current message and only the recent conversation text needed to resolve references.
+2. Resolves exact `PLP`/`PLM` codes before ranked retrieval.
+3. Produces lexical candidates with SQLite FTS5/BM25 over active Prompt label, body, category, type, tags, and safe media captions.
+4. If the user has explicitly configured an approved embedding backend, produces semantic candidates from a versioned index.
+5. Fuses and ranks candidates deterministically, then returns at most eight Prompt bundles within a fixed character/token budget.
+6. Re-resolves selected records by identity and revision before model invocation so stale, trashed, or unbound records are not injected.
+7. Persists retrieval audit metadata with the Agent turn or MCP operation, not a duplicate of the whole library.
+
+Each evidence bundle contains a stable Prompt identity/code, revision, digest, bounded content, matched fields, score components, retrieval reason, and safe associated-media metadata. It never contains media bytes, local paths, credentials, raw vectors, or unrestricted metadata.
+
+The contract distinguishes `lexical`, `semantic`, `hybrid`, and `degraded_lexical` execution. Semantic failure falls back to bounded lexical retrieval with a visible reason; it never silently expands result count or uploads content elsewhere.
+
+### Index lifecycle and privacy
+
+- Prompt create/update/archive/restore updates the lexical index transactionally with the authoritative Prompt revision.
+- Trash is excluded from ordinary retrieval.
+- Semantic rows record Prompt revision, content digest, embedding model identity, dimensions, and index version.
+- A changed or removed Prompt becomes ineligible before stale evidence can reach either host.
+- Index rebuild exposes status and diagnostics and does not modify Prompt revisions.
+- Prompt Library and Canvas indexes remain separate even when they refer to the same underlying asset.
+- No embedding provider receives Prompt content unless the user explicitly configures and enables that provider for indexing.
+
+### Agent permission and audit contract
+
+- Replace the request-array `search_prompt_library` tool with a policy-locked `retrieve_prompt_library` operation or equivalent Gateway-preloaded evidence contract.
+- The model may provide a query and allowed filters, but cannot choose Storage paths, arbitrary limits, Trash scope, or permissions.
+- Only explicit Prompt Library RAG mode and the dedicated Prompt Library assistant receive this capability.
+- Canvas `complete` and `rewrite`, ordinary discussion, and media analysis receive no Prompt retriever.
+- Retrieved evidence cannot emit `free_canvas_text_insertions` or `free_canvas_text_create`.
+- Skills may teach query construction and evidence use but cannot increase budgets, add tools, or bypass citations and approval.
+
+The persistent Agent turn records the normalized query digest, retrieval mode, retriever/index version, candidate identities/revisions/scores, selected evidence identities, degradation reason, and actual model/Skill snapshots. Prompt bodies remain authoritative in Storage and are not copied wholesale into conversation rows. MCP audit uses its own operation identity and permission scope rather than an Agent conversation ID.
 
 ## Stable Reference Model
 
@@ -618,6 +680,30 @@ The following Phase 3 scope remains planned and is intentionally left unchecked 
 - [ ] No read tool exposes local paths, credentials, or unrestricted project JSON.
 - [ ] STDIO MCP starts without downloading runtime dependencies from the network.
 
+### Phase 4A: Shared Prompt Library RAG
+
+**Goal:** Replace request-snapshot Prompt lookup with one bounded, auditable retrieval core used through separate local-Agent and MCP adapters.
+
+- Add normalized Prompt retrieval documents and transactional SQLite FTS5 maintenance.
+- Add the bounded Storage/Gateway contract with exact-code short-circuiting, deterministic ranking, evidence budgets, and stale-record re-resolution.
+- Replace browser Prompt-array transport in the local Agent mode and expose citations, degraded state, and durable turn audit.
+- Reuse the retrieval core from MCP search without sharing Agent conversation state, Canvas scope, credentials, tools, or mutation permissions.
+- Add an optional, provider-neutral, versioned semantic-index adapter only after explicit indexing consent is defined.
+- Remove the legacy request-snapshot path after migration and compatibility tests pass.
+
+**Acceptance:**
+
+- [ ] Agent RAG requests and MCP searches contain no browser-supplied full Prompt array.
+- [ ] Exact Prompt/media codes resolve deterministically before ranking.
+- [ ] Chinese and English paraphrases retrieve relevant active Prompts with reviewable reasons.
+- [ ] Result count and injected context remain bounded as the library grows.
+- [ ] Create, update, archive, and restore keep retrieval indexes consistent and exclude Trash from ordinary results.
+- [ ] Missing semantic infrastructure produces an explicit lexical fallback and does not fail the Agent conversation or MCP search.
+- [ ] Agent citations and MCP results expose resolvable Prompt identities and revisions.
+- [ ] Canvas completion/rewrite, ordinary discussion, and media analysis cannot call the retriever.
+- [ ] RAG mode cannot mutate Canvas or Prompt Library without a separate valid proposal and user approval.
+- [ ] Disabling RAG leaves ordinary Agent, Canvas, media analysis, exact-code resolution, and non-RAG MCP tools available.
+
 ### Phase 5: Prompt Node and Image Delivery
 
 **Goal:** Return Codex outputs to the correct Canvas safely.
@@ -656,9 +742,10 @@ The following Phase 3 scope remains planned and is intentionally left unchecked 
 
 ## Verification Strategy
 
-- Storage tests: code uniqueness, migration, backup/restore, trash/restore, context revocation, Skill revision pinning, package digest, and idempotency.
-- Gateway tests: permission scopes, exact resolution, Skill snapshot bounds, multipart validation, redaction, provenance, and conflict errors.
-- Frontend tests: copy-code affordances, selection preview, context creation, Skill Hub navigation/import/review/host toggles, pending delivery, save-before-placed, and recovery.
+- Storage tests: code uniqueness, migration, backup/restore, trash/restore, context revocation, Skill revision pinning, package digest, idempotency, FTS freshness, semantic-index invalidation, and rebuild safety.
+- Gateway tests: permission scopes, exact resolution, Skill snapshot bounds, RAG query/evidence budgets, ranking provenance, stale-candidate rejection, degraded lexical fallback, multipart validation, redaction, provenance, and conflict errors.
+- Frontend tests: copy-code affordances, selection preview, context creation, absence of full-library Agent payloads, RAG citations/degraded state, Skill Hub navigation/import/review/host toggles, pending delivery, save-before-placed, and recovery.
+- Runtime tests: only explicit Prompt Library RAG mode receives bounded evidence or the retrieval tool.
 - MCP/CLI contract tests: identical schemas and results for every shared operation.
 - Skill package security tests: traversal, unsafe links, duplicate normalized paths, archive limits, malformed metadata, collision, and no-execution guarantees.
 - End-to-end tests:
@@ -680,6 +767,9 @@ The following Phase 3 scope remains planned and is intentionally left unchecked 
 - No automatic modification of unrelated user-owned Codex Skills or global Codex configuration.
 - No direct Codex access to SQLite, full project JSON, keyring, or arbitrary filesystem paths.
 - No fuzzy title matching for write targets.
+- No ambient Prompt Library retrieval during Canvas completion/rewrite, ordinary discussion, or media analysis.
+- No unbounded full-library injection into an Agent or Codex context.
+- No silent upload of Prompt content to a remote embedding service.
 - No shared generic media code spanning Prompt Library and Canvas.
 - No copying the entire Canvas when the user has not explicitly requested it.
 - No updates, deletes, or destructive Canvas operations in the first MCP write surface.
@@ -695,4 +785,7 @@ The following Phase 3 scope remains planned and is intentionally left unchecked 
 - Should a future portable project export namespace reference codes to prevent collisions when two independent libraries are merged?
 - Which Skill import sources should follow local folder/archive after the first release: Git repository URL, registry, or neither?
 - Should local-Agent Skill matching remain explicit-only or support deterministic metadata matching after the first release?
+- Should the first RAG release remain lexical-only until an explicit embedding consent flow exists?
+- Which local or remote embedding backend should be supported first?
+- Should hybrid retrieval initially use fixed reciprocal-rank fusion or a separately versioned reranker?
 - When a Codex host supports script-bearing Skills, should PromptCard expose script compatibility as information only or require a separate per-revision execution approval?

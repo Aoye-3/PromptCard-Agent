@@ -34,8 +34,7 @@ Use numbered filenames:
 - [002: Floating Capture Video Asset MVP](./002-floating-capture-video-asset-mvp.md)
 - [004: Update Module Integration](./004-update-module-integration.md)
 - [007: Provider-Neutral Contextual Image Editing And Multi-View](./007-contextual-image-editing-and-multi-view-plan.md)
-- [008: Local MCP Prompt-Media Codex Bridge](./008-local-mcp-prompt-media-codex-bridge.md)
-- [009: Local Agent Prompt Library RAG](./009-local-agent-prompt-library-rag.md)
+- [008: Local MCP, Prompt Library RAG, and Codex Bridge](./008-local-mcp-prompt-media-codex-bridge.md)
 
 ## Implemented Baselines
 

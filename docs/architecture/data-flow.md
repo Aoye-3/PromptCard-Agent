@@ -54,13 +54,15 @@ Source updates must treat durable data and local runtime state as out of scope. 
 
 ## Agent Collaboration Data
 
-The frontend sends a bounded workspace snapshot and at most 100 Prompt Library items through the Python Gateway to the pi text Agent.
+The frontend sends user-visible text plus bounded node identities and roles through the Python Gateway. Gateway resolves authoritative Canvas content by ID. Prompt Library items are loaded only for the explicit `prompt-library` mode, not for ordinary project conversation or Canvas editing.
 
 The maintained pi runtime may return only these proposal kinds:
 
-- `free_canvas_text_update`: update the exact selected Canvas text node;
-- `free_canvas_text_create`: create a Canvas text node when no text node is selected;
+- `free_canvas_text_insertions`: insert black user segments at exact anchors inside the one attached target while preserving all existing segments;
+- `free_canvas_text_create`: create a complete derived text node for `rewrite` while preserving the source node;
 - `prompt_library_write_proposal`: add one new Prompt Library preset.
+
+Historical `free_canvas_text_update` proposals remain readable and approvable for compatibility, but revision 3 Canvas runs do not emit them.
 
 Media analysis is read-only and returns no mutation proposal. Every maintained proposal remains pending until the user explicitly selects Apply or Reject; no Canvas or Prompt Library change is auto-applied.
 

@@ -46,12 +46,13 @@ The text Agent supports the third step without becoming a general-purpose autono
 
 ## Canvas Contract
 
-- When the active Canvas selection is one text node, the Agent may return only a `free_canvas_text_update` proposal for that exact node.
-- When no text node is selected, the Agent may return only a `free_canvas_text_create` proposal.
-- The complete text-node snapshot includes preset/template segments and the user-authored segment. Preset segments are context only; the update tool accepts only the resulting `userText`.
-- `free_canvas_text_update` carries `baseNodeRevision` and `templateDigest`. Applying a stale proposal is refused and requires regeneration.
-- The built-in `canvas-prompt-editor` Skill is bound by the `canvas.prompt.edit` capability, but the same template protection is also enforced by Gateway validation, the tool schema, and the frontend write helper.
-- The Agent may use the bounded Prompt Library snapshot as writing reference.
+- Canvas editing requires one explicitly attached target text node. Up to nine additional attached text nodes are read-only references; `@` mentions express relationships but do not grant write permission.
+- `complete` exposes only the mode-locked `emit_canvas_prompt_edit` insertion schema. Valid output becomes `free_canvas_text_insertions` for the exact target, with at most 16 unique segment/text anchors.
+- Completion preserves every original character, segment order, source, and color. Approval only inserts black `user` segments at the validated anchors.
+- `rewrite` exposes the same tool name with a different schema that accepts one complete `userText`. Valid output becomes `free_canvas_text_create`; approval creates a derived node to the source node's right and never changes the source.
+- New proposals carry `baseNodeRevision`, `templateDigest`, and `baseSegmentsDigest`. Gateway and the apply path reject the whole proposal when any basis or anchor is stale.
+- The built-in `canvas-prompt-editor` revision 3 is bound by `canvas.prompt.edit`, but target locking, reference immutability, tool schemas, and approval checks remain Gateway/application policy rather than Skill-granted authority.
+- Prompt Library content is not included in ordinary Canvas discussion or edit calls. It is available only in the explicit `prompt-library` mode, which exposes search but no Canvas mutation tool.
 - The frontend must show Apply and Reject controls. No Agent response writes to Canvas automatically.
 
 ## Prompt Library Contract
@@ -75,6 +76,8 @@ The Media Library's temporary collaboration dialog calls `POST /api/promptcard/r
 
 - Persistent project calls use `conversationId + requestId`; `(conversationId, requestId)` is idempotent in Storage.
 - The Gateway refuses a conversation when its `projectId`, `entrypoint`, or `mode` differs from the request.
+- Each conversation persists a nullable model binding. New conversations adopt the available `chat.primary`; subsequent turns resolve the saved binding against the current connection whitelist and readiness state.
+- Every first execution records the actual connection, provider, model, display name, and capability snapshot. An idempotent retry returns that stored turn even if the conversation's selected model later changes.
 - Conversation list, rename, Trash, restore, and permanent deletion are project-scoped. Permanent deletion cascades its messages, turns, and proposals.
 - The current `localStorage` entry remembers only the selected conversation ID. Composer drafts are component state; browser storage is never a message-history authority.
 - Built-in Skills are selected by stable capability ID. External Skills are chosen explicitly and apply to one message only.
@@ -89,7 +92,7 @@ The Media Library's temporary collaboration dialog calls `POST /api/promptcard/r
 - pi tools produce proposals only. They have no filesystem, shell, provider credential, Canvas write, or Storage write capability.
 - Persistent conversation reuse is rejected when `projectId`, `entrypoint`, or `mode` changes.
 - Skill content cannot expand permissions, proposal kinds, network access, filesystem access, or approval rights.
-- Text model calls resolve the `chat.primary` assignment at Agent construction time. The runtime never contains a fixed Ark model constant.
+- Project-Agent model calls use the binding loaded from the owning conversation, never an arbitrary browser model ID. `chat.primary` is only the initial/default binding; the runtime never contains a fixed Ark model constant.
 
 ## Provider and modality boundaries
 
@@ -100,7 +103,7 @@ Model connections are shared account metadata; invocation and assignment remain 
 - Image models never enter either text path. Image generation continues through `image_generation` provider adapters and the `image.primary` assignment.
 - The text selector groups `PI 原生` before SDK families. The image selector shows SDK families only and filters out every chat model before rendering.
 
-The internal `GET /api/promptcard/runtime/internal/text-model` response contains the selected connection ID, provider ID, model capabilities, and integration group; it never contains an API base or credential. PI-native provider traffic uses the authenticated `/internal/pi-proxy/{connectionId}/...` route, which accepts only the current `chat.primary` connection and replaces incoming authorization with the stored credential.
+The project turn request carries the Gateway-resolved non-secret model descriptor into the Node runtime. Internal text-model responses contain connection ID, provider ID, model capabilities, and integration group; they never contain an API base or credential. PI-native provider traffic uses the authenticated `/internal/pi-proxy/{connectionId}/...` route and replaces incoming authorization with the stored credential.
 
 Adding a text integration follows one of two paths:
 
@@ -119,3 +122,5 @@ Neither path requires a Canvas contract change or an image-generation adapter ch
 - pi text Agent
 
 The manifest includes `textAgentUrl` and `textAgentHealthUrl` in addition to the existing frontend, Gateway, and Storage URLs.
+
+The runtime-manifest schema and Storage schema are independent. The combined development and desktop launch path accepts PromptCard Storage schema v9; a healthy service reporting an older schema is rejected before the frontend is considered ready. `npm.cmd run agent:check` separately verifies schema v9 imports, the pinned Ark SDK, the maintained chat catalog, and the text-runtime TypeScript build.

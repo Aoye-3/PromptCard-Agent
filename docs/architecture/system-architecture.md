@@ -70,8 +70,8 @@ flowchart LR
 2. Vite proxies `/agent-api` to the Python Gateway.
 3. For a project conversation, Gateway validates the project, entrypoint, mode, permission scope, `conversationId`, and idempotent `requestId`, then loads bounded SQLite history. Media requests instead carry bounded component-memory history and are never persisted.
 4. Gateway binds the feature Skill and any one-shot external Skill, rejects unavailable tool dependencies, and forwards normalized history, current workspace context, Skill snapshots, and the permitted tool catalog to the stateless pi Runtime using an internal token.
-5. pi can search only the supplied Prompt Library snapshot and can emit only tools allowed by the request policy.
-6. pi resolves the non-secret `chat.primary` descriptor into its provider collection.
+5. pi can search Prompt Library only in the explicit `prompt-library` mode and can emit only tools allowed by the request policy.
+6. For persistent project chat, Gateway resolves the conversation's whitelisted model binding and sends its non-secret descriptor to pi. `chat.primary` initializes a conversation but is not reselected on every turn.
 7. PI-native models stream through the credential-injecting Gateway proxy; SDK-backed models use the separate Gateway text-adapter registry.
 8. Gateway validates the result again and durably records project messages, tool summaries, proposal state, and the exact Skill revision/digest used.
 9. The frontend displays Apply/Reject. No response mutates Canvas or Prompt Library data automatically.
@@ -79,14 +79,15 @@ flowchart LR
 ## Canvas Proposal Rules
 
 - Explicit Canvas node context: at most one attached text node is the writable target; all other attached text nodes are read-only references. `@` mentions express relationships and do not grant write access.
-- Completion mode accepts only an append proposal. Rewrite mode accepts either a whole-user-part rewrite or a validated selection rewrite. The protected template segment is context-only.
-- Proposals record the target node revision, template digest, and user-content digest. The apply path fails closed when any baseline changes. Explicit Canvas context without a target is discussion-only.
+- Completion mode accepts at most 16 exact segment/text anchors and produces `free_canvas_text_insertions`; approval preserves every existing segment and adds only black user segments.
+- Rewrite mode produces a complete `free_canvas_text_create` derived node to the source node's right. It does not replace the source or use a text selection.
+- Proposals record the target node revision, template digest, and segment digest. The apply path fails closed when any baseline or anchor changes. Explicit Canvas context without a target is discussion-only.
 - Prompt Library: additive preset creation only.
 - Media analysis: ordinary chat or a non-mutating Prompt preview for one selected image. Prompt Library registration always requires a separate explicit user action.
 
 ## Image-Generation Isolation
 
-Image generation remains a separate Gateway module using `image.primary`. Image models never enter the PI text provider collection or the text-SDK registry. It does not depend on text-Agent availability. The current Storage schema is v8: it preserves the image-generation conversations and durable placements introduced in v4, the original/derived image relationships introduced in v5, the later asset-lifecycle and project-resource additions, and the v8 text-Agent conversation and Skill tables. Image runs remain immutable, and Recent Capture behavior remains unchanged.
+Image generation remains a separate Gateway module using `image.primary`. Image models never enter the PI text provider collection or the text-SDK registry. It does not depend on text-Agent availability. The current Storage schema is v9: it preserves the image-generation conversations and durable placements introduced in v4, the original/derived image relationships introduced in v5, the later asset-lifecycle and project-resource additions, and the v8 text-Agent conversation and Skill tables; v9 adds the nullable conversation model binding. Image runs remain immutable, and Recent Capture behavior remains unchanged.
 
 ## Local Port Discovery
 

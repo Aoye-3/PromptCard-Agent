@@ -154,7 +154,7 @@ cd PromptCard-Agent
 start-desktop.vbs
 ```
 
-启动器会在需要时安装前端依赖、初始化本地服务并打开 PMAgent-Canvas 桌面壳。正常启动会复用现有桌面进程；Rust 或 Tauri 源码变化时会触发重新构建。
+启动器会在需要时安装前端依赖、初始化本地服务并打开 PMAgent-Canvas 桌面壳。正常启动会复用现有桌面进程；Rust 或 Tauri 源码变化时会触发重新构建。当前组合启动链路会校验 Storage schema v9，避免把旧 Storage 进程误当作可用服务。
 
 如果启动失败，运行可见终端版本查看完整日志：
 

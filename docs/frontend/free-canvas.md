@@ -24,7 +24,7 @@ Text nodes store visible text as ordered segments:
 - `source: "preset"` segments are template text and default to red.
 - `source: "user"` segments are user-authored text and default to black.
 - The UI presents both as one editable-looking node; color is the only visible distinction.
-- Agent edits are restricted to user segments through `free_canvas_text_update`. When no text node is selected, the Agent may instead propose `free_canvas_text_create`.
+- Agent completion preserves all existing segments and proposes anchored black `user` insertions. Agent rewrite creates a separate derived text node; it never overwrites the source. Historical `free_canvas_text_update` records remain compatible but are not emitted by the current revision 3 flow.
 
 Quick messages are Prompt Library presets in the dedicated `quick-message` category. Clicking a
 quick message creates a new text node with the preset content as a red `preset` segment; later
@@ -210,9 +210,10 @@ The current pi policy is attachment- and role-driven:
 
 - **补全** on a text node attaches it as the single writable target; **发送到 Agent** attaches it as a read-only reference;
 - the Agent composer displays up to ten full node labels, with the target first, and supports atomic `@` references to attached nodes;
-- completion can only append a new user segment; rewrite can replace a validated user-text selection or the complete user part;
-- template segments and reference nodes are always read-only, and explicit context without a target is discussion-only;
-- every proposal requires explicit Apply or Reject and passes revision/template/content freshness checks before application.
+- completion uses exact segment or unique in-segment text anchors to interleave black user segments without changing any original character, color, source, or order;
+- rewrite creates a complete derived node to the source node's right; text selection no longer changes rewrite behavior;
+- template segments, all existing target segments, and reference nodes are always read-only, and explicit context without a target is discussion-only;
+- every proposal requires explicit Apply or Reject and passes node revision, template digest, segment digest, and anchor freshness checks before application.
 
 The complete interaction and request contract is maintained in [Canvas Agent Omnireference Prompt Editing](./canvas-agent-reference-editing.md).
 
@@ -286,7 +287,7 @@ annotation editor, verifying mode-filtered annotation editing, checking that mod
 deletes the image node, confirming arrow/freehand gestures stop on pointer release, cropping an
 image from each edge direction, connecting nodes, switching the side panel between Agent and
 Prompt library preview, renaming a text node, attaching target/reference labels, inserting `@`
-mentions, and approving or rejecting append, whole-part rewrite, and selection rewrite proposals.
+mentions, switching the conversation model, previewing multi-anchor interleaved completion, and approving or rejecting insertion and derived-node rewrite proposals. Approval must leave every original segment unchanged; stale anchors or source revisions must reject the whole proposal.
 
 Quick-message manual checks should confirm the drawer and lightweight dialog have no note field,
 and that clicking a quick message inserts only a red preset text node even when the preset has

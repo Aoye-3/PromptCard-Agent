@@ -205,11 +205,11 @@ The proposal is not a preset until the user approves it.
 
 `AgentWorkspaceProposal` is the shared parsed output shape for Agent-authored changes. The maintained pi runtime emits:
 
-- `free_canvas_text_update`: append a new user segment, replace the complete user part, or replace one validated user-text selection on the explicit target;
-- `free_canvas_text_create`: retained for legacy request compatibility; explicit Canvas node context without a target cannot emit a mutation;
+- `free_canvas_text_insertions`: add black user segments at validated anchors inside the explicit target without changing existing segments;
+- `free_canvas_text_create`: create a complete derived node for rewrite while preserving the source;
 - `prompt_library_write_proposal`: create a new Prompt Library preset after approval in Prompt Library scope.
 
-All three remain pending until explicit Apply/Reject. Prompt Library proposals are filtered out of workspace scope, and Canvas proposals are not accepted in Prompt Library scope.
+All three remain pending until explicit Apply/Reject. Prompt Library proposals are filtered out of workspace scope, and Canvas proposals are not accepted in Prompt Library scope. Historical `free_canvas_text_update` records remain in the parsed union for revision 1/2 proposal compatibility but are not emitted by revision 3.
 
 The TypeScript union and parser retain older `workspace_card_*`, `storyboard_update`, and `three_stage_field_update` shapes for compatibility. The focused pi runtime has no tools that emit them.
 

@@ -20,3 +20,10 @@ test('agent runtime diagnostics verify schema v9, Ark SDK, and the chat whitelis
   expect(source).toContain('agent_chat_catalog')
   expect(source).toContain('volcenginesdkarkruntime import Ark')
 })
+
+test('development and desktop startup accept the current storage schema', async () => {
+  const source = await readFile(path.resolve(__dirname, 'start-dev-with-agent.ps1'), 'utf8')
+
+  expect(source).toContain('$payload.schemaVersion -ne 9')
+  expect(source).not.toContain('$payload.schemaVersion -ne 8')
+})

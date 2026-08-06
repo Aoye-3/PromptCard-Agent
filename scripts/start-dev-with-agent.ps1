@@ -102,7 +102,7 @@ function Test-StorageService {
     $payload = $response.Content | ConvertFrom-Json
     if (
       $payload.serviceVersion -ne "2.0.0" -or
-      $payload.schemaVersion -ne 8 -or
+      $payload.schemaVersion -ne 9 -or
       !$payload.capabilities.sqlite -or
       !$payload.capabilities.projectResources
     ) {

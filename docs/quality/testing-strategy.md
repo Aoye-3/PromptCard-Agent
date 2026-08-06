@@ -149,10 +149,11 @@ The focused image-generation commands are the regression gate for this feature. 
 
 ### Agent Collaboration Flow
 
-- Attach target X and reference nodes Y/Z, mention them with `@`, and confirm only X can receive a pending `free_canvas_text_update`.
-- In completion mode, confirm Apply appends a new user segment without changing existing user or template text.
-- In rewrite mode, confirm a current user-text selection is replaced locally and the no-selection case replaces only the complete user part.
-- Change the node, template, user content, or selected source text after generation and confirm the stale proposal is rejected.
+- Attach target X and reference nodes Y/Z, mention them with `@`, and confirm only X can receive a pending `free_canvas_text_insertions` or source-bound derived-node proposal.
+- In completion mode, confirm Apply inserts black user segments at exact anchors without changing any existing character, segment order, source, or color.
+- In rewrite mode, confirm approval creates a complete derived node to X's right and leaves X unchanged; text selection must not change the request contract.
+- Change the node, template, segments, or anchored source text after generation and confirm the whole stale proposal is rejected.
+- Switch between two allowed conversation models, reload the conversation, and confirm the selection and first-execution turn snapshot persist.
 - Remove the target while keeping references and confirm discussion works but no Canvas mutation proposal is accepted.
 - Reject a proposal and confirm Canvas is unchanged.
 - Confirm no Canvas mutation occurs before Apply.

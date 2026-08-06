@@ -35,6 +35,7 @@ Use numbered filenames:
 - [004: Update Module Integration](./004-update-module-integration.md)
 - [007: Provider-Neutral Contextual Image Editing And Multi-View](./007-contextual-image-editing-and-multi-view-plan.md)
 - [008: Local MCP Prompt-Media Codex Bridge](./008-local-mcp-prompt-media-codex-bridge.md)
+- [009: Local Agent Prompt Library RAG](./009-local-agent-prompt-library-rag.md)
 
 ## Implemented Baselines
 

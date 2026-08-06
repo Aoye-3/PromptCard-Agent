@@ -251,6 +251,8 @@ PromptCard Storage release gate (use the existing workspace virtual environment 
 
 详细设计与分阶段验收见 [Plan 008：本地 MCP Prompt-媒体 Codex 桥接](./docs/Plan/008-local-mcp-prompt-media-codex-bridge.md)。
 
+后续将把本地 Agent 的 Prompt 库手动搜索升级为有界、可引用、可审计的 RAG 检索，详见 [Plan 009：本地 Agent Prompt 库 RAG](./docs/Plan/009-local-agent-prompt-library-rag.md)。
+
 ## 当前状态
 
 PMAgent-Canvas 仍处于活跃开发阶段。当前重点是稳定自由画布、图片生成与编辑、Prompt/媒体资产沉淀、Agent 会话隔离和本地桌面启动链路。对外使用前请以仓库中的实际实现和技术文档为准。

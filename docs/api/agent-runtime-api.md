@@ -53,6 +53,8 @@ Returns the focused text-Agent catalog. The current tool surface contains Prompt
   ],
   "tools": [
     { "name": "search_prompt_library" },
+    { "name": "emit_canvas_prompt_edit" },
+    { "name": "emit_prompt_library_create" },
     { "name": "emit_media_prompt_preview" }
   ],
   "builtins": [],

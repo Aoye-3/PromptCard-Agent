@@ -20,11 +20,12 @@ The current delivery target is:
 - Contextual image actions that resolve local edits immediately and require an explicit Generate action for provider-backed operations.
 - Explicit multi-view request groups, including the front/left/top shortcut, durable placeholders, partial-failure recovery, and retry of only the failed member.
 - A pi-based text Agent that can:
-  - analyze and improve a selected Canvas text node;
-  - propose a new Canvas text node when none is selected;
-  - write from a bounded Prompt Library snapshot;
+  - maintain project-scoped durable conversations with one whitelisted model binding per conversation;
+  - complete one explicitly attached Canvas target through exact anchored black insertions while preserving every existing segment;
+  - rewrite by proposing a complete derived text node while leaving the source and references unchanged;
+  - search a bounded Prompt Library snapshot only in the explicit read-only `prompt-library` mode;
   - propose new Prompt Library items;
-  - analyze one explicitly selected image through the assigned multimodal text provider.
+  - analyze one explicitly selected image through a temporary, non-persistent multimodal conversation.
 - Storyboard and structured prompt workflows.
 
 All Agent mutations are proposals and require explicit user confirmation.

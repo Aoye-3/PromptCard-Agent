@@ -1,16 +1,18 @@
 # PMAgent Technical Documentation
 
-This documentation set describes the current PMAgent implementation for developers taking over the project. It is intentionally split by architecture area instead of being kept in a single large document.
+> **Archived legacy snapshot.** This file describes an earlier browser-storage/DeerFlow architecture and is retained only for historical context. It is not the current implementation contract. Start from the [maintained documentation index](../../README.md).
+
+The maintained documentation is split by architecture area instead of being kept in a single large document.
 
 ## Documentation Map
 
-- [System Architecture](./01-system-architecture.md) explains the runtime topology, major modules, and cross-module data flows.
-- [Frontend Application](./02-frontend-application.md) explains the React application shell, screens, navigation, and component ownership.
-- [State and Storage](./03-state-and-storage.md) explains Zustand stores, local persistence, dev file persistence, and core schemas.
-- [Prompt Library](./04-prompt-library.md) explains the `IPreset` contract, Prompt library behavior, and Agent write proposal safety.
-- [Agent Runtime Integration](./05-agent-runtime-integration.md) explains the current DeerFlow integration boundary, frontend service API, local scripts, and safe capability model.
-- [Development and Operations](./06-development-and-operations.md) explains local commands, runtime hygiene, dev server control, and troubleshooting.
-- [Testing and Quality](./07-testing-and-quality.md) explains current test coverage and recommended verification flows.
+- [System Architecture](../../architecture/system-architecture.md) explains the runtime topology, major modules, and cross-module data flows.
+- [Frontend Application](../../frontend/app-shell.md) explains the React application shell, screens, navigation, and component ownership.
+- [State and Storage](../../frontend/state-management.md) explains Zustand stores, durable boundaries, and core schemas.
+- [Prompt Library](../../frontend/prompt-library.md) explains the `IPreset` contract, Prompt Library behavior, and Agent proposal safety.
+- [Agent Runtime Integration](../../backend/agent-runtime.md) explains the maintained Gateway/pi boundary, frontend service API, local scripts, and safe capability model.
+- [Development and Operations](../../operations/local-development.md) explains local commands, runtime hygiene, development service control, and troubleshooting.
+- [Testing and Quality](../../quality/testing-strategy.md) explains current test coverage and recommended verification flows.
 
 ## Current Architecture at a Glance
 
@@ -48,4 +50,4 @@ flowchart LR
 
 ## Documentation Policy
 
-These documents describe current code truth. Planned or incomplete capabilities are labeled as **Roadmap / Not Yet Implemented**. Existing legacy documents remain in place and are not rewritten by this documentation set.
+This archived body records the code truth at the time it was written. It must not be used as a current API, persistence, Agent, or operations contract; follow the maintained pages linked above.

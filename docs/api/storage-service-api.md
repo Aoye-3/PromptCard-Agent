@@ -4,7 +4,7 @@ The local storage service is the durable source of truth for projects, Prompt Li
 
 ## Health
 
-`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, `recentCaptures`, `projectResources`, `agentConversations`, and `skillHub`. The current service reports schema version `8`; project resources were introduced in v7, while durable Agent conversations and the minimal Skill registry require v8.
+`GET /health` returns `serviceVersion`, `schemaVersion`, `storage`, `database`, `pid`, and capabilities including `sqlite`, `assets`, `presetBatch`, `browserImportIdempotency`, `backup`, `recentCaptures`, `projectResources`, `agentConversations`, and `skillHub`. The current service reports schema version `9`; project resources were introduced in v7, durable Agent conversations and the minimal Skill registry require v8, and nullable per-conversation text-model binding requires v9.
 
 - `GET /health`
 

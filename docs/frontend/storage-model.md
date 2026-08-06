@@ -15,7 +15,9 @@ The following browser-side records remain outside the filesystem profile for now
 - localforage `history`, `templates`, `settings`, `cards`, `examples`, and legacy migration flags.
 - localStorage `prompt_card_config` for the older AI settings panel.
 - localStorage `promptcard-ui-language`.
-- localStorage `promptcard-agent-sessions-v1`.
+- localStorage `promptcard-agent-conversation:${projectId}`, containing only the last selected durable conversation ID for that project.
+
+Project-Agent messages, turns, proposal states, model bindings, and Skill audit snapshots are not browser-storage records. They are loaded from PromptCard Storage through Gateway; the current composer draft and attached-node labels remain transient component state.
 
 Future settings work may migrate these records, but source update logic must already treat them as user-owned data.
 

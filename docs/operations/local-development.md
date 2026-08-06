@@ -167,7 +167,7 @@ Then start or reuse the runtime:
 npm.cmd run agent:dev
 ```
 
-In Model Management, verify that a tested compatible text connection is assigned to `chat.primary`. Text options are grouped as `PI 原生` and `方舟 SDK`; image options are filtered independently and must never contain chat models. Do not print the key.
+In Model Management, verify that a tested compatible text connection is assigned to `chat.primary` and that the intended project-Agent models are selected under `agentChatModelIds`. A conversation-bound model that is removed from this whitelist remains visible in historical audit data but cannot send a new turn. Text options are grouped as `PI 原生` and `方舟 SDK`; image options are filtered independently and must never contain chat models. Do not print the key.
 
 If Gateway health succeeds but text messages fail, also check `textAgentHealthUrl` from `logs/dev-runtime.json`. `npm.cmd run text-agent:dev` starts only the pi service for focused diagnosis.
 

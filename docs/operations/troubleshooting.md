@@ -65,6 +65,8 @@ The main Tauri window should show the native `index.html` boot screen first, the
 
    `/storage-api/health` must proxy to storage `/health`. It is not part of the normal `/storage-api/* -> /api/*` business API proxy.
 
+   The response must report `serviceVersion: "2.0.0"` and `schemaVersion: 9`. `start.bat` and `start-desktop.bat` both reach the same combined service launcher, which rejects an older Storage schema instead of opening the frontend against it. If a stale process is still listening, inspect `logs/storage-service.err.log` and rerun the visible launcher rather than changing the expected schema in the script.
+
 3. If only a tiny capture toolbar window is visible, close that toolbar window and relaunch the main window from `start-desktop.bat`. The toolbar is now created on demand from the Capture Bar page; its native boot screen is intentionally hidden for `/?window=capture-toolbar` so it does not display a clipped loading panel.
 
 Run the focused startup UI checks after changing the boot screen, storage health probe, or Vite proxy:
@@ -171,6 +173,7 @@ Confirm that runtime bootstrap succeeds before the model panel loads. Then verif
 - one enabled text connection reports `credentialConfigured: true`;
 - the latest connection test passed;
 - one chat model is assigned to `chat.primary`;
+- the conversation's model is still present in that connection's `agentChatModelIds` whitelist;
 - `textAgentHealthUrl` from `logs/dev-runtime.json` is healthy.
 
 If the connection list is unexpectedly empty after upgrading from the removed DeerFlow runtime, refresh Model Management once. The Gateway performs an idempotent merge from the sibling `.deer-flow/promptcard-model-connections.json` into `.promptcard-runtime` while preserving connection IDs and keyring references.

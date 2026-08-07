@@ -251,6 +251,14 @@ PromptCard Storage release gate (use the existing workspace virtual environment 
 
 本地 Agent 的 Prompt 库手动搜索也将随这次改造升级为有界、可引用、可审计的 RAG 检索；详细设计与分阶段验收见 [Plan 008：本地 MCP、Prompt 库 RAG 与 Codex 桥接](./docs/Plan/008-local-mcp-prompt-media-codex-bridge.md)。
 
+## 未来设想（暂无计划）
+
+以下内容仅记录可能的产品方向，尚未进入正式 Plan，不代表已经排期、确定接口或承诺实现。
+
+### 编剧 Agent Skill 与情绪曲线脚本工作台
+
+在 Skill Hub 接入并稳定后，可进一步引入面向短片创作的编剧 Agent Skill，并设计一套可视化的情绪曲线脚本界面：围绕剧情节点、场景、角色状态和节奏变化组织本地短片脚本创作。标准化短片脚本可继续转换为设定图、分镜图等视觉资产，并通过资产表统一管理角色、场景、道具、镜头、参考素材、Prompt、生成结果及其来源关系。
+
 ## 当前状态
 
 PMAgent-Canvas 仍处于活跃开发阶段。当前重点是稳定自由画布、图片生成与编辑、Prompt/媒体资产沉淀、Agent 会话隔离和本地桌面启动链路。对外使用前请以仓库中的实际实现和技术文档为准。
